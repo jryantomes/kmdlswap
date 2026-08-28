@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kmdlswap"
+version = "0.0.1"
+description = "Scoped tool to swap the geometry of a single mesh node in a vanilla KOTOR 1 model"
+requires-python = ">=3.11"
+dependencies = [
+    "pykotor>=2.3.12",
+    "numpy>=1.24",
+]
+
+[project.scripts]
+kmdlswap = "kmdlswap.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: full-corpus sweeps over the whole game install"]
+addopts = "-m 'not slow'"
