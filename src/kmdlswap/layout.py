@@ -97,7 +97,16 @@ class NodeInfo:
     mdx_data_offset: int = 0
     trimesh_at: int = 0  # absolute file position of the trimesh subheader
     skin_at: int = 0
-    bones: tuple[int, ...] = ()
+    bones: tuple[int, ...] = ()  # fixed 16-slot table; entries past the used
+    # count are uninitialised garbage, so prefer the bonemap
+    textures: tuple[str, str] = ("", "")
+
+    # byte offsets of the weight/bone columns *within* the MDX vertex stride
+    mdx_weights_offset: int = 0xFFFFFFFF
+    mdx_bones_offset: int = 0xFFFFFFFF
+    # bonemap: one float per geometry node; value is that node's bone slot in
+    # the qbones/tbones arrays, or -1 when the node is not a bone.
+    bonemap: tuple[int, ...] = ()
 
     @property
     def flags(self) -> list[str]:
@@ -410,6 +419,8 @@ class _Parser:
         self.cnt(t + 204, counters_count, "counters_count", idx)
         self.cnt(t + 208, r.u32(), "counters_count2", idx)
 
+        info.textures = (Reader(self.mdl, t + 88).cstr(32), Reader(self.mdl, t + 120).cstr(32))
+
         r.seek(t + 252)
         info.mdx_stride = r.u32()
         info.mdx_bitmap = r.u32()
@@ -460,6 +471,9 @@ class _Parser:
     def _skin_arrays(self, info: NodeInfo) -> None:
         s = info.skin_at
         idx = info.index
+        wr = Reader(self.mdl, s + 12)
+        info.mdx_weights_offset, info.mdx_bones_offset = wr.u32(), wr.u32()
+
         r = Reader(self.mdl, s + 20)
         bonemap_offset, bonemap_count = r.u32(), r.u32()
         self.cnt(s + 24, bonemap_count, "bonemap_count", idx)
@@ -485,6 +499,10 @@ class _Parser:
                 continue
             self.off(loc, offset, kind, idx)
             self.span(MDL_BASE + offset, count * stride, kind, idx)
+
+        if bonemap_offset not in NULL_OFFSETS and bonemap_count:
+            br = Reader(self.mdl, MDL_BASE + bonemap_offset)
+            info.bonemap = tuple(int(br.f32()) for _ in range(bonemap_count))
 
     def _light_arrays(self, l: int, idx: int) -> None:
         """Lens-flare data: three parallel float arrays plus an array of texture

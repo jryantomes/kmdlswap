@@ -128,20 +128,28 @@ Milestone 2.
 
 ## Risks / unknowns (flag, don't block)
 
-1. **Offset-field table completeness** — a missed pointer corrupts files silently
-   in-game. Mitigation: offset-closure check + no-op swap + full corpus. On
-   closure failure we *refuse* the model rather than guess.
-2. **`bonemap` semantics** — per-bone remap vs per-vertex. Decides whether it
-   resizes with vertex count. Verify: correlate `bonemap_count` with `vertex_count`
-   vs bone count across the corpus.
+1. ~~**Offset-field table completeness**~~ — **largely retired.** Offset closure
+   holds on 2832/2832 vanilla models, so no live pointer is unaccounted for.
+   Splices still need the shift logic exercised (Milestone 2). On closure failure
+   we *refuse* the model rather than guess.
+2. ~~**`bonemap` semantics**~~ — **RESOLVED.** One float per *geometry node*, in
+   node order, giving that node's slot in qbones/tbones (`-1` = not a bone).
+   Indexed by node, not vertex, so it does **not** resize with a geometry swap;
+   bonemap/qbones/tbones all pass through untouched. Also resolved: the skin
+   subheader's 16-slot bone table is not the per-mesh limit and its unused
+   entries are garbage — never read it. See
+   [`reports/SKINNING_FINDINGS.md`](../reports/SKINNING_FINDINGS.md).
 3. **Array alignment rule** — 16-byte? 4-byte? per-type? Derive from inter-span
    gaps across the corpus. Growing needs synthesised padding (brief's known
    unknown — zeros, documented, in-game tested).
 4. **MDX trailing dummy vertex** — detect from block-size vs `vertex_count×stride`.
 5. **`mdx_data_buffer_offset`** (model header 0xAC) — purpose unclear; shift
    conservatively, verify against corpus identity.
-6. **Shared array spans** — do two nodes ever point at one array? Coverage check
-   flags overlap; if real, splice needs ref-counting.
+6. ~~**Shared array spans**~~ — **RESOLVED: none exist.** Zero overlaps across
+   the whole corpus, so a splice never needs ref-counting.
+
+8. **Positions are stored twice** — in the MDX stream *and* in an MDL-side `vec3`
+   array. They agree byte-for-byte in vanilla; a swap must write both.
 7. **44 unreadable models** in PyKotor's run (`fx_*`, `m12a*`) — check whether our
    parser handles them or they're genuinely out of scope (not character models).
 

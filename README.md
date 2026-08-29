@@ -10,8 +10,8 @@ See [`MDL_SWAP_TOOL_BRIEF.md`](MDL_SWAP_TOOL_BRIEF.md) for the full project brie
 | Milestone | State |
 |-----------|-------|
 | 0 — Byte-exact MDL/MDX round-trip | **Done — 2832/2832 (100%)** of vanilla K1 models. |
-| 1 — Inspect | next |
-| 2 — No-op swap | not started |
+| 1 — Inspect | **Done** — `kmdlswap inspect` |
+| 2 — No-op swap | next |
 | 3 — Geometry replacement | not started |
 | 4 — CLI | skeleton only (`src/kmdlswap/cli.py`) |
 
@@ -27,6 +27,26 @@ seconds. (PyKotor: 0/2832 in 607s.)
 .venv/Scripts/python -m pytest -q          # fast checks
 .venv/Scripts/python -m pytest -q -m slow  # full-corpus sweep
 ```
+
+### Milestone 1 — inspect
+
+```bash
+.venv/Scripts/kmdlswap inspect p_hk47 --install "E:\SteamLibrary\steamapps\common\swkotor"
+```
+
+Reports the node tree with exact casing and parent paths, per-node vertex/face
+counts, which meshes are skinned and which bones they reference, observed
+influences per vertex, supermodel, and bounding box. Exits non-zero with a
+warning if the model does not fully validate — a model we cannot account for is
+one we must not edit.
+
+### Skinning census
+
+A corpus-wide measurement of vanilla's skinning behaviour lives in
+[`reports/SKINNING_FINDINGS.md`](reports/SKINNING_FINDINGS.md). Headlines: no
+vanilla vertex exceeds **4** influences; weights are **always** normalised; the
+skin subheader's 16-slot bone table is **not** the per-mesh limit (21 meshes use
+17 bones) and its unused entries are garbage — the bonemap is the authority.
 
 ## Setup
 
