@@ -149,7 +149,25 @@ Milestone 2.
    the whole corpus, so a splice never needs ref-counting.
 
 8. **Positions are stored twice** — in the MDX stream *and* in an MDL-side `vec3`
-   array. They agree byte-for-byte in vanilla; a swap must write both.
+   array. They agree byte-for-byte in vanilla; a swap must write both. *(Handled
+   in `edit.replace_geometry`.)*
+
+9. **Face adjacency must be rebuilt for new geometry.** Each face stores three
+   neighbour face indices; measured over 16,031 vanilla faces they are always
+   either a valid face index or `0xFFFF` ("no neighbour"), never out of range.
+   Carrying the old adjacency across a real geometry change would leave stale
+   indices. Milestone 3 must recompute it from shared edges (or write `0xFFFF`
+   throughout, which is safe but untested in-game). A validator should assert
+   every adjacency is in range or `0xFFFF`.
+
+10. **Face `material`** is a small integer (1, 2, 3, … — smoothing-group-like).
+    Unknown semantics; new geometry needs a documented default.
+
+11. **The MDX trailing sentinel vertex.** Every block carries 1-2 extra vertex
+    rows past `vertex_count`: position `(1e7, 1e7, 1e7)` or `(1e6, 1e6, 1e6)`,
+    rest zeroed, and on skinned meshes `weight[0] = 1.0` with bone slot 0.
+    Purpose undocumented; it does not depend on the geometry, so it is preserved
+    verbatim rather than regenerated.
 7. **44 unreadable models** in PyKotor's run (`fx_*`, `m12a*`) — check whether our
    parser handles them or they're genuinely out of scope (not character models).
 

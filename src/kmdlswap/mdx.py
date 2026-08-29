@@ -31,10 +31,79 @@ class MdxBitmap:
 @dataclass(slots=True)
 class Influence:
     """One bone's pull on one vertex. ``bone_slot`` indexes the qbones/tbones
-    arrays; use :func:`bone_slot_nodes` to get the node it names."""
+    arrays; use :func:`bone_slot_nodes` to get the node it names.
+
+    ``stride_slot`` records which of the four MDX slots this influence occupied.
+    A handful of vanilla vertices leave slot 0 empty and start at slot 1, so
+    compacting on rebuild would change bytes for no reason. New geometry can
+    leave it at -1, and slots are then filled in order.
+    """
 
     bone_slot: int
     weight: float
+    stride_slot: int = -1
+
+
+# Per-component offsets live in the trimesh subheader as 13 consecutive u32s
+# starting at +252: data_size, bitmap, then one offset per attribute.
+COLUMNS: tuple[tuple[str, int, int, str], ...] = (
+    # (name, trimesh field offset, width in bytes, struct format)
+    ("vertex", 260, 12, "3f"),
+    ("normal", 264, 12, "3f"),
+    ("color", 268, 12, "3f"),
+    ("uv1", 272, 8, "2f"),
+    ("uv2", 276, 8, "2f"),
+    ("uv3", 280, 8, "2f"),
+    ("uv4", 284, 8, "2f"),
+    ("tangent", 288, 36, "9f"),
+)
+SKIN_COLUMN_BYTES = 32  # 4 weights + 4 bone slots, both float32
+
+
+@dataclass(slots=True)
+class StrideLayout:
+    """Which attribute columns a mesh's MDX vertex carries, and where."""
+
+    stride: int
+    bitmap: int
+    columns: dict[str, int]  # name -> byte offset within the stride
+    weights_offset: int = NO_OFFSET
+    bones_offset: int = NO_OFFSET
+
+    @property
+    def accounted_bytes(self) -> int:
+        total = sum(w for name, _, w, _ in COLUMNS if name in self.columns)
+        if self.weights_offset != NO_OFFSET:
+            total += SKIN_COLUMN_BYTES
+        return total
+
+
+def stride_layout(layout: Layout, node: NodeInfo) -> StrideLayout:
+    """Describe a mesh's MDX stride, and prove we understand all of it.
+
+    Every vanilla stride is exactly the sum of its declared columns plus 32
+    bytes of skin data when skinned - there is no unexplained padding. We assert
+    that rather than assume it: rebuilding a stride we do not fully understand
+    would silently drop bytes.
+    """
+    stride = _mdx_field(layout, node, 252)
+    bitmap = _mdx_field(layout, node, 256)
+    columns = {
+        name: off
+        for name, field, _, _ in COLUMNS
+        if (off := _mdx_field(layout, node, field)) != NO_OFFSET
+    }
+    sl = StrideLayout(stride=stride, bitmap=bitmap, columns=columns)
+    if node.is_skin:
+        sl.weights_offset = node.mdx_weights_offset
+        sl.bones_offset = node.mdx_bones_offset
+    if sl.accounted_bytes != stride:
+        raise ValueError(
+            f"{node.name}: MDX stride {stride} != {sl.accounted_bytes} accounted for by "
+            f"columns {sorted(columns)}{' + skin' if node.is_skin else ''}; refusing to "
+            f"rebuild a stride we do not fully understand"
+        )
+    return sl
 
 
 def _column(mdx: bytes, node: NodeInfo, offset_in_stride: int, count: int, fmt: str):
@@ -87,8 +156,8 @@ def influences(layout: Layout, node: NodeInfo) -> list[list[Influence]]:
         slots = w4.unpack_from(mdx, base + node.mdx_bones_offset)
         out.append(
             [
-                Influence(int(b), w)
-                for w, b in zip(weights, slots)
+                Influence(int(b), w, i)
+                for i, (w, b) in enumerate(zip(weights, slots))
                 if w > 0.0 and int(b) >= 0
             ]
         )
