@@ -12,7 +12,7 @@ See [`MDL_SWAP_TOOL_BRIEF.md`](MDL_SWAP_TOOL_BRIEF.md) for the full project brie
 | 0 — Byte-exact MDL/MDX round-trip | **Done — 2832/2832 (100%)** of vanilla K1 models. |
 | 1 — Inspect | **Done** — `kmdlswap inspect` |
 | 2 — No-op swap | **Done — 76,703/76,703 mesh nodes, and verified in-game.** |
-| 3 — Geometry replacement | **File side done.** In-game verification outstanding. |
+| 3 — Geometry replacement | **Done — verified in-game.** |
 | 4 — CLI | **Done** — `inspect`, `extract`, `replace` |
 
 ### Milestone 0 result
@@ -83,6 +83,13 @@ MDL change is inside the target node's face array.
 Meshes carrying MDX columns an OBJ cannot express - a second UV set, vertex
 colours, tangent frames - are **refused** rather than zero-filled. No character
 model carries them; only rooms and placeables do.
+
+**Verified in-game.** Three probes on `p_hk47`, all passing: a head scaled 135%
+(new positions render), a skinned node deformed (skinned geometry still flexes),
+and a skinned node replaced by a 24-vertex box, down from 124 (weight transfer
+onto entirely new topology, plus a shrinking splice). The box moves with HK-47's
+torso, which is the evidence that matters: none of its vertices inherited weights
+by index.
 
 Findings: [`reports/MILESTONE_3_FINDINGS.md`](reports/MILESTONE_3_FINDINGS.md).
 

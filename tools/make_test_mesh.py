@@ -49,11 +49,14 @@ def mode_scale(positions, normals, faces, factor):
 def mode_bulge(positions, normals, faces, factor):
     if not normals:
         raise SystemExit("bulge needs vertex normals, which this mesh does not carry")
-    c = centroid(positions)
-    extent = max(
-        max(abs(p[i] - c[i]) for i in range(3)) for p in positions
-    )
-    amount = extent * (factor - 1.0)
+    # Scale the displacement by the mesh's SMALLEST extent, not its largest.
+    # A hose is long and thin; using the long axis pushes every vertex further
+    # than the mesh is thick and inflates it into an unrecognisable blob.
+    span = [
+        max(p[i] for p in positions) - min(p[i] for p in positions) for i in range(3)
+    ]
+    thinnest = min(s for s in span if s > 1e-9)
+    amount = thinnest * 0.5 * (factor - 1.0)
     moved = [
         tuple(p[i] + normals[v][i] * amount for i in range(3))
         for v, p in enumerate(positions)

@@ -95,7 +95,7 @@ coverage gaps — MDL arrays are packed contiguously with no padding whatsoever.
 Growing or shrinking one needs no alignment handling. This retires design risk 3
 for the MDL side.
 
-## Status — file side done, in-game verification outstanding
+## Status — PASSED, including in-game
 
 48 tests pass; the corpus still parses and validates at 2832/2832.
 
@@ -115,22 +115,38 @@ MDX −6,400 B); Milestone 2 only exercised a grow.
 
 ### In-game results
 
+All three **PASSED** in-game on 2026-08-29.
+
 | Artifact | Result |
 |---|---|
-| `bighead` | **PASSED (2026-08-29).** HK-47 rendered with a visibly enlarged head, textured, animating normally. |
-| `fathoses` | pending |
-| `boxhoses` | pending |
+| `bighead` | Visibly enlarged head, textured, animating normally. Replacement vertex positions are genuinely read and rendered. |
+| `fathoses` | Hoses visibly larger, textured, and moving with the body. Skinned geometry survives a rewrite and still deforms. |
+| `boxhoses` | The box moves and flexes with HK-47's torso. Weight transfer onto entirely new topology works, and a shrinking splice loads correctly. |
 
-`bighead` establishes that replacement vertex positions are genuinely read and
-rendered by the engine - the first evidence that this tool changes geometry
-rather than merely producing files that parse. It says nothing yet about
-skinning, since `head` is a rigid child node rather than a skinned mesh.
+`boxhoses` is the result that matters. Its 24 vertices share nothing with the
+original 124 by index - every one got its bone weights from the closest point on
+the original hose surface, interpolated across the containing triangle. The box
+tracking his torso is direct engine evidence that the barycentric transfer is
+correct, not merely self-consistent.
+
+It also clears the last untested splice direction: Milestone 2 only ever grew a
+model in-game, while this shrank it (MDL 4,392 B smaller, MDX 6,400 B smaller).
+
+**Note on `fathoses` appearance.** The hoses rendered as over-inflated wedges
+rather than fatter tubes. That was the probe generator, not the pipeline: the
+bulge displacement was scaled by the mesh's *largest* extent (0.133 units) while
+the hoses are only 0.059 units thick, so every vertex moved more than twice the
+mesh's own thickness. Coincident vertices were confirmed to share identical
+normals, so nothing tore - the geometry was exactly what was asked for. The
+probe now scales displacement by the thinnest axis.
 
 ### Not yet established
 
-- Skinning after a rewrite is unverified: `bighead` passed, but `fathoses` and
-  `boxhoses` have not been seen by the engine. Shrinking splices are likewise
-  untested in-game.
+- **No genuinely foreign mesh has been through the pipeline.** All three probes
+  derive their geometry from the mesh being replaced. The pipeline accepts any
+  OBJ, but a mesh authored in Blender - with its own scale, axis convention and
+  UV layout - has not been tested, and coordinate-space mistakes are the most
+  likely first failure for a real user.
 - The influence-cap experiment (1/2/4/8) from the brief is only half-answered:
   the census shows vanilla never exceeds 4 and the stride cannot hold a fifth,
   so caps 1/2/4 are supported and testable via `--max-influences`, but whether
