@@ -14,3 +14,4 @@ dist/
 /reports/*.csv
 /out_probe/
 /out_m3/
+/out_fbx/
