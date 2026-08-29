@@ -93,6 +93,37 @@ by index.
 
 Findings: [`reports/MILESTONE_3_FINDINGS.md`](reports/MILESTONE_3_FINDINGS.md).
 
+## kmdlfun — companion effects app
+
+A separate, playful tool built on the kmdlswap engine. Every edit goes through
+the same validated splice path, so the same coverage, offset-closure and
+identity checks guard these as guard a real geometry swap.
+
+```bash
+kmdlfun effects                 # list effects
+kmdlfun companions              # list companions and their models
+kmdlfun preview --install "<K1 root>" --companion hk47 --effect bighead
+kmdlfun build   --install "<K1 root>" --effect bighead --companion all --out out_fun/
+kmdlfun gui                     # Tkinter desktop app (no extra dependencies)
+```
+
+Effects: **bighead**, **smallhead**, **bobblehead**, **chibi**, **bigmitts** —
+each a per-node uniform scale, with an adjustable intensity.
+
+Two things the models forced:
+
+- **Human companions keep their head in a separate model** (`p_carthh`), which
+  holds hair, teeth, eyes, brows and tongue as *separate nodes*. Scaling only
+  the node called `head` would leave the hair and eyes at original size, so a
+  head model scales entirely, minus the neck that joins the body. Their body
+  models carry a small `head_g` stub that is deliberately left alone.
+- **Node names are not unique** — T3-M4 has two nodes called `FootL` — so
+  everything addresses nodes by index, never by name.
+
+Node *positions* live in headers kmdlswap never touches, so only geometry
+inside a node can scale. Heads and extremities work well; `chibi` shrinks torso
+and limbs and can show gaps at joints, which the tool says up front.
+
 ### Skinning census
 
 A corpus-wide measurement of vanilla's skinning behaviour lives in
