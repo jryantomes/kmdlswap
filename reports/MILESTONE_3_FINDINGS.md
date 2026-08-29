@@ -128,7 +128,9 @@ skinning, since `head` is a rigid child node rather than a skinned mesh.
 
 ### Not yet established
 
-- Nothing here has been seen by the engine. All three artifacts are unverified.
+- Skinning after a rewrite is unverified: `bighead` passed, but `fathoses` and
+  `boxhoses` have not been seen by the engine. Shrinking splices are likewise
+  untested in-game.
 - The influence-cap experiment (1/2/4/8) from the brief is only half-answered:
   the census shows vanilla never exceeds 4 and the stride cannot hold a fifth,
   so caps 1/2/4 are supported and testable via `--max-influences`, but whether
