@@ -12,3 +12,4 @@ dist/
 /corpus/
 /reports/*.json
 /reports/*.csv
+/out_probe/
