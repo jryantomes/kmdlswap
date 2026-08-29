@@ -113,6 +113,19 @@ moves with HK-47's torso the barycentric transfer is genuinely working. It is
 also the first *shrinking* splice to be tested in-game (MDL −4,392 B,
 MDX −6,400 B); Milestone 2 only exercised a grow.
 
+### In-game results
+
+| Artifact | Result |
+|---|---|
+| `bighead` | **PASSED (2026-08-29).** HK-47 rendered with a visibly enlarged head, textured, animating normally. |
+| `fathoses` | pending |
+| `boxhoses` | pending |
+
+`bighead` establishes that replacement vertex positions are genuinely read and
+rendered by the engine - the first evidence that this tool changes geometry
+rather than merely producing files that parse. It says nothing yet about
+skinning, since `head` is a rigid child node rather than a skinned mesh.
+
 ### Not yet established
 
 - Nothing here has been seen by the engine. All three artifacts are unverified.
