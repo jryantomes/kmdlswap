@@ -11,7 +11,7 @@ See [`MDL_SWAP_TOOL_BRIEF.md`](MDL_SWAP_TOOL_BRIEF.md) for the full project brie
 |-----------|-------|
 | 0 — Byte-exact MDL/MDX round-trip | **Done — 2832/2832 (100%)** of vanilla K1 models. |
 | 1 — Inspect | **Done** — `kmdlswap inspect` |
-| 2 — No-op swap | **File side done — 76,703/76,703 mesh nodes.** In-game verification outstanding. |
+| 2 — No-op swap | **Done — 76,703/76,703 mesh nodes, and verified in-game.** |
 | 3 — Geometry replacement | next |
 | 4 — CLI | skeleton only (`src/kmdlswap/cli.py`) |
 
@@ -50,13 +50,21 @@ logic, which a no-op never exercises.
 
 ```bash
 .venv/Scripts/python tools/noop_swap_sweep.py --install "<K1 root>"
-# produce files for in-game verification (never writes into the install):
-.venv/Scripts/python tools/write_noop.py --install "<K1 root>" --model p_hk47 --out out/
 ```
 
-**This is the file-side half only.** Per the brief, a successful file build is
-not proof — loading the output in KOTOR 1 and confirming it renders and animates
-is still outstanding. Findings:
+**Verified in-game.** A no-op output is byte-identical to vanilla, so loading it
+would only test the Override mechanism. The informative test is a *resize probe*:
+a mesh padded with inert duplicate vertices no face references, so nothing
+visible changes but both files grow and every pointer past the splice must be
+rewritten.
+
+```bash
+.venv/Scripts/python tools/write_resize_probe.py --install "<K1 root>" --model p_hk47 --node head --out out_probe/
+```
+
+For `p_hk47:head` that moves ~494 stored pointers (MDL +768 B, MDX +2,048 B).
+Loaded into `Override/`, HK-47 rendered and animated correctly — idle, walk and
+head turn all confirmed. Findings:
 [`reports/MILESTONE_2_FINDINGS.md`](reports/MILESTONE_2_FINDINGS.md).
 
 ### Skinning census

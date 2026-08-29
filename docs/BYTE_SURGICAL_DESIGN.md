@@ -128,10 +128,12 @@ Milestone 2.
 
 ## Risks / unknowns (flag, don't block)
 
-1. ~~**Offset-field table completeness**~~ — **largely retired.** Offset closure
-   holds on 2832/2832 vanilla models, so no live pointer is unaccounted for.
-   Splices still need the shift logic exercised (Milestone 2). On closure failure
-   we *refuse* the model rather than guess.
+1. ~~**Offset-field table completeness**~~ — **RETIRED.** Offset closure holds on
+   2832/2832 vanilla models, so no live pointer is unaccounted for, and the
+   splice's shift logic is now confirmed by the engine itself: a resize probe
+   that moved ~494 pointers loaded, rendered and animated correctly in-game
+   (see [`reports/MILESTONE_2_FINDINGS.md`](../reports/MILESTONE_2_FINDINGS.md)).
+   On closure failure we still *refuse* the model rather than guess.
 2. ~~**`bonemap` semantics**~~ — **RESOLVED.** One float per *geometry node*, in
    node order, giving that node's slot in qbones/tbones (`-1` = not a bone).
    Indexed by node, not vertex, so it does **not** resize with a geometry swap;
@@ -142,7 +144,8 @@ Milestone 2.
 3. **Array alignment rule** — 16-byte? 4-byte? per-type? Derive from inter-span
    gaps across the corpus. Growing needs synthesised padding (brief's known
    unknown — zeros, documented, in-game tested).
-4. **MDX trailing dummy vertex** — detect from block-size vs `vertex_count×stride`.
+4. ~~**MDX trailing dummy vertex**~~ — **RESOLVED.** Detected from block size vs
+   `vertex_count x stride`; contents preserved verbatim (see item 11).
 5. **`mdx_data_buffer_offset`** (model header 0xAC) — purpose unclear; shift
    conservatively, verify against corpus identity.
 6. ~~**Shared array spans**~~ — **RESOLVED: none exist.** Zero overlaps across

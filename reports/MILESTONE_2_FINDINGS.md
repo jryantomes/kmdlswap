@@ -78,9 +78,41 @@ All 76,703 mesh nodes: `stride == sum(declared columns) + 32 if skinned`, with
 zero unexplained padding, across 9 distinct layouts. `stride_layout()` asserts
 this and refuses to rebuild a stride it cannot fully explain.
 
-## Status
+## Status — PASSED, including in-game
 
-The file-side half of Milestone 2 passes. Per the brief, **a successful file
-build is not proof** — the remaining half is loading a no-op output in KOTOR 1
-and confirming it renders and animates. That has not been done and is not
-something this tooling can establish.
+The file-side half passes: 76,703/76,703 mesh nodes byte-identical.
+
+**In-game verification: passed (2026-08-28).** Because the no-op output is
+byte-identical to vanilla, loading it would only have tested the Override
+mechanism, not this tool. The informative test is instead a *resize probe*
+([`tools/write_resize_probe.py`](../tools/write_resize_probe.py)): the `head`
+node of `p_hk47` padded with 64 inert duplicate vertices that no face
+references.
+
+| | |
+|---|---|
+| head vertices | 481 -> 545 |
+| faces | 393 (unchanged; the copies stay unreferenced) |
+| MDL | 1,009,979 -> 1,010,747 (+768) |
+| MDX | 110,464 -> 112,512 (+2,048) |
+| stored pointers past the splice | ~494 rewritten |
+
+Nothing visible should change, but the file layout shifts substantially and
+every offset after the edit had to be recalculated. Loaded into `Override/`,
+HK-47 **rendered correctly and animated correctly — idle, walk, and head turn
+all confirmed**.
+
+That is direct evidence, from the engine rather than from our own validators,
+that the splice and offset-fixup logic is sound: the game read a model whose
+arrays had all moved and resolved every pointer correctly.
+
+It also incidentally answers a question raised when designing the probe: the
+engine walks the face list rather than iterating the raw vertex array, since 64
+unreferenced vertices produced no visible artifact.
+
+### What this does not establish
+
+- Only one splice shape was tested (a grow, on one unskinned mesh). Shrinks, and
+  edits to *skinned* meshes, are covered by the validators but not yet in-game.
+- The probe changed no vertex positions, so nothing here speaks to whether
+  replacement *content* renders correctly. That is Milestone 3.
