@@ -154,7 +154,17 @@ def build_mdx_block(layout: Layout, node: NodeInfo, geo: MeshGeometry) -> bytes:
             w4.pack_into(out, v * sl.stride + sl.weights_offset, *weights)
             w4.pack_into(out, v * sl.stride + sl.bones_offset, *slots)
 
-    return bytes(out) + geo.trailing
+    block = bytes(out) + geo.trailing
+
+    # Every one of the 76,703 vanilla MDX blocks starts on an 8-byte boundary.
+    # Changing a vertex count shifts every later block, so the new block must
+    # keep the original's size modulo 8 or the whole stream slides out of
+    # alignment. Vanilla itself pads with zeros after the sentinel row.
+    original = kmdx.block_size(layout, node)
+    want = original % 8
+    while len(block) % 8 != want:
+        block += bytes(1)
+    return block
 
 
 def replace_geometry(layout: Layout, node: NodeInfo, geo: MeshGeometry) -> tuple[bytes, bytes]:

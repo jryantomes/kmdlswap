@@ -12,8 +12,8 @@ See [`MDL_SWAP_TOOL_BRIEF.md`](MDL_SWAP_TOOL_BRIEF.md) for the full project brie
 | 0 — Byte-exact MDL/MDX round-trip | **Done — 2832/2832 (100%)** of vanilla K1 models. |
 | 1 — Inspect | **Done** — `kmdlswap inspect` |
 | 2 — No-op swap | **Done — 76,703/76,703 mesh nodes, and verified in-game.** |
-| 3 — Geometry replacement | next |
-| 4 — CLI | skeleton only (`src/kmdlswap/cli.py`) |
+| 3 — Geometry replacement | **File side done.** In-game verification outstanding. |
+| 4 — CLI | **Done** — `inspect`, `extract`, `replace` |
 
 ### Milestone 0 result
 
@@ -66,6 +66,25 @@ For `p_hk47:head` that moves ~494 stored pointers (MDL +768 B, MDX +2,048 B).
 Loaded into `Override/`, HK-47 rendered and animated correctly — idle, walk and
 head turn all confirmed. Findings:
 [`reports/MILESTONE_2_FINDINGS.md`](reports/MILESTONE_2_FINDINGS.md).
+
+### Milestone 3 — geometry replacement
+
+```bash
+.venv/Scripts/kmdlswap extract p_hk47 --install "<K1 root>" --node head --out head.obj
+.venv/Scripts/kmdlswap replace p_hk47 --install "<K1 root>" --node head --mesh head.obj --out out/
+```
+
+`replace` inherits skin weights from the mesh being replaced (closest point on
+the source surface, barycentric interpolation), rebuilds face adjacency, and
+re-validates the result before writing. `extract -> OBJ -> replace` reproduces
+the **entire MDX byte-for-byte**, transferred skin weights included; the only
+MDL change is inside the target node's face array.
+
+Meshes carrying MDX columns an OBJ cannot express - a second UV set, vertex
+colours, tangent frames - are **refused** rather than zero-filled. No character
+model carries them; only rooms and placeables do.
+
+Findings: [`reports/MILESTONE_3_FINDINGS.md`](reports/MILESTONE_3_FINDINGS.md).
 
 ### Skinning census
 

@@ -141,9 +141,11 @@ Milestone 2.
    subheader's 16-slot bone table is not the per-mesh limit and its unused
    entries are garbage — never read it. See
    [`reports/SKINNING_FINDINGS.md`](../reports/SKINNING_FINDINGS.md).
-3. **Array alignment rule** — 16-byte? 4-byte? per-type? Derive from inter-span
-   gaps across the corpus. Growing needs synthesised padding (brief's known
-   unknown — zeros, documented, in-game tested).
+3. ~~**Array alignment rule**~~ — **RESOLVED.** MDL arrays have *no* alignment
+   requirement: start offsets are uniform mod 16 and the corpus has zero coverage
+   gaps, so arrays are packed contiguously with no padding. MDX is different -
+   all 76,703 block starts are 8-byte aligned - so a resized block is zero-padded
+   to preserve its size mod 8. Matters for strides 60/68/76/100 (4 mod 8).
 4. ~~**MDX trailing dummy vertex**~~ — **RESOLVED.** Detected from block size vs
    `vertex_count x stride`; contents preserved verbatim (see item 11).
 5. **`mdx_data_buffer_offset`** (model header 0xAC) — purpose unclear; shift
@@ -155,16 +157,15 @@ Milestone 2.
    array. They agree byte-for-byte in vanilla; a swap must write both. *(Handled
    in `edit.replace_geometry`.)*
 
-9. **Face adjacency must be rebuilt for new geometry.** Each face stores three
-   neighbour face indices; measured over 16,031 vanilla faces they are always
-   either a valid face index or `0xFFFF` ("no neighbour"), never out of range.
-   Carrying the old adjacency across a real geometry change would leave stale
-   indices. Milestone 3 must recompute it from shared edges (or write `0xFFFF`
-   throughout, which is safe but untested in-game). A validator should assert
-   every adjacency is in range or `0xFFFF`.
+9. ~~**Face adjacency must be rebuilt for new geometry**~~ — **IMPLEMENTED** in
+   `topology.build_adjacency`: edges `(v0,v1),(v1,v2),(v2,v0)`, vertices welded
+   by position, matched as directed half-edges. Reproduces 96.3% of vanilla
+   adjacency exactly; the residual is likely a weld tolerance in the original
+   compiler. `check_adjacency` asserts every value is in range or `0xFFFF`.
 
 10. **Face `material`** is a small integer (1, 2, 3, … — smoothing-group-like).
-    Unknown semantics; new geometry needs a documented default.
+    Semantics still unknown. New geometry inherits the value from the first face
+    of the node being replaced, overridable with `--material`.
 
 11. **The MDX trailing sentinel vertex.** Every block carries 1-2 extra vertex
     rows past `vertex_count`: position `(1e7, 1e7, 1e7)` or `(1e6, 1e6, 1e6)`,
