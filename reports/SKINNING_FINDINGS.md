@@ -76,6 +76,36 @@ That is a prediction made before the in-game test, not a description of it.
 Worst case throughout is `c_bantha:btBody_front`, where a 4-way even split loses
 75% of its weight at cap 1.
 
+### In-game result (2026-08-29): the prediction was wrong
+
+`p_bastilabb:torso` capped at 1 was loaded into Override. Vertex positions were
+byte-identical to vanilla, so weights were the only variable: 991 vertices went
+from `{1: 464, 2: 463, 3: 54, 4: 10}` across 16 bones to `{1: 991}` across 14.
+53% of the mesh went from blended to rigidly bound.
+
+Observed: **the waist pinches most, but it is hard to notice.**
+
+That is a much weaker effect than predicted. "Visibly crease or snap at joints"
+was an overstatement drawn from the weight numbers alone. The *location* was
+right - the waist is exactly where torso vertices are shared between bones - but
+the *magnitude* was not.
+
+**Conclusion: the engine tolerates aggressive influence capping.** Discarding a
+third of the weight on half of a mesh's vertices produces an artifact a person
+has to look for. Two consequences:
+
+- A weight-transfer implementation can cap at 2 without meaningful visual cost.
+  Whatever the engine does when reconstructing a vertex from few influences, it
+  is forgiving.
+- **Caps 2 and 3 were not tested in-game, deliberately.** Both are strictly
+  milder than cap 1 - cap 2 touches a fifth as many vertices, cap 3 a
+  sixty-fifth - so a test that cap 1 barely passed cannot fail for them. Running
+  them would produce a predictable null result rather than evidence.
+
+The honest limit of this finding: it is one mesh, on one character, judged by
+eye in motion. It says the artifact is subtle, not that it is absent. Anything
+depending on exact deformation should still cap at 4.
+
 Test variants are built by `kmdlswap replace --max-influences N`; the meshes used
 were `p_hk47:TorsoHoses` (2 influences max) and `p_bastilabb:torso`, the only
 companion mesh found using all four slots.
