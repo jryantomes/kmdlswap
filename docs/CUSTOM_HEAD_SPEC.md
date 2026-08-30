@@ -190,6 +190,9 @@ the path and to catch regressions along it, not to be worn.
 - **Nothing validates that the head looks right.** These are structural checks.
   Orientation, proportion and placement are judged by eye, and the `facing`,
   `scale` and `anchor` hints exist because the tool cannot infer them reliably.
+  The Preview tab (and `kmdlfun render --compare`) at least moves that eye
+  judgement out of the game and next to a vanilla reference, but it is still a
+  judgement, and the previewer draws no texture and no animation.
 - **Adjacency is rebuilt at 96.3% fidelity**, not exactly. No visible
   consequence has been observed, but it is not proven harmless.
 - **Decimation preserves topology, not appearance.** It guarantees the mesh

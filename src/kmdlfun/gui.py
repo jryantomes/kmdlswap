@@ -25,6 +25,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from . import effects as keffects
 from . import roster
+from . import viewport as kviewport
 from .library import build
 
 DEFAULT_INSTALLS = [
@@ -96,6 +97,7 @@ class App(ttk.Frame):
         self.tabs.grid(row=1, column=0, sticky="ew", pady=(0, 8))
         self._build_effect_tab()
         self._build_transplant_tab()
+        self._build_preview_tab()
 
     # ---- effects tab -------------------------------------------------------
 
@@ -212,6 +214,148 @@ class App(ttk.Frame):
         )
 
     # ---- shared bottom -----------------------------------------------------
+
+    # ---- preview tab -------------------------------------------------------
+
+    def _build_preview_tab(self):
+        """Look at a model without launching the game.
+
+        The comparison is the point. A single render tells you little - vanilla
+        heads look odd untextured too - but vanilla beside the build, framed by
+        the same ruler, shows immediately whether a head landed at the right size
+        and in the right place, which is otherwise a trip to the game to find out.
+        """
+        page = ttk.Frame(self.tabs, padding=8)
+        self.tabs.add(page, text="Preview")
+        page.columnconfigure(1, weight=1)
+        page.rowconfigure(3, weight=1)
+
+        ttk.Label(page, text="Model").grid(row=0, column=0, sticky="w")
+        self.preview_model = tk.StringVar()
+        self.preview_box = ttk.Combobox(page, textvariable=self.preview_model, values=[])
+        self.preview_box.grid(row=0, column=1, sticky="ew", padx=6)
+        ttk.Button(page, text="Show", command=self._show_preview).grid(row=0, column=2)
+
+        self.preview_compare = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            page, text="Compare with the build in the output folder",
+            variable=self.preview_compare,
+        ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(6, 0))
+
+        ttk.Label(page, text="Highlight").grid(row=2, column=0, sticky="w", pady=(6, 0))
+        self.preview_highlight = tk.StringVar(value="head")
+        ttk.Entry(page, textvariable=self.preview_highlight).grid(
+            row=2, column=1, sticky="ew", padx=6, pady=(6, 0)
+        )
+        ttk.Label(page, text="node names, comma separated", foreground="#666").grid(
+            row=2, column=2, sticky="w", pady=(6, 0)
+        )
+
+        self.viewport = kviewport.Viewport(page, size=420)
+        self.viewport.grid(row=3, column=0, columnspan=3, sticky="nsew", pady=(8, 0))
+
+        views = ttk.Frame(page)
+        views.grid(row=4, column=0, columnspan=3, sticky="w", pady=(6, 0))
+        for label, yaw, pitch in (
+            ("Front", 0, 0), ("Side", 90, 0), ("Back", 180, 0), ("Above", 0, 55),
+        ):
+            ttk.Button(
+                views, text=label, width=7,
+                command=lambda y=yaw, p=pitch: self.viewport.look(y, p),
+            ).pack(side="left", padx=(0, 4))
+        ttk.Button(views, text="Reset", width=7, command=self.viewport.reset).pack(
+            side="left", padx=(8, 0)
+        )
+        ttk.Button(views, text="Save PNG", width=9, command=self._save_preview).pack(
+            side="left", padx=(8, 0)
+        )
+
+        self.preview_status = ttk.Label(page, text="", foreground="#666", wraplength=600)
+        self.preview_status.grid(row=5, column=0, columnspan=3, sticky="w", pady=(6, 0))
+        ttk.Label(
+            page,
+            text=("Drag to turn, wheel to zoom, double-click to reset. Geometry only: "
+                  "no texture and no animation, so this cannot tell you whether a face "
+                  "still moves. A preview is not proof."),
+            foreground="#a35", wraplength=600,
+        ).grid(row=6, column=0, columnspan=3, sticky="w", pady=(4, 0))
+
+    def _show_preview(self):
+        if self.worker and self.worker.is_alive():
+            return
+        name = self.preview_model.get().strip()
+        if not name:
+            self._say("pick a model to preview (press Scan install first)")
+            return
+        if not self._check_install():
+            return
+        self.viewport.clear("reading ...")
+        self.preview_status.config(text="")
+        highlight = frozenset(
+            n.strip() for n in self.preview_highlight.get().split(",") if n.strip()
+        )
+        built = Path(self.out_dir.get().strip()) / f"{name}.mdl"
+        compare = built if (self.preview_compare.get() and built.is_file()) else None
+        self.worker = threading.Thread(
+            target=self._preview_work,
+            args=(self.install.get().strip(), name, highlight, compare),
+            daemon=True,
+        )
+        self.worker.start()
+
+    def _preview_work(self, install, name, highlight, compare):
+        try:
+            from kmdlswap import layout as kl
+
+            from . import render as krender
+            from .library import ModelLibrary
+
+            scenes, labels, notes = [], [], []
+            layout = kl.parse(*ModelLibrary(install).read(name))
+            scenes.append(krender.from_layout(layout, highlight=highlight))
+            labels.append(f"{name} (vanilla)")
+
+            if compare is not None:
+                mdx = compare.with_suffix(".mdx")
+                if not mdx.is_file():
+                    notes.append(f"{compare.name} has no .mdx beside it, so it was skipped")
+                else:
+                    other = kl.parse(compare.read_bytes(), mdx.read_bytes())
+                    scenes.append(krender.from_layout(other, highlight=highlight))
+                    labels.append(f"{name} (your build)")
+
+            missing = highlight - set(scenes[0].groups)
+            if missing:
+                notes.append(
+                    f"not drawn, so absent or hidden: {', '.join(sorted(missing))}"
+                )
+            counts = " vs ".join(f"{s.triangles}" for s in scenes)
+            notes.insert(0, f"{counts} triangles"
+                            + (" (vanilla vs build)" if len(scenes) > 1 else ""))
+            self.events.put(("scenes", (scenes, labels, "  -  ".join(notes))))
+        except Exception as exc:  # noqa: BLE001
+            self.events.put(("error", f"{type(exc).__name__}: {exc}"))
+
+    def _save_preview(self):
+        if not self.viewport.scenes:
+            self._say("nothing to save - show a model first")
+            return
+        from tkinter import filedialog
+
+        path = filedialog.asksaveasfilename(
+            defaultextension=".png", filetypes=[("PNG image", "*.png")],
+            initialdir=self.out_dir.get().strip() or None, initialfile="preview.png",
+        )
+        if not path:
+            return
+        from . import render as krender
+
+        pixels = krender.strip(
+            self.viewport.scenes, yaw=self.viewport.yaw, pitch=self.viewport.pitch,
+            zoom=self.viewport.zoom, size=720, bounds=self.viewport.bounds,
+        )
+        krender.to_png(pixels, path)
+        self._say(f"wrote {path}")
 
     def _build_log(self):
         box = ttk.LabelFrame(self, text="Log", padding=8)
@@ -594,10 +738,15 @@ class App(ttk.Frame):
                     self.progress.config(value=100 * i / max(total, 1))
                     if label != "done":
                         self._say(f"  [{i + 1}/{total}] {label}")
+                elif kind == "scenes":
+                    scenes, labels, note = payload
+                    self.viewport.set_scenes(scenes, labels)
+                    self.preview_status.config(text=note)
                 elif kind == "index":
                     self.index = payload
                     self.models = payload.names
                     self.host_box.config(values=self.models)
+                    self.preview_box.config(values=self.models)
                     self._say(f"indexed {len(self.models)} character models")
                     self._refresh_donors()
                     self.build_btn.config(state="normal")

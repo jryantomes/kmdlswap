@@ -77,6 +77,22 @@ def main(argv: list[str] | None = None) -> int:
     hd.add_argument("--template", action="store_true",
                     help="write a head.json template into the folder and stop")
 
+    rn = sub.add_parser("render", help="draw a model to a PNG, without the game")
+    rn.add_argument("model", help="a model name in the install, or a path to a .mdl")
+    rn.add_argument("--install")
+    rn.add_argument("--out", default="render.png")
+    rn.add_argument("--compare", metavar="MODEL",
+                    help="draw this one beside it, framed identically")
+    rn.add_argument("--highlight", nargs="*", default=[], metavar="NODE",
+                    help="draw these nodes in the accent colour")
+    rn.add_argument("--yaw", type=float, default=0.0, help="degrees, 0 is front")
+    rn.add_argument("--pitch", type=float, default=0.0, help="degrees, + looks down")
+    rn.add_argument("--size", type=int, default=640)
+    rn.add_argument("--turntable", type=int, default=0, metavar="N",
+                    help="write N frames around the model instead of one image")
+    rn.add_argument("--show-hidden", action="store_true",
+                    help="draw meshes the render flag turns off, in grey")
+
     sub.add_parser("gui", help="launch the desktop app")
 
     args = p.parse_args(argv)
@@ -93,6 +109,8 @@ def main(argv: list[str] | None = None) -> int:
             return _transplant(args)
         if args.cmd == "head":
             return _head(args)
+        if args.cmd == "render":
+            return _render(args)
         if args.cmd == "gui":
             from .gui import run
 
@@ -101,6 +119,78 @@ def main(argv: list[str] | None = None) -> int:
         print(f"kmdlfun: {exc}", file=sys.stderr)
         return 1
     return 2
+
+
+def _load_layout(name: str, install: str | None):
+    """A model by name from the install, or by path to a built .mdl."""
+    from pathlib import Path as _Path
+
+    from kmdlswap import layout as kl
+
+    if name.lower().endswith(".mdl") or _Path(name).is_file():
+        mdl = _Path(name)
+        mdx = mdl.with_suffix(".mdx")
+        if not mdx.is_file():
+            raise SystemExit(f"{mdx.name} is missing; an MDL cannot be read without it")
+        return kl.parse(mdl.read_bytes(), mdx.read_bytes())
+    if not install:
+        raise SystemExit(f"{name!r} is not a file, so --install is needed to look it up")
+    from .library import ModelLibrary
+
+    return kl.parse(*ModelLibrary(install).read(name))
+
+
+def _render(args) -> int:
+    import math
+    from pathlib import Path as _Path
+
+    from . import render as krender
+
+    highlight = frozenset(args.highlight)
+    layout = _load_layout(args.model, args.install)
+    scene = krender.from_layout(
+        layout, highlight=highlight, include_hidden=args.show_hidden
+    )
+    print(f"{args.model}: {scene.triangles} triangles across {len(scene.groups)} meshes")
+    if highlight:
+        missing = highlight - set(scene.groups)
+        if missing:
+            print(f"  not drawn (absent or hidden): {', '.join(sorted(missing))}")
+
+    scenes = [scene]
+    if args.compare:
+        other = krender.from_layout(
+            _load_layout(args.compare, args.install),
+            highlight=highlight,
+            include_hidden=args.show_hidden,
+        )
+        print(f"{args.compare}: {other.triangles} triangles across "
+              f"{len(other.groups)} meshes")
+        scenes.append(other)
+
+    # One shared framing, or the comparison lies about relative size.
+    bounds = krender.shared_bounds(scenes)
+    out = _Path(args.out)
+
+    if args.turntable:
+        stem, suffix = out.stem, out.suffix or ".png"
+        for i in range(args.turntable):
+            yaw = 2.0 * math.pi * i / args.turntable
+            frame = krender.strip(scenes, yaw=yaw,
+                                  pitch=math.radians(args.pitch),
+                                  size=args.size, bounds=bounds)
+            krender.to_png(frame, out.with_name(f"{stem}_{i:03d}{suffix}"))
+        print(f"wrote {args.turntable} frames to {out.parent}/{stem}_NNN{suffix}")
+        return 0
+
+    frame = krender.strip(scenes, yaw=math.radians(args.yaw),
+                          pitch=math.radians(args.pitch),
+                          size=args.size, bounds=bounds)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    krender.to_png(frame, out)
+    print(f"wrote {out}")
+    print("Geometry only - no texture, no animation. A preview is not proof.")
+    return 0
 
 
 def _effects() -> int:
