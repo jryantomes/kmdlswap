@@ -35,7 +35,21 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--effect", required=True)
     b.add_argument("--out", required=True)
     b.add_argument("--intensity", type=float, default=1.0)
-    b.add_argument("--pivot", choices=["bounds", "origin"], default="bounds")
+    b.add_argument(
+        "--pivot", choices=list(kapply.PIVOTS), default="joint",
+        help="where each node grows from: joint (default, keeps a multi-node "
+             "part registered), node (its own origin), bounds (its own bbox centre)",
+    )
+
+    tp = sub.add_parser("transplant", help="move one model's geometry into another")
+    tp.add_argument("--install", required=True)
+    tp.add_argument("--host", required=True, help="model that keeps its hierarchy and animations")
+    tp.add_argument("--donor", required=True, help="model to take geometry from")
+    tp.add_argument("--node", nargs="*", help="host node(s); default every matching node")
+    tp.add_argument("--out", required=True)
+    tp.add_argument("--fit", action="store_true", help="scale the donor part to the host part's size")
+    tp.add_argument("--max-influences", type=int, default=4)
+    tp.add_argument("--dry-run", action="store_true", help="report matches and fit, write nothing")
 
     sub.add_parser("gui", help="launch the desktop app")
 
@@ -49,6 +63,8 @@ def main(argv: list[str] | None = None) -> int:
             return _preview(args)
         if args.cmd == "build":
             return _build(args)
+        if args.cmd == "transplant":
+            return _transplant(args)
         if args.cmd == "gui":
             from .gui import run
 
@@ -139,3 +155,90 @@ def _build(args) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+def _transplant(args) -> int:
+    from pathlib import Path
+
+    from kmdlswap import layout as kl
+    from kmdlswap import validate as kv
+
+    from . import transplant as ktp
+    from .library import ModelLibrary
+
+    lib = ModelLibrary(args.install)
+    for name in (args.host, args.donor):
+        if not lib.has(name):
+            print(f"kmdlfun: no model {name!r} in that install", file=sys.stderr)
+            return 1
+
+    mdl, mdx = lib.read(args.host)
+    donor_layout = kl.parse(*lib.read(args.donor))
+    host_layout = kl.parse(mdl, mdx)
+
+    if args.node:
+        donors = {n.name.lower(): n.name for n in ktp.kparts.mesh_nodes(donor_layout)}
+        pairs = []
+        for wanted in args.node:
+            match = donors.get(wanted.lower())
+            if not match:
+                print(f"kmdlfun: {args.donor} has no node matching {wanted!r}", file=sys.stderr)
+                return 1
+            pairs.append((wanted, match))
+    else:
+        pairs = ktp.match_nodes(host_layout, donor_layout)
+
+    if not pairs:
+        print(
+            f"kmdlfun: {args.host} and {args.donor} share no mesh node names, "
+            f"so there is nothing to move between them",
+            file=sys.stderr,
+        )
+        return 1
+
+    print(f"{args.host}  <-  {args.donor}   ({len(pairs)} node(s))")
+    print()
+    results = []
+    for host_node, donor_node in pairs:
+        mdl2, mdx2, r = ktp.transplant_node(
+            mdl, mdx, donor_layout, args.donor, host_node, donor_node,
+            fit=args.fit, max_influences=args.max_influences,
+        )
+        results.append(r)
+        if r.ok and not args.dry_run:
+            mdl, mdx = mdl2, mdx2
+        line = f"  {host_node:<16} <- {donor_node:<16}"
+        if not r.ok:
+            print(f"{line} REFUSED: {r.error}")
+            continue
+        a = r.alignment
+        s = r.swap
+        print(
+            f"{line} {s.old_vertices:>5} -> {s.new_vertices:<5} verts"
+            f"   fit {a.worst_ratio:.2f}x   drift {a.drift:.3f}"
+        )
+        for w in r.warnings:
+            print(f"      ! {w}")
+
+    done = [r for r in results if r.ok]
+    if args.dry_run:
+        print(f"dry run: {len(done)}/{len(pairs)} node(s) would transfer")
+        return 0
+    if not done:
+        print("nothing transferred", file=sys.stderr)
+        return 1
+
+    final = kv.check(kl.parse(mdl, mdx))
+    if not final.ok:
+        print("kmdlfun: result failed validation; refusing to write it", file=sys.stderr)
+        return 1
+
+    out_dir = Path(args.out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / f"{args.host}.mdl").write_bytes(mdl)
+    (out_dir / f"{args.host}.mdx").write_bytes(mdx)
+    print()
+    print(f"{len(done)}/{len(pairs)} node(s) transferred")
+    print(f"wrote {out_dir / args.host}.mdl and .mdx")
+    print("Copy both into the game's Override directory. Verify in-game.")
+    return 0
