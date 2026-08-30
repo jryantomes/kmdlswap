@@ -119,6 +119,7 @@ kmdlfun build   --install "<K1 root>" --effect bighead --companion all --out out
 kmdlfun gui                     # Tkinter desktop app (no extra dependencies)
 kmdlfun render p_hk47 --install "<K1 root>" --highlight head --out shot.png
 kmdlfun render p_hk47 --install "<K1 root>" --compare out/p_hk47.mdl --out before_after.png
+kmdlfun render p_hk47 --install "<K1 root>" --textured --turntable 24 --out spin.png
 ```
 
 Effects: **bighead**, **smallhead**, **bobblehead**, **chibi**, **bigmitts** —
@@ -174,17 +175,39 @@ landed at the right size and in the right place. Its first real use showed the
 decimated Tripo head sitting noticeably smaller than HK-47's own, which had
 previously taken a trip into the game to notice.
 
-Two conventions are pinned by tests because they fail silently by eye. The
-camera sits on -Y looking towards +Y, since KOTOR characters face -Y — invert it
-and every head preview shows the back of the skull and still looks plausible.
-And a before-and-after must share one framing, or a head that changed size looks
-unchanged. There is no backface culling and lighting is two-sided, because the
-head spec tolerates 5% of faces winding against their normals and culling by
-winding would punch holes in meshes we accept.
+`--textured` paints each mesh with the texture its own header names, resolved
+in the engine's order: loose files beat packed ones, so a custom head's `.tga`
+wins exactly as it does in Override, and a folder passed in wins over both so a
+head can be previewed before it is installed anywhere. TPC decoding is
+PyKotor's — unlike its MDL reader it is trustworthy here, the format being a
+header and a pixel block. Texturing is affine in the barycentrics with no
+perspective correction, which is exact rather than approximate under an
+orthographic projection.
 
-It draws geometry only: no texture, no animation. So it says nothing about the
-one failure this project knows is real — that a skinned head's vertex count must
-not change. A preview is not proof either.
+**Turning textures on immediately found a real bug: every render this project
+had ever made was of the back of the character's head.** The `-Y` facing
+inherited from `blender_render.py` had the sign backwards, and an untextured
+low-poly head looks equally plausible from either side, so nothing had
+contradicted it — including a marker check that felt like verification and
+wasn't. Settled two ways and now fixed in both renderers:
+[`reports/FACING_FINDINGS.md`](reports/FACING_FINDINGS.md).
+
+Conventions pinned by tests, because each fails silently by eye: characters face
+**+Y**, verified from the position of every eye, teeth and tongue node rather
+than from a texture; and a before-and-after must share one framing, or a head
+that changed size looks unchanged. There is no backface culling and lighting is
+two-sided, because the head spec tolerates 5% of faces winding against their
+normals and culling by winding would punch holes in meshes we accept.
+
+The V axis runs down the image with no flip. That one rests on visual
+inspection: no cheap automated check separates the two conventions on real
+data — a head's UV islands are too uniform for mean texel colour to tell them
+apart, which was measured rather than assumed — so the test pins the sampler
+and the docstring records how the orientation was actually established.
+
+There is still no animation, no lightmap and no transparency. So it says nothing
+about the one failure this project knows is real — that a skinned head's vertex
+count must not change. A preview is not proof either.
 
 Findings and measurements:
 [`reports/KMDLFUN_PIVOT_FINDINGS.md`](reports/KMDLFUN_PIVOT_FINDINGS.md).

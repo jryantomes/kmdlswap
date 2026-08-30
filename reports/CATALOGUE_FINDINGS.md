@@ -1,5 +1,10 @@
 # Character-model catalogue — is a parts-bin creator viable?
 
+> **Stale images.** Every preview referenced here was rendered with the
+> camera on the wrong side: KOTOR characters face +Y, not -Y, so these
+> all show the backs of heads. The measurements below are unaffected -
+> only the pictures are. See [FACING_FINDINGS.md](FACING_FINDINGS.md).
+
 **Date:** 2026-08-29
 **Tools:** [`tools/build_catalogue.py`](../tools/build_catalogue.py),
 [`src/kmdlfun/catalogue.py`](../src/kmdlfun/catalogue.py)

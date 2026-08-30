@@ -236,20 +236,25 @@ class App(ttk.Frame):
         self.preview_box.grid(row=0, column=1, sticky="ew", padx=6)
         ttk.Button(page, text="Show", command=self._show_preview).grid(row=0, column=2)
 
+        opts = ttk.Frame(page)
+        opts.grid(row=1, column=0, columnspan=3, sticky="w", pady=(6, 0))
         self.preview_compare = tk.BooleanVar(value=True)
         ttk.Checkbutton(
-            page, text="Compare with the build in the output folder",
+            opts, text="Compare with the build in the output folder",
             variable=self.preview_compare,
-        ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(6, 0))
+        ).pack(side="left", padx=(0, 16))
+        self.preview_textured = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            opts, text="Textured", variable=self.preview_textured,
+        ).pack(side="left")
 
         ttk.Label(page, text="Highlight").grid(row=2, column=0, sticky="w", pady=(6, 0))
         self.preview_highlight = tk.StringVar(value="head")
         ttk.Entry(page, textvariable=self.preview_highlight).grid(
             row=2, column=1, sticky="ew", padx=6, pady=(6, 0)
         )
-        ttk.Label(page, text="node names, comma separated", foreground="#666").grid(
-            row=2, column=2, sticky="w", pady=(6, 0)
-        )
+        ttk.Label(page, text="comma separated; overrides the texture",
+                  foreground="#666").grid(row=2, column=2, sticky="w", pady=(6, 0))
 
         self.viewport = kviewport.Viewport(page, size=420)
         self.viewport.grid(row=3, column=0, columnspan=3, sticky="nsew", pady=(8, 0))
@@ -274,9 +279,9 @@ class App(ttk.Frame):
         self.preview_status.grid(row=5, column=0, columnspan=3, sticky="w", pady=(6, 0))
         ttk.Label(
             page,
-            text=("Drag to turn, wheel to zoom, double-click to reset. Geometry only: "
-                  "no texture and no animation, so this cannot tell you whether a face "
-                  "still moves. A preview is not proof."),
+            text=("Drag to turn, wheel to zoom, double-click to reset. No animation, "
+                  "so this cannot tell you whether a face still moves. A preview is "
+                  "not proof."),
             foreground="#a35", wraplength=600,
         ).grid(row=6, column=0, columnspan=3, sticky="w", pady=(4, 0))
 
@@ -298,21 +303,33 @@ class App(ttk.Frame):
         compare = built if (self.preview_compare.get() and built.is_file()) else None
         self.worker = threading.Thread(
             target=self._preview_work,
-            args=(self.install.get().strip(), name, highlight, compare),
+            args=(self.install.get().strip(), name, highlight, compare,
+                  self.preview_textured.get(), Path(self.out_dir.get().strip())),
             daemon=True,
         )
         self.worker.start()
 
-    def _preview_work(self, install, name, highlight, compare):
+    def _preview_work(self, install, name, highlight, compare, textured, out_dir):
         try:
             from kmdlswap import layout as kl
 
             from . import render as krender
             from .library import ModelLibrary
 
+            lookup = cache = None
+            if textured:
+                from . import textures as ktextures
+
+                # The build's own texture sits in the output folder, and is what
+                # the game will use once both are in Override.
+                cache = ktextures.TextureCache(install, extra=[out_dir])
+                lookup = cache.get
+
             scenes, labels, notes = [], [], []
             layout = kl.parse(*ModelLibrary(install).read(name))
-            scenes.append(krender.from_layout(layout, highlight=highlight))
+            scenes.append(
+                krender.from_layout(layout, highlight=highlight, texture_lookup=lookup)
+            )
             labels.append(f"{name} (vanilla)")
 
             if compare is not None:
@@ -321,7 +338,8 @@ class App(ttk.Frame):
                     notes.append(f"{compare.name} has no .mdx beside it, so it was skipped")
                 else:
                     other = kl.parse(compare.read_bytes(), mdx.read_bytes())
-                    scenes.append(krender.from_layout(other, highlight=highlight))
+                    scenes.append(krender.from_layout(
+                        other, highlight=highlight, texture_lookup=lookup))
                     labels.append(f"{name} (your build)")
 
             missing = highlight - set(scenes[0].groups)
@@ -329,6 +347,14 @@ class App(ttk.Frame):
                 notes.append(
                     f"not drawn, so absent or hidden: {', '.join(sorted(missing))}"
                 )
+            if textured:
+                # Report per scene: a build usually carries its own head texture
+                # that vanilla does not have, and one total would hide that.
+                counts = " vs ".join(str(len(s.textures)) for s in scenes)
+                notes.append("untextured: nothing resolved"
+                             if not any(s.textures for s in scenes)
+                             else f"{counts} texture(s)")
+                notes.extend(cache.problems if cache else [])
             counts = " vs ".join(f"{s.triangles}" for s in scenes)
             notes.insert(0, f"{counts} triangles"
                             + (" (vanilla vs build)" if len(scenes) > 1 else ""))

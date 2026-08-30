@@ -8,8 +8,14 @@ the question these previews answer is *what shape is this and how big is it*,
 and colour would only distract from silhouette and proportion. Orthographic with
 a shared scale across a batch means two models can be compared directly.
 
-KOTOR characters face -Y (measured: a head's largest front-back asymmetry is on
-Y, negative), so the camera sits on -Y looking towards +Y.
+KOTOR characters face +Y, so the camera sits on +Y looking towards -Y.
+
+This was wrong until the in-app previewer gained textures: the earlier reading
+of "largest front-back asymmetry on Y, negative" had the sign backwards, and an
+untextured low-poly head looks equally plausible from either side, so nothing
+contradicted it. Settled two ways - four textured models show a face only from
++Y, and every eye, teeth and tongue node in a vanilla head sits at positive Y.
+Catalogue images rendered before this fix show the backs of characters' heads.
 
     blender --background --python tools/blender_render.py -- --manifest jobs.json
 """
@@ -81,7 +87,7 @@ def clear_meshes():
 
 
 def frame(cam, objects, margin: float = 1.12):
-    """Point an orthographic camera at the objects from -Y."""
+    """Point an orthographic camera at the objects from +Y, where the face is."""
     corners = []
     for obj in objects:
         for c in obj.bound_box:
@@ -95,9 +101,9 @@ def frame(cam, objects, margin: float = 1.12):
 
     cam.data.ortho_scale = max(size.x, size.z, 1e-4) * margin
     depth = max(size.y, 1.0) * 4 + 2
-    cam.location = (centre.x, centre.y - depth, centre.z)
+    cam.location = (centre.x, centre.y + depth, centre.z)
     # Look along +Y with Z up.
-    cam.rotation_euler = (math.radians(90), 0.0, 0.0)
+    cam.rotation_euler = (math.radians(90), 0.0, math.radians(180))
     return size
 
 

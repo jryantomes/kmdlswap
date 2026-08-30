@@ -127,6 +127,13 @@ Scoped to head models deliberately: body meshes are unaffected — HK-47's
   it now does. The real Tripo head goes 3312 -> 690 and comes out ACCEPTED with
   zero warnings; without the flag it is rejected, and the message names the
   flag. Design notes in `docs/CUSTOM_HEAD_SPEC.md`.
+- ~~**Texture preview.**~~ **DONE.** `--textured` / the Textured checkbox.
+  Resolves in the engine's order (loose beats packed, caller's folders beat
+  both), so a custom head's own `.tga` shows before it is installed. It found
+  that **every render this project had made was of the back of the head**:
+  characters face +Y, not -Y. Fixed in both renderers;
+  `reports/FACING_FINDINGS.md` has the evidence and why the earlier check
+  failed to catch it.
 - ~~**A previewer in the app.**~~ **DONE.** Preview tab plus `kmdlfun render`.
   numpy software rasteriser (`src/kmdlfun/render.py`), Tk widget in
   `viewport.py`. Draws the posed model out of MDL/MDX bytes, so it checks the
@@ -134,6 +141,9 @@ Scoped to head models deliberately: body meshes are unaffected — HK-47's
   Geometry only - no texture, no animation, so it cannot see the facial-animation
   failure. Camera convention and shared framing are pinned by tests; both fail
   silently by eye.
+- **Regenerate the catalogue.** Every image in it shows the back of the
+  character's head - see below. `python tools/render_catalogue.py --install
+  "<K1 root>"` with the fixed camera.
 - **A foreign mesh into a *skinned* node.** Still the largest untested path.
   HK-47's head is unskinned, so weight transfer from genuinely authored geometry
   is proven only by the synthetic box probe. Needs a mesh.
