@@ -36,6 +36,8 @@ class SwapReport:
     max_influences: int = 0
     influence_histogram: dict[int, int] = field(default_factory=dict)
     bones_used: int = 0
+    bones_available: int = 0
+    bones_claimed: dict[int, int] = field(default_factory=dict)
     normals_source: str = "obj"
     uv_source: str = "obj"
     warnings: list[str] = field(default_factory=list)
@@ -51,8 +53,17 @@ class SwapReport:
         if self.skinned:
             out.append(
                 f"skinning    transferred; max {self.max_influences} influences/vertex, "
-                f"{self.bones_used} bones, histogram {self.influence_histogram}"
+                f"{self.bones_used}"
+                + (f" of {self.bones_available}" if self.bones_available else "")
+                + f" bones, histogram {self.influence_histogram}"
             )
+            if self.bones_claimed:
+                total = sum(self.bones_claimed.values())
+                out.append(
+                    f"            {len(self.bones_claimed)} bone(s) had no "
+                    f"transferred weight and were given the nearest {total} "
+                    f"vertex/vertices, at the weight they held on the host"
+                )
         else:
             out.append("skinning    none (mesh is not skinned)")
         for w in self.warnings:
@@ -209,6 +220,15 @@ def build_replacement(
             mesh.positions,
             max_influences=max_influences,
         )
+        # A bone that receives no transferred weight stops driving anything, and
+        # says nothing about it. Give every source bone somewhere to act.
+        report.bones_claimed = weights.claim_orphan_bones(
+            original.positions,
+            original.influences,
+            mesh.positions,
+            influences_out,
+            max_influences=max_influences,
+        )
         problems = weights.check(influences_out)
         if problems:
             raise ValueError(
@@ -223,6 +243,15 @@ def build_replacement(
         report.max_influences = max(hist) if hist else 0
         report.influence_histogram = dict(sorted(hist.items()))
         report.bones_used = len(used)
+        report.bones_available = len(
+            {i.bone_slot for infl in original.influences for i in infl}
+        )
+        if report.bones_used < report.bones_available:
+            report.warnings.append(
+                f"{report.bones_available - report.bones_used} of the host's "
+                f"{report.bones_available} bones could not be placed on this mesh "
+                f"and will not move it"
+            )
 
     geo = MeshGeometry(
         vertex_count=mesh.vertex_count,
