@@ -96,9 +96,12 @@ host's, which the catalogue knows how to answer.
 - **Body models use several textures** (`n_rodian` has `N_Rodian01` on the head
   and `N_Rodian02` on torso and arms), so a body swap needs per-node texture
   decisions rather than one per model.
-- **Nothing copies the texture file itself.** The swap points at a texture that
-  already ships with the game. Using a *custom* texture means writing a TPC/TGA
-  into Override alongside the model, which this tool does not do.
+- ~~**Nothing copies the texture file itself.**~~ **SOLVED.** A custom texture
+  dropped into `Override/` as an uncompressed TGA and referenced by name loads
+  and maps correctly - verified on HK-47 with Tripo's 4096x4096 atlas resized to
+  512x512. No V-flip was needed. See `reports/CUSTOM_TEXTURE_FINDINGS.md`.
+  `kmdlswap replace --texture <resref>` sets the field; the `.tga` ships beside
+  the model.
 - **Skin tone and lighting will not match** across donors, so a head from one
   character on another's body can show a seam at the neck.
 

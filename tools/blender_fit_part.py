@@ -183,6 +183,10 @@ def main():
         factor = min(fit[i] / size[i] for i in range(3) if size[i] > 1e-9)
     else:
         factor = 1.0
+    # Fitting on the tightest axis guarantees the part fits inside the target
+    # box, which can leave it noticeably smaller than the part it replaces.
+    # --scale multiplies that result.
+    factor *= float(a.get("scale", 1.0))
 
     # Where the replacement should sit in node-local space. A node's geometry is
     # not necessarily centred on its own origin - HK-47's head sits +0.078 above
