@@ -84,7 +84,8 @@ class App(ttk.Frame):
         )
         ttk.Label(
             box,
-            text="Nothing is ever written into the game install. Copy results into Override yourself.",
+            text=("Builds go to the output folder. \"Install to Override\" copies them into "
+                  "the game, and \"Remove\" puts it back to vanilla."),
             foreground="#666",
         ).grid(row=2, column=0, columnspan=3, sticky="w", pady=(6, 0))
 
@@ -224,6 +225,12 @@ class App(ttk.Frame):
         ttk.Button(row, text="Open output", command=self._open_out).grid(
             row=0, column=2, padx=(6, 0)
         )
+        ttk.Button(row, text="Install to Override", command=self._install).grid(
+            row=0, column=3, padx=(6, 0)
+        )
+        ttk.Button(row, text="Remove", command=self._uninstall).grid(
+            row=0, column=4, padx=(6, 0)
+        )
 
     # ---- behaviour ---------------------------------------------------------
 
@@ -253,6 +260,78 @@ class App(ttk.Frame):
             os.startfile(d)  # noqa: S606
         else:
             subprocess.run(["xdg-open", str(d)], check=False)
+
+    def _install(self):
+        """Copy the build into Override. The one action that touches the game."""
+        from . import install as kinstall
+
+        if not self._check_install():
+            return
+        install = self.install.get().strip()
+        p = kinstall.plan(install, self.out_dir.get())
+        if not p.total:
+            messagebox.showinfo("kmdlfun", "Nothing built to install yet.")
+            return
+
+        names = [f.name for f in (p.new + p.ours + p.foreign)]
+        preview = "\n".join("  " + n for n in names[:12])
+        if len(names) > 12:
+            preview += f"\n  ... and {len(names) - 12} more"
+
+        if p.foreign:
+            # Not ours - very likely another mod the user installed by hand.
+            clash = ", ".join(f.name for f in p.foreign)
+            if not messagebox.askyesno(
+                "Overwrite files this tool did not install?",
+                f"These already exist in Override and were not put there by this "
+                f"tool, so they probably belong to another mod:\n\n  {clash}\n\n"
+                f"Overwrite them anyway?",
+                icon="warning",
+            ):
+                self._say("install cancelled")
+                return
+
+        if not messagebox.askokcancel(
+            "Install to Override",
+            f"Copy {p.total} file(s) into\n{p.override}\n\n{preview}\n\n"
+            f"({p.describe()})",
+        ):
+            self._say("install cancelled")
+            return
+
+        try:
+            done = kinstall.apply(install, self.out_dir.get(), allow_foreign=True)
+        except OSError as exc:
+            messagebox.showerror("kmdlfun", f"Could not install: {exc}")
+            return
+        self._say(f"\ninstalled {len(done)} file(s) into Override: {', '.join(done[:8])}"
+                  + (" ..." if len(done) > 8 else ""))
+        self._say("Load the game to check. Remove puts it back to vanilla.")
+
+    def _uninstall(self):
+        from . import install as kinstall
+
+        if not self._check_install():
+            return
+        install = self.install.get().strip()
+        known = kinstall.read_manifest(install)
+        if not known:
+            messagebox.showinfo(
+                "kmdlfun",
+                "This tool has not installed anything, so there is nothing to "
+                "remove.\n\nFiles put in Override by hand or by other mods are "
+                "deliberately left alone.",
+            )
+            return
+        if not messagebox.askokcancel(
+            "Remove from Override",
+            f"Remove the {len(known)} file(s) this tool installed?\n\n"
+            f"Vanilla models live in the game archives, so the originals come "
+            f"back. Nothing else in Override is touched.",
+        ):
+            return
+        removed = kinstall.remove(install)
+        self._say(f"\nremoved {len(removed)} file(s) from Override; vanilla restored")
 
     def _on_effect_change(self):
         e = keffects.resolve(self.effect.get())
