@@ -42,6 +42,16 @@ def main(argv: list[str] | None = None) -> int:
         help="cap bone influences per vertex (1-4; vanilla never exceeds 4)",
     )
     p_replace.add_argument(
+        "--texture", default=None,
+        help="point the node at a different texture (resref, max 16 chars); the file "
+             "itself must be in Override as .tga or .tpc",
+    )
+    p_replace.add_argument(
+        "--hide", nargs="*", default=None,
+        help="stop drawing these mesh nodes; for leftovers the new geometry does "
+             "not account for, which cannot be removed without touching the hierarchy",
+    )
+    p_replace.add_argument(
         "--material", type=int, default=None,
         help="face material value (default: inherit from the node being replaced)",
     )
@@ -132,7 +142,25 @@ def _replace(args) -> int:
         max_influences=args.max_influences,
         material=args.material,
     )
-    mdl, mdx = replace_geometry(layout, node, geo)
+    mdl, mdx = replace_geometry(layout, node, geo, texture=args.texture)
+
+    if args.hide:
+        import struct
+
+        RENDER_FLAG_AT = 313
+        staged = kl.parse(mdl, mdx)
+        buf = bytearray(mdl)
+        hidden = []
+        for n in staged.nodes:
+            if n.is_mesh and n.in_animation is None and n.name in args.hide:
+                struct.pack_into("<B", buf, n.trimesh_at + RENDER_FLAG_AT, 0)
+                hidden.append(n.name)
+        missing = sorted(set(args.hide) - set(hidden))
+        if missing:
+            print(f"kmdlswap: no mesh node named {', '.join(missing)}", file=sys.stderr)
+            return 1
+        mdl = bytes(buf)
+        print(f"hidden      {', '.join(hidden)}")
 
     after = kl.parse(mdl, mdx)
     final = kv.check(after)
