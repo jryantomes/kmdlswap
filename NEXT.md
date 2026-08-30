@@ -60,6 +60,35 @@ Either answer sharpens `HEAD_ANIMATION_FINDINGS.md` from "we know the rule" to
 Verified on file: vertex count, faces and per-vertex weights byte-identical to
 vanilla, file sizes unchanged, UVs replaced, texture field now `N_DustilH01`.
 
+### Known limitation: nodes the donor does not have
+
+`n_dustilh` has no `hair` node, so Carth's hair was left untouched — still shaped
+for Carth's skull and still using `P_CarthH01` while the head around it became
+Dustil's shape and `N_DustilH01`. In-game it reads as wrong hair, and it is the
+one visible flaw in an otherwise correct swap.
+
+This is inherent to node-matched swapping rather than a bug: only nodes the host
+already has can be filled, and the hierarchy is never touched, so a node the
+donor lacks cannot be removed or hidden. `transplant` now lists these before
+writing:
+
+```
+  left as p_carthh's own: hair
+  (n_dustilh has no node of that name. These keep their original
+   shape and texture, so they may not sit right on the new head.)
+```
+
+Worth thinking about tomorrow, roughly in order of appeal:
+
+1. **Pick donors that have the same parts.** The catalogue already knows who has
+   what; the creator could simply prefer donors whose node set covers the host's.
+2. **Retexture unmatched nodes to the donor's texture** without reshaping them.
+   Cheap - it is a header patch - but their UVs still belong to the host texture,
+   so it may look worse, not better.
+3. **Shrink an unwanted node to nothing.** Scaling its geometry to near-zero
+   effectively hides it without touching the hierarchy. Crude, but it would let a
+   bald donor actually look bald.
+
 ### Still open on textures
 
 - **Body models use several textures** (`n_rodian` has `N_Rodian01` on the head
