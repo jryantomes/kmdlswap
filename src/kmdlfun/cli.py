@@ -13,6 +13,7 @@ import sys
 
 from . import apply as kapply
 from . import effects as keffects
+from . import parts as kparts
 from . import roster
 
 
@@ -90,6 +91,10 @@ def main(argv: list[str] | None = None) -> int:
     rn.add_argument("--size", type=int, default=640)
     rn.add_argument("--turntable", type=int, default=0, metavar="N",
                     help="write N frames around the model instead of one image")
+    rn.add_argument("--textured", action="store_true",
+                    help="paint each mesh with the texture its header names")
+    rn.add_argument("--texture-dir", action="append", default=[], metavar="DIR",
+                    help="look here for loose textures first; repeatable")
     rn.add_argument("--show-hidden", action="store_true",
                     help="draw meshes the render flag turns off, in grey")
 
@@ -147,10 +152,34 @@ def _render(args) -> int:
     from . import render as krender
 
     highlight = frozenset(args.highlight)
+    lookup = None
+    cache = None
+    if args.textured:
+        from . import textures as ktextures
+
+        extra = [_Path(d) for d in args.texture_dir]
+        # A build's own texture sits beside it, and is the one the game will use
+        # once both are in Override - so look there before anything installed.
+        model_dir = _Path(args.model).parent
+        if model_dir.is_dir():
+            extra.insert(0, model_dir)
+        cache = ktextures.TextureCache(args.install, extra=extra)
+        lookup = cache.get
+
     layout = _load_layout(args.model, args.install)
     scene = krender.from_layout(
-        layout, highlight=highlight, include_hidden=args.show_hidden
+        layout, highlight=highlight, include_hidden=args.show_hidden,
+        texture_lookup=lookup,
     )
+    if args.textured:
+        named = {krender.node_texture(layout, n) for n in kparts.mesh_nodes(layout)}
+        found = len(scene.textures)
+        print(f"  textures: {found} of {len(named - {''})} resolved"
+              f" ({', '.join(sorted(named - {''}))})")
+        for problem in (cache.problems if cache else []):
+            print(f"  texture problem: {problem}")
+        if not found:
+            print("  nothing resolved, so this is drawing untextured grey")
     print(f"{args.model}: {scene.triangles} triangles across {len(scene.groups)} meshes")
     if highlight:
         missing = highlight - set(scene.groups)
@@ -163,6 +192,7 @@ def _render(args) -> int:
             _load_layout(args.compare, args.install),
             highlight=highlight,
             include_hidden=args.show_hidden,
+            texture_lookup=lookup,
         )
         print(f"{args.compare}: {other.triangles} triangles across "
               f"{len(other.groups)} meshes")
@@ -189,7 +219,8 @@ def _render(args) -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
     krender.to_png(frame, out)
     print(f"wrote {out}")
-    print("Geometry only - no texture, no animation. A preview is not proof.")
+    print("No animation" + ("" if args.textured else ", no texture")
+          + ". A preview is not proof.")
     return 0
 
 

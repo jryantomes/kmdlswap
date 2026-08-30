@@ -12,10 +12,15 @@ posed into model space by `space.rest_pose`, and filtered to the meshes the
 render flag says are actually drawn. So previewing a build is a real check on
 the output bytes rather than a re-display of the input mesh.
 
-Conventions match `tools/blender_render.py` so the two agree: Z is up, KOTOR
-characters face -Y, so the default camera sits on -Y looking towards +Y.
+Z is up and **KOTOR characters face +Y**, so the default camera sits on +Y
+looking towards -Y. That direction was wrong here until textures went in: the
+project had inherited "characters face -Y" from `tools/blender_render.py`, and
+an untextured low-poly head looks equally plausible from either side, so nothing
+contradicted it. Four textured models settled it at once - Carth, Bastila,
+Dustil and Mission all show a face only from +Y. `tools/blender_render.py` still
+has the old direction and its catalogue renders every character from behind.
 
-Two decisions worth stating, because they are not the obvious ones:
+Three decisions worth stating, because they are not the obvious ones:
 
 * **No backface culling, and two-sided lighting.** Our own head spec tolerates
   up to 5% of faces winding against their normals, so culling by winding would
@@ -27,10 +32,13 @@ Two decisions worth stating, because they are not the obvious ones:
   `bounds` to two renders also makes them directly comparable, which is the
   whole point of a before-and-after.
 
-It draws untextured flat-shaded geometry. It cannot show a texture, and it
-cannot show animation - so it says nothing about the one failure this project
-knows is real, that a skinned head's vertex count must not change. A preview is
-not proof either.
+* **Texturing is affine, with no perspective correction.** That is exact rather
+  than approximate here, because the projection is orthographic.
+
+It draws geometry and one diffuse texture. There is no animation, no lightmap
+and no transparency - so it still says nothing about the one failure this
+project knows is real, that a skinned head's vertex count must not change. A
+preview is not proof either.
 """
 
 from __future__ import annotations
@@ -49,7 +57,11 @@ HIGHLIGHT = (0.93, 0.58, 0.24)     # warm: a node the operation touched
 MUTED = (0.34, 0.35, 0.39)         # present in the file but not drawn
 BACKGROUND = (0.09, 0.10, 0.12)
 
-LIGHT = np.array([-0.35, -0.80, 0.48], dtype=np.float64)
+# Characters face +Y, so the camera's home position is opposite a bare yaw of 0.
+# Measured from textured models, not assumed - see the module docstring.
+FRONT_YAW = np.pi
+
+LIGHT = np.array([-0.35, 0.80, 0.48], dtype=np.float64)
 LIGHT /= np.linalg.norm(LIGHT)
 AMBIENT = 0.30
 
@@ -63,6 +75,13 @@ class Scene:
     face_colour: np.ndarray                    # (M, 3) float64
     groups: list[str] = field(default_factory=list)
     triangles: int = 0
+    uvs: np.ndarray | None = None              # (N, 2) float64, or None
+    face_texture: np.ndarray | None = None     # (M,) int, index into `textures`
+    textures: list = field(default_factory=list)   # each (H, W, 3) uint8
+
+    @property
+    def textured(self) -> bool:
+        return bool(self.textures) and self.uvs is not None
 
     @property
     def bounds(self) -> tuple[np.ndarray, float]:
@@ -76,24 +95,43 @@ class Scene:
         return centre, max(radius, 1e-6)
 
 
+def node_texture(layout: Layout, node) -> str:
+    """The texture name in a node's trimesh header, as the engine reads it."""
+    at = node.trimesh_at + ke.TEXTURE_AT
+    raw = bytes(layout.mdl[at : at + ke.TEXTURE_FIELD])
+    return raw.split(b"\0")[0].decode("ascii", "replace").strip()
+
+
 def from_layout(
     layout: Layout,
     *,
     highlight: frozenset[str] = frozenset(),
     include_hidden: bool = False,
+    texture_lookup=None,
 ) -> Scene:
     """Build a scene from a parsed model.
 
     `highlight` names nodes to draw in the accent colour - the ones an operation
     touched. With `include_hidden`, meshes the render flag turns off are drawn in
     a muted grey instead of skipped, which is how you see what `--hide` did.
+
+    `texture_lookup` maps a texture name to an (H, W, 3) uint8 array, or None if
+    it cannot be found. Passing one switches the scene to textured drawing. It is
+    a callable rather than a path so this module needs neither PyKotor nor PIL -
+    the format knowledge stays in `textures.py`, the same way Blender is only
+    ever a renderer here and never the format engine.
     """
     pose = space.rest_pose(layout)
     chunks_v: list[np.ndarray] = []
     chunks_f: list[np.ndarray] = []
     chunks_c: list[np.ndarray] = []
+    chunks_uv: list[np.ndarray] = []
+    chunks_tex: list[np.ndarray] = []
     names: list[str] = []
+    images: list[np.ndarray] = []
+    by_name: dict[str, int] = {}
     base = 0
+    any_uv = False
 
     for node in parts.mesh_nodes(layout, visible_only=not include_hidden):
         geo = ke.extract(layout, node)
@@ -112,6 +150,25 @@ def from_layout(
         else:
             colour = BASE
 
+        uv1 = geo.columns.get("uv1")
+        if uv1:
+            chunks_uv.append(np.asarray(uv1, dtype=np.float64))
+            any_uv = True
+        else:
+            chunks_uv.append(np.zeros((len(world), 2)))
+
+        slot = -1
+        if texture_lookup is not None and uv1 and node.name not in highlight:
+            name = node_texture(layout, node)
+            if name:
+                if name not in by_name:
+                    image = texture_lookup(name)
+                    by_name[name] = -1 if image is None else len(images)
+                    if image is not None:
+                        images.append(np.asarray(image, dtype=np.uint8))
+                slot = by_name[name]
+        chunks_tex.append(np.full(len(f), slot, dtype=np.int32))
+
         chunks_v.append(world)
         chunks_f.append(f)
         chunks_c.append(np.tile(np.asarray(colour, dtype=np.float64), (len(f), 1)))
@@ -127,6 +184,9 @@ def from_layout(
         face_colour=np.concatenate(chunks_c),
         groups=names,
         triangles=len(faces),
+        uvs=np.concatenate(chunks_uv) if any_uv else None,
+        face_texture=np.concatenate(chunks_tex) if images else None,
+        textures=images,
     )
 
 
@@ -144,7 +204,11 @@ def from_mesh(positions, faces, *, colour=BASE) -> Scene:
 
 
 def view_matrix(yaw: float, pitch: float) -> np.ndarray:
-    """World to view. Yaw turns about the model's up axis, pitch tips the camera."""
+    """World to view. Yaw turns about the model's up axis, pitch tips the camera.
+
+    This is bare rotation. `render` adds `FRONT_YAW` so that a caller's yaw of 0
+    means "facing the camera" rather than "aligned with +Y".
+    """
     cy, sy = np.cos(yaw), np.sin(yaw)
     cp, sp = np.cos(pitch), np.sin(pitch)
     about_z = np.array([[cy, -sy, 0.0], [sy, cy, 0.0], [0.0, 0.0, 1.0]])
@@ -178,7 +242,7 @@ def render(
 
     centre, radius = bounds if bounds is not None else scene.bounds
     view = scene.positions - centre
-    view = view @ view_matrix(yaw, pitch).T
+    view = view @ view_matrix(yaw + FRONT_YAW, pitch).T
 
     # Orthographic: the bounding sphere fills the frame, less a small margin.
     scale = (dim / 2.0) * 0.92 * zoom / radius
@@ -189,7 +253,13 @@ def render(
     shade = _shading(view, scene.faces)
     colours = np.clip(scene.face_colour * shade[:, None], 0.0, 1.0)
 
-    _rasterise(px, py, depth, scene.faces, colours, img, dim)
+    uv = tex_ids = None
+    if scene.textured and scene.face_texture is not None:
+        uv = scene.uvs
+        tex_ids = scene.face_texture.tolist()
+
+    _rasterise(px, py, depth, scene.faces, colours, img, dim,
+               uv=uv, tex_ids=tex_ids, textures=scene.textures, shade=shade)
     return _to_uint8(img, size, ss)
 
 
@@ -203,17 +273,29 @@ def _shading(view: np.ndarray, faces: np.ndarray) -> np.ndarray:
     return AMBIENT + (1.0 - AMBIENT) * np.abs(n @ LIGHT)
 
 
-def _rasterise(px, py, depth, faces, colours, img, dim):
+def _rasterise(px, py, depth, faces, colours, img, dim,
+               *, uv=None, tex_ids=None, textures=(), shade=None):
     """Half-space rasteriser with a z-buffer, one triangle at a time.
 
     Normalising the barycentrics by the *signed* area makes the inside test work
     for either winding, which is what lets us skip culling entirely.
+
+    Texturing is affine in the barycentrics with no perspective correction, which
+    is not an approximation here: the projection is orthographic, so affine
+    interpolation across a triangle is exact.
     """
     zbuf = np.full((dim, dim), np.inf)
     x0, x1, x2 = (px[faces[:, i]].tolist() for i in range(3))
     y0, y1, y2 = (py[faces[:, i]].tolist() for i in range(3))
     d0, d1, d2 = (depth[faces[:, i]].tolist() for i in range(3))
     cols = colours.tolist()
+
+    if uv is not None and tex_ids is not None:
+        u0, u1, u2 = (uv[faces[:, i], 0].tolist() for i in range(3))
+        v0, v1, v2 = (uv[faces[:, i], 1].tolist() for i in range(3))
+        lighting = shade.tolist()
+    else:
+        tex_ids = None
 
     for i in range(len(cols)):
         ax, bx, cx = x0[i], x1[i], x2[i]
@@ -245,7 +327,23 @@ def _rasterise(px, py, depth, faces, colours, img, dim):
         if not hit.any():
             continue
         window[hit] = z[hit]
-        img[lo_y:hi_y, lo_x:hi_x][hit] = cols[i]
+
+        slot = tex_ids[i] if tex_ids is not None else -1
+        if slot < 0:
+            img[lo_y:hi_y, lo_x:hi_x][hit] = cols[i]
+            continue
+
+        tex = textures[slot]
+        th, tw = tex.shape[0], tex.shape[1]
+        u = (l0 * u0[i] + l1 * u1[i] + l2 * u2[i])[hit]
+        v = (l0 * v0[i] + l1 * v1[i] + l2 * v2[i])[hit]
+        # Measured, not assumed: V runs down the image the same way the rows do,
+        # so no flip. Flipping it puts a head's hair below its eyes.
+        # `% 1` wraps, which is what a tiling UV outside [0, 1] expects.
+        cu = np.minimum((u % 1.0) * tw, tw - 1).astype(np.int32)
+        cv = np.minimum((v % 1.0) * th, th - 1).astype(np.int32)
+        texel = tex[cv, cu].astype(np.float64) / 255.0
+        img[lo_y:hi_y, lo_x:hi_x][hit] = texel * lighting[i]
 
 
 def shared_bounds(scenes) -> tuple[np.ndarray, float]:
