@@ -16,21 +16,15 @@ The last session found and bounded a real engine constraint:
 `kmdlfun transplant --reshape` works within that and is verified in-game.
 Full write-up: `reports/HEAD_ANIMATION_FINDINGS.md`.
 
-## 1. Two tests ready to run, ~5 minutes each
+## 1. One test still to run (~5 minutes)
 
-### a) Textures — already installed in Override
+### a) ~~Textures~~ — DONE, verified in-game
 
-`out_swap/carth_dustil_tex/` is in your Override now: Carth reshaped onto
-Dustil's head **with Dustil's texture**. All eight head nodes.
+Carth reshaped onto Dustil's head with Dustil's texture: shape, colouring and
+facial animation all correct, skin continuous into the neck, no UV smearing.
+**The texture half of a character creator is solved.**
 
-Talk to him. Expect a face that is Dustil's shape *and* Dustil's colouring, with
-the mouth and eyebrows still animating. If the texture looks right, the texture
-half of a character creator is solved.
-
-Watch specifically for UV seams or smearing: the mapping is sampled, not copied,
-so it can smudge where the two head shapes differ most.
-
-### b) The mechanism probe
+### b) The mechanism probe — still to run
 
 `out_probe2/E_tongue_skinned/p_carthh.mdl` + `.mdx` are built and waiting.
 
