@@ -368,7 +368,7 @@ def _head(args) -> int:
 
     from . import reshape as kreshape
     from .apply import is_head_model
-    from .swap import build_replacement
+    from kmdlswap.swap import build_replacement
 
     if node.is_skin and is_head_model(layout):
         # The vertex count must not change, so the pack is a shape to move the
