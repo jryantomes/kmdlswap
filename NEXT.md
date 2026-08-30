@@ -10,8 +10,12 @@ done met in-game. `kmdlfun` adds companion effects and a swap engine on top.
 
 The last session found and bounded a real engine constraint:
 
-> **A skinned head mesh's vertex count cannot change**, or the character's mouth
-> and eyebrows stop moving in dialogue. Its vertices can move freely.
+> ~~**A skinned head mesh's vertex count cannot change**, or the character's
+> mouth and eyebrows stop moving in dialogue.~~ **WRONG, resolved 2026-08-30.**
+> The cause was a node pointer at MDL model header `+168` that our parser never
+> read and so never relocated. Fixed; confirmed in game. Skinned head meshes may
+> change vertex count freely.
+> [reports/SKIN_ROOT_POINTER_FINDINGS.md](reports/SKIN_ROOT_POINTER_FINDINGS.md)
 
 `kmdlfun transplant --reshape` works within that and is verified in-game.
 Full write-up: `reports/HEAD_ANIMATION_FINDINGS.md`.

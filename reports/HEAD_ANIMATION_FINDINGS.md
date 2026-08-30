@@ -1,5 +1,16 @@
 # Changing a head mesh's vertex count breaks facial animation
 
+> **SUPERSEDED 2026-08-30.** The central claim below — that a skinned head
+> mesh's vertex count cannot change — is **wrong**. The cause was a node pointer
+> at MDL model header `+168` that this project's parser never read and so never
+> relocated. Skinning was a coincidence: `hair` happens to sit after that
+> pointer's target and `Head` and `tongue` before it. Fixed and confirmed in
+> game. See [SKIN_ROOT_POINTER_FINDINGS.md](SKIN_ROOT_POINTER_FINDINGS.md).
+>
+> The measurements here are still sound and worth keeping — the bisection, the
+> two real bugs found along the way, the reshape and texture work. Only the
+> conclusion was wrong.
+
 **Date:** 2026-08-29
 **Model:** `p_carthh` (Carth's head), tested in dialogue in-game
 **Status:** reproduced and bounded by bisection; **mechanism unknown**

@@ -248,11 +248,12 @@ def check_against_target(mesh: ObjMesh, layout, node) -> Verdict:
     from .apply import is_head_model
 
     if node.is_skin and is_head_model(layout):
-        v.add("warn", "skinned head",
-              f"{node.name!r} is skinned in a head model, so its vertex count cannot "
-              f"change or facial animation breaks. The mesh will be used as a shape "
-              f"to reshape onto, keeping the host's {node.vertex_count} vertices "
-              f"and its UVs")
+        v.add("pass", "skinned head",
+              f"{node.name!r} is skinned in a head model. Its vertex count is free "
+              f"to change - the failure that used to make this a warning was a "
+              f"stale pointer in our own writer, fixed and confirmed in game. "
+              f"--reshape remains available for keeping the host's "
+              f"{node.vertex_count} vertices, weights and UVs")
     elif node.is_skin:
         v.add("warn", "skinned",
               f"{node.name!r} is skinned; weights transfer from the mesh being "

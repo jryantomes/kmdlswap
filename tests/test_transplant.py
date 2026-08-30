@@ -137,16 +137,68 @@ def test_refuses_a_saber_or_unauthorable_node(pair):
     assert ktp.check_pair(host, host_node, donor, donor_node) is not None
 
 
-def test_refuses_to_change_a_head_models_vertex_count(pair):
-    """Established in-game: it stops the mouth and eyebrows moving."""
+def test_a_head_transplant_may_change_the_vertex_count(pair):
+    """This test used to assert the opposite, on the strength of five in-game
+    probes. The rule was wrong: the failures came from a node pointer at model
+    header +168 that our writer never relocated, not from the vertex count.
+    Fixed, and confirmed in game on 2026-08-30 with the probe that had broken
+    every previous time. See reports/SKIN_ROOT_POINTER_FINDINGS.md."""
     host_mdl, host_mdx = pair("p_carthh")
     donor = kl.parse(*pair("n_dustilh"))
-    _, _, result = ktp.transplant_node(
+    mdl, mdx, result = ktp.transplant_node(
         host_mdl, host_mdx, donor, "n_dustilh", "Head", "Head"
     )
-    assert not result.ok
-    assert "vertices rather than" in result.error
-    assert "--reshape" in result.error
+    assert result.ok, result.error
+    assert not result.reshaped, "reshape must no longer be forced"
+
+    after = kl.parse(mdl, mdx)
+    assert after.node_by_name("Head").vertex_count != kl.parse(
+        host_mdl, host_mdx
+    ).node_by_name("Head").vertex_count, "the count really did change"
+    assert kv.check(after).ok
+
+
+def test_the_super_root_pointer_survives_a_growing_edit(pair):
+    """The regression test for the bug that caused all of it.
+
+    A node pointer sits at model header +168, after the supermodel name. Grow
+    any array before its target without relocating it and it lands mid-node, and
+    the engine loads the whole model rigid - which is exactly what five probes
+    saw and misread as a vertex-count constraint.
+
+    Growing `Head` moves that pointer's target; growing `hair` does not. Both
+    must come out resolving to a node header, which is what makes this test
+    able to fail rather than merely confirm.
+    """
+    from kmdlswap import edit as ke
+
+    for node_name in ("Head", "hair"):
+        layout = kl.parse(*pair("p_carthh"))
+        before = next(o for o in layout.offsets if o.loc == 0xB4)
+        node = layout.node_by_name(node_name)
+        geo = ke.extract(layout, node)
+        grown = ke.MeshGeometry(
+            vertex_count=geo.vertex_count + 3,
+            columns={k: v + v[:3] for k, v in geo.columns.items()},
+            influences=geo.influences + geo.influences[:3] if geo.influences else [],
+            faces=list(geo.faces),
+            trailing=geo.trailing,
+        )
+        mdl, mdx = ke.replace_geometry(layout, node, grown)
+        after = kl.parse(mdl, mdx)
+
+        pointer = next(o for o in after.offsets if o.loc == 0xB4)
+        target = [s for s in after.spans if s.start == pointer.absolute]
+        assert target, f"growing {node_name} left the pointer resolving to nothing"
+        assert target[0].kind == "node_header", (
+            f"growing {node_name} left the pointer inside {target[0].kind}"
+        )
+        # Growing `Head` sits before the target and must move it; `hair` does not.
+        moved = pointer.value != before.value
+        assert moved == (node_name == "Head"), (
+            f"{node_name}: pointer {'moved' if moved else 'held'}, which is wrong"
+        )
+        assert kv.check(after).ok
 
 
 def test_reshape_is_allowed_and_preserves_the_host_exactly(pair):
