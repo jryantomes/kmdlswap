@@ -73,6 +73,51 @@ def test_a_wholly_inside_out_mesh_is_turned_outward():
     assert repair.signed_volume(fixed.positions, fixed.faces) > 0
 
 
+def test_an_OPEN_mesh_that_is_inside_out_is_still_turned_outward():
+    """The case that put a hollow head in game.
+
+    Cropping a bust opens the mesh along the cut. The old test for "is this
+    inside out" was the signed volume, which only means anything on a closed
+    surface, so a cropped head could be judged fine while being entirely
+    inverted - and in game the front faces are culled and you see straight
+    through to the inside of the back of the skull.
+    """
+    m, _ = repair.crop_below(box(), 0.5, axis=2)
+    assert any(
+        len([f for f in m.faces if v in f]) for v in range(len(m.positions))
+    ), "fixture is empty"
+    m.faces = [(f[0], f[2], f[1]) for f in m.faces]        # turn it inside out
+    assert repair.outward_fraction(m.positions, m.faces) < 0.5
+
+    fixed, _ = repair.unify_winding(m)
+    assert repair.outward_fraction(fixed.positions, fixed.faces) > 0.5
+
+
+def test_outward_fraction_is_area_weighted():
+    """A swarm of tiny crumpled faces must not outvote the skull."""
+    m = box()
+    big = repair.outward_fraction(m.positions, m.faces)
+    assert big > 0.99
+
+    # Many tiny inward-facing faces, scattered symmetrically so they do not move
+    # the centre. By count they swamp the box ten to one; by area they are dust.
+    import math
+
+    tiny = ObjMesh(name="tiny")
+    tiny.positions = list(m.positions)
+    tiny.faces = list(m.faces)
+    base = len(tiny.positions)
+    for i in range(200):
+        a = 2.0 * math.pi * i / 200.0
+        cx, cy = 0.3 * math.cos(a), 0.3 * math.sin(a)
+        tiny.positions.extend([(cx, cy, 0.0), (cx + 1e-3, cy, 0.0), (cx, cy + 1e-3, 0.0)])
+        tiny.faces.append((base, base + 2, base + 1))
+        base += 3
+
+    assert len(tiny.faces) > len(m.faces) * 10, "the fixture must dominate by count"
+    assert repair.outward_fraction(tiny.positions, tiny.faces) > 0.9
+
+
 def test_seam_split_vertices_do_not_stop_the_walk():
     """Positions are welded first. Without that, a mesh split at UV seams has no
     shared indices there and the walk stops at every seam."""

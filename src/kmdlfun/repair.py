@@ -21,8 +21,40 @@ import numpy as np
 from kmdlswap.obj import ObjMesh
 
 
+def outward_fraction(positions, faces) -> float:
+    """How much of the surface faces away from the mesh's centre, by area.
+
+    The test that replaced signed volume, which only means anything on a closed
+    surface. Cropping a bust opens it along the cut, and the volume integral
+    then returns whatever the open boundary happens to contribute - so a head
+    that was cropped could be judged outward-facing while being entirely inside
+    out, which is what put a hollow head in game.
+
+    Comparing each face's normal against the direction from the centre works
+    open or closed. A head is not convex, so this is never 100%; it only has to
+    be a clear majority, weighted by area so a swarm of tiny crumpled faces
+    cannot outvote the skull.
+    """
+    p = np.asarray([q[:3] for q in positions], dtype=np.float64)
+    f = np.asarray(faces, dtype=np.int64)
+    if len(f) == 0:
+        return 1.0
+    a, b, c = p[f[:, 0]], p[f[:, 1]], p[f[:, 2]]
+    normals = np.cross(b - a, c - a)
+    area = np.linalg.norm(normals, axis=1)
+    # Bounding-box centre, not the mean of the vertices: a scan puts most of its
+    # vertices wherever the detail is - all through the hair, on this one - and
+    # the mean would sit inside that mass rather than inside the skull.
+    centre = (p.min(axis=0) + p.max(axis=0)) / 2.0
+    outward = np.einsum("ij,ij->i", normals, (a + b + c) / 3.0 - centre)
+    total = area.sum()
+    if total <= 0.0:
+        return 1.0
+    return float(area[outward > 0].sum() / total)
+
+
 def signed_volume(positions, faces) -> float:
-    """Six times the enclosed volume. Negative means the mesh faces inwards."""
+    """Six times the enclosed volume. Meaningful only on a closed surface."""
     p = np.asarray([q[:3] for q in positions], dtype=np.float64)
     f = np.asarray(faces, dtype=np.int64)
     if len(f) == 0:
@@ -88,7 +120,7 @@ def unify_winding(mesh: ObjMesh) -> tuple[ObjMesh, int]:
                     queue.append(j)
 
     # Consistent, but possibly consistently inside out.
-    if signed_volume(mesh.positions, faces) < 0.0:
+    if outward_fraction(mesh.positions, faces) < 0.5:
         faces = [[f[0], f[2], f[1]] for f in faces]
         flipped = len(faces) - flipped
 
@@ -99,6 +131,11 @@ def unify_winding(mesh: ObjMesh) -> tuple[ObjMesh, int]:
     out.materials = list(mesh.materials)
     out.normals = _vertex_normals(out.positions, out.faces)
     return out, flipped
+
+
+def facing_report(mesh: ObjMesh) -> str:
+    return (f"{outward_fraction(mesh.positions, mesh.faces):.0%} of the surface "
+            f"faces outward")
 
 
 def _vertex_normals(positions, faces):

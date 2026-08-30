@@ -120,6 +120,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="paint each mesh with the texture its header names")
     rn.add_argument("--texture-dir", action="append", default=[], metavar="DIR",
                     help="look here for loose textures first; repeatable")
+    rn.add_argument("--cull", action="store_true",
+                    help="draw only front-facing triangles, as the engine does. "
+                         "An inside-out mesh looks perfect in the normal "
+                         "two-sided preview and full of holes in game")
     rn.add_argument("--show-hidden", action="store_true",
                     help="draw meshes the render flag turns off, in grey")
 
@@ -320,7 +324,7 @@ def _render(args) -> int:
             yaw = 2.0 * math.pi * i / args.turntable
             frame = krender.strip(scenes, yaw=yaw,
                                   pitch=math.radians(args.pitch),
-                                  size=args.size, bounds=bounds)
+                                  size=args.size, bounds=bounds, cull=args.cull)
             krender.to_png(frame, out.with_name(f"{stem}_{i:03d}{suffix}"))
         print(f"wrote {args.turntable} frames to {out.parent}/{stem}_NNN{suffix}")
         return 0
@@ -581,6 +585,7 @@ def _head(args) -> int:
         mesh, flipped = krepair.unify_winding(mesh)
         print(f"  winding: {flipped} face(s) rewound to agree with their neighbours"
               if flipped else "  winding: already consistent")
+        print(f"           {krepair.facing_report(mesh)}")
 
     verdict = headspec.check_mesh(mesh)
     for line in verdict.lines():
