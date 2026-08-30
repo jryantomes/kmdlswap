@@ -47,6 +47,11 @@ import numpy as np
 from kmdlswap.obj import ObjMesh
 
 
+# Above this, run a clustering pass first. Chosen so ordinary head meshes - a
+# few thousand triangles - never touch it and go straight to quadric collapse.
+CLUSTER_ABOVE = 40_000
+
+
 @dataclass
 class Result:
     mesh: ObjMesh
@@ -55,10 +60,14 @@ class Result:
     collapses: int
     refused_flip: int
     refused_manifold: int
+    clustered: int = 0
 
     def summary(self) -> str:
+        pre = (f"clustered away {self.clustered} triangles first, then "
+               if self.clustered else "")
         return (
-            f"{self.before} -> {self.after} triangles in {self.collapses} collapses "
+            f"{self.before} -> {self.after} triangles, " + pre
+            + f"{self.collapses} collapses "
             f"({self.refused_flip} refused for face flips, "
             f"{self.refused_manifold} for non-manifold)"
         )
@@ -91,8 +100,81 @@ def _face_quadric(p0, p1, p2):
     return np.outer(plane, plane)
 
 
+def cluster(mesh: ObjMesh, target_faces: int) -> ObjMesh:
+    """Collapse a mesh onto a grid, as a first pass for very dense input.
+
+    Edge collapse is O(edges log edges) with a Python-level loop, which is fine
+    for a few thousand triangles and hopeless for a scan: a 1.2-million-triangle
+    head would need well over a million collapses. Vertex clustering is a single
+    vectorised pass - snap every vertex to a grid cell, keep one representative
+    per cell, drop faces whose corners collapse together - so it gets within
+    reach quickly and the quadric pass then does the shape-aware work.
+
+    Clustering alone would be a poor decimator: it ignores curvature and can
+    weld across a thin gap. That is exactly why it is only ever a first pass,
+    stopping well above the target so the quadric stage still has room to work.
+
+    Seams are preserved the same way the quadric pass preserves them, and for
+    the same reason: taking one representative vertex's UV per cell hands back
+    whichever side of a seam happened to be first, and on a scan atlas that
+    scrambles the texture. Output vertices are keyed by (cell, UV), so a cell
+    straddling a seam becomes several vertices sharing a position - which is
+    exactly what the quadric pass then welds for topology and re-splits on
+    output.
+    """
+    positions = np.asarray([p[:3] for p in mesh.positions], dtype=np.float64)
+    lo, hi = positions.min(axis=0), positions.max(axis=0)
+    extent = np.maximum(hi - lo, 1e-9)
+
+    # Aim for a few times the target so the quadric pass still has choices.
+    wanted_cells = max(target_faces * 4, 64)
+    divisions = max(2, int(round(wanted_cells ** (1.0 / 3.0) * 2)))
+    step = extent / divisions
+
+    cell = np.floor((positions - lo) / step).astype(np.int64)
+    _, first, inverse = np.unique(cell, axis=0, return_index=True, return_inverse=True)
+    inverse = inverse.reshape(-1)
+
+    has_uvs = mesh.has_uvs and len(mesh.uvs) == len(mesh.positions)
+    representative = [tuple(float(c) for c in positions[i]) for i in first]
+
+    out = ObjMesh(name=mesh.name)
+    remap: dict = {}
+    seen = set()
+
+    def vertex_for(original: int) -> int:
+        cell_index = int(inverse[original])
+        uv = tuple(round(c, 6) for c in mesh.uvs[original]) if has_uvs else None
+        key = (cell_index, uv)
+        if key not in remap:
+            remap[key] = len(out.positions)
+            out.positions.append(representative[cell_index])
+            if uv is not None:
+                out.uvs.append(uv)
+        return remap[key]
+
+    for a, b, c in mesh.faces:
+        cells = (int(inverse[a]), int(inverse[b]), int(inverse[c]))
+        if len({*cells}) != 3:
+            continue
+        key = tuple(sorted(cells))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.faces.append((vertex_for(a), vertex_for(b), vertex_for(c)))
+    return out
+
+
 def simplify(mesh: ObjMesh, target_faces: int) -> Result:
     """Reduce a mesh towards `target_faces`, preserving its topology class."""
+    # A scan can arrive with a million triangles. Cluster down to something the
+    # quadric pass can chew through, then let it do the shape-aware work.
+    clustered = 0
+    if len(mesh.faces) > CLUSTER_ABOVE and len(mesh.faces) > target_faces * 8:
+        before_cluster = len(mesh.faces)
+        mesh = cluster(mesh, target_faces)
+        clustered = before_cluster - len(mesh.faces)
+
     verts, mapping = _weld(mesh.positions)
     faces = []
     corner_uv: list[list[tuple]] = []
@@ -245,7 +327,9 @@ def simplify(mesh: ObjMesh, target_faces: int) -> Result:
             out.faces.append(tuple(tri))
 
     out.normals = _normals(out.positions, out.faces)
-    return Result(out, before, len(out.faces), collapses, refused_flip, refused_manifold)
+    return Result(
+        out, before, len(out.faces), collapses, refused_flip, refused_manifold, clustered
+    )
 
 
 def resample_uvs(points, source: ObjMesh):

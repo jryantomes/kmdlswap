@@ -80,6 +80,13 @@ def main(argv: list[str] | None = None) -> int:
     hd.add_argument("--fit", action="store_true",
                     help="scale and place the mesh onto the target node, using the "
                          "pack's facing, up, scale and anchor hints")
+    hd.add_argument("--crop", type=float, metavar="FRACTION",
+                    help="drop geometry below this fraction of the mesh's height, "
+                         "for a source that is a bust rather than a head")
+    hd.add_argument("--repair", action="store_true",
+                    help="wind every triangle the same way round and outward. "
+                         "Scans and generated meshes often arrive mixed, which "
+                         "looks fine in a viewer and full of holes in game")
     hd.add_argument("--hide", nargs="*", metavar="NODE", default=None,
                     help="stop drawing these of the host's own nodes. With no "
                          "names, hides every other visible mesh in the head "
@@ -196,12 +203,14 @@ def _import(args) -> int:
     out = _Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
-    mesh = kobj.ObjMesh(name=out.name)
-    mesh.positions = imported.positions
-    mesh.faces = imported.faces
-    mesh.normals = imported.normals
-    mesh.uvs = imported.uvs
-    kobj.write_obj(mesh, out / "head.obj")
+    kobj.write_obj(
+        out / "head.obj",
+        imported.positions,
+        imported.faces,
+        uvs=imported.uvs or None,
+        normals=imported.normals or None,
+        name=out.name,
+    )
 
     texture_name = None
     if imported.image:
@@ -548,6 +557,14 @@ def _head(args) -> int:
         print(f"  [FAIL] mesh: {exc}", file=sys.stderr)
         return 1
 
+    if args.crop:
+        from . import repair as krepair
+
+        axis = 1 if pack.up == "y" else 2
+        mesh, cut = krepair.crop_below(mesh, args.crop, axis=axis)
+        print(f"  cropped: {cut} face(s) below {args.crop:.0%} of the height removed"
+              if cut else "  cropped: nothing was below the cut")
+
     if args.decimate:
         from . import decimate as kdecimate
 
@@ -557,6 +574,13 @@ def _head(args) -> int:
             print(f"  decimated: {result.summary()}")
         else:
             print(f"  decimate: already {result.before} triangles, left alone")
+
+    if args.repair:
+        from . import repair as krepair
+
+        mesh, flipped = krepair.unify_winding(mesh)
+        print(f"  winding: {flipped} face(s) rewound to agree with their neighbours"
+              if flipped else "  winding: already consistent")
 
     verdict = headspec.check_mesh(mesh)
     for line in verdict.lines():

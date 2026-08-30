@@ -199,3 +199,42 @@ def test_welding_merges_split_seams():
     unique, mapping = decimate._weld(m.positions)
     assert len(unique) == 3
     assert mapping[0] == mapping[3]
+
+
+# --- clustering, for very dense input ----------------------------------------
+
+
+def test_a_huge_mesh_is_clustered_before_collapsing():
+    """A scan can arrive with over a million triangles; edge collapse alone
+    would need a million Python-level collapses."""
+    dense = dense_head(rings=120, segments=180)
+    assert len(dense.faces) > decimate.CLUSTER_ABOVE
+
+    result = decimate.simplify(dense, 700)
+    assert result.clustered > 0
+    assert result.after <= 700
+    assert "clustered away" in result.summary()
+
+
+def test_an_ordinary_head_never_touches_clustering():
+    """Clustering ignores curvature, so a mesh small enough for the quadric pass
+    should go straight there."""
+    result = decimate.simplify(dense_head(rings=24, segments=36), 400)
+    assert result.clustered == 0
+
+
+def test_clustering_preserves_seams(seamed_mesh):
+    """The bug this had twice: taking one representative vertex's UV per cell
+    hands back whichever side of a seam came first, and the texture scrambles.
+    A cell straddling a seam must come out as several vertices."""
+    big = kobj.ObjMesh(name="big")
+    for _ in range(6):                     # enough faces to trip the threshold
+        base = len(big.positions)
+        big.positions.extend(seamed_mesh.positions)
+        big.uvs.extend(seamed_mesh.uvs)
+        big.faces.extend((a + base, b + base, c + base) for a, b, c in seamed_mesh.faces)
+
+    clustered = decimate.cluster(big, 300)
+    unique_positions = {tuple(round(c, 6) for c in p) for p in clustered.positions}
+    assert len(clustered.positions) > len(unique_positions), "seams were welded away"
+    assert len(clustered.uvs) == len(clustered.positions)
