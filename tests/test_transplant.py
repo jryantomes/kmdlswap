@@ -40,7 +40,9 @@ def test_transplant_lands_in_the_right_place(carth_head, dustil):
     """Donor geometry is stored in the donor node's frame, so it has to be
     re-expressed in the host's. If that maths is wrong the part flies off."""
     mdl, mdx = carth_head
-    _, _, result = ktp.transplant_node(mdl, mdx, dustil, "n_dustilh", "Head", "Head")
+    _, _, result = ktp.transplant_node(
+        mdl, mdx, dustil, "n_dustilh", "Head", "Head", reshape=True
+    )
     assert result.ok, result.error
     a = result.alignment
     assert a.worst_ratio < 1.2, f"donor is {a.worst_ratio:.2f}x the host part"
@@ -50,9 +52,9 @@ def test_transplant_lands_in_the_right_place(carth_head, dustil):
 def test_transplant_produces_a_valid_model(carth_head, dustil):
     mdl, mdx = carth_head
     new_mdl, new_mdx, result = ktp.transplant_node(
-        mdl, mdx, dustil, "n_dustilh", "Head", "Head"
+        mdl, mdx, dustil, "n_dustilh", "Head", "Head", reshape=True
     )
-    assert result.ok
+    assert result.ok, result.error
     assert kv.check(kl.parse(new_mdl, new_mdx)).ok
 
 
@@ -60,7 +62,7 @@ def test_transplant_leaves_the_hierarchy_and_other_nodes_alone(carth_head, dusti
     mdl, mdx = carth_head
     before = kl.parse(mdl, mdx)
     new_mdl, new_mdx, _ = ktp.transplant_node(
-        mdl, mdx, dustil, "n_dustilh", "Head", "Head"
+        mdl, mdx, dustil, "n_dustilh", "Head", "Head", reshape=True
     )
     after = kl.parse(new_mdl, new_mdx)
 
@@ -78,26 +80,30 @@ def test_transplant_leaves_the_hierarchy_and_other_nodes_alone(carth_head, dusti
         assert ke.extract(after, new).columns == ke.extract(before, old).columns
 
 
-def test_weights_come_from_the_host_not_the_donor(carth_head, dustil):
+def test_weights_come_from_the_host_not_the_donor(pair):
     """The donor's rig never crosses over. Bone slots index the HOST's bonemap,
-    which is what makes a foreign-rigged donor safe."""
+    which is what makes a foreign-rigged donor safe.
+
+    Uses body models, so the real weight-transfer path runs - a head would be
+    refused for changing its vertex count.
+    """
     from kmdlswap import mdx as kmdx
 
-    mdl, mdx = carth_head
+    mdl, mdx = pair("p_bastilaba")
+    donor = kl.parse(*pair("p_bastilabb"))
     before = kl.parse(mdl, mdx)
-    host_node = before.node_by_name("Head")
-    if not host_node.is_skin:
-        pytest.skip("host head is not skinned")
+    host_node = before.node_by_name("torso")
+    assert host_node.is_skin
     host_slots = {
         x.bone_slot for infl in kmdx.influences(before, host_node) for x in infl
     }
 
     new_mdl, new_mdx, result = ktp.transplant_node(
-        mdl, mdx, dustil, "n_dustilh", "Head", "Head"
+        mdl, mdx, donor, "p_bastilabb", "torso", "torso"
     )
-    assert result.ok
+    assert result.ok, result.error
     after = kl.parse(new_mdl, new_mdx)
-    new_node = after.node_by_name("Head")
+    new_node = after.node_by_name("torso")
     new_slots = {x.bone_slot for infl in kmdx.influences(after, new_node) for x in infl}
     assert new_slots <= host_slots, "transplant introduced a bone slot the host does not have"
 
@@ -112,10 +118,11 @@ def test_fit_rescales_a_mismatched_donor(pair):
         pytest.skip("no shared head node with this donor")
 
     _, _, loose = ktp.transplant_node(
-        host_mdl, host_mdx, donor, "n_wookiem", node, pairs[node]
+        host_mdl, host_mdx, donor, "n_wookiem", node, pairs[node], reshape=True
     )
     _, _, fitted = ktp.transplant_node(
-        host_mdl, host_mdx, donor, "n_wookiem", node, pairs[node], fit=True
+        host_mdl, host_mdx, donor, "n_wookiem", node, pairs[node],
+        fit=True, reshape=True,
     )
     assert loose.ok and fitted.ok
     assert fitted.alignment.worst_ratio <= loose.alignment.worst_ratio
