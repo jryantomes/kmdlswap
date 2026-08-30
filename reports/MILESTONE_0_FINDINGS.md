@@ -3,7 +3,7 @@
 **Date:** 2026-08-28
 **Install (corpus + oracle):** `E:\SteamLibrary\steamapps\common\swkotor` (vanilla K1, Steam)
 **PyKotor:** 2.3.12
-**Harness:** [`tools/roundtrip_eval.py`](../tools/roundtrip_eval.py), [`tools/diff_anatomy.py`](../tools/diff_anatomy.py)
+**Harness:** [`tools/legacy/roundtrip_eval.py`](../tools/legacy/roundtrip_eval.py), [`tools/legacy/diff_anatomy.py`](../tools/legacy/diff_anatomy.py)
 
 ## Method
 
