@@ -53,6 +53,8 @@ class App(ttk.Frame):
         self.events: queue.Queue = queue.Queue()
         self.worker: threading.Thread | None = None
         self.models: list[str] = []
+        self.index = None
+        self.donor_labels: dict[str, str] = {}
 
         self._build_paths()
         self._build_tabs()
@@ -155,6 +157,7 @@ class App(ttk.Frame):
         self.host = tk.StringVar()
         self.host_box = ttk.Combobox(page, textvariable=self.host, values=[])
         self.host_box.grid(row=0, column=1, sticky="ew", padx=6)
+        self.host_box.bind("<<ComboboxSelected>>", lambda _e: self._refresh_donors())
 
         ttk.Label(page, text="Donor").grid(row=0, column=2, sticky="w")
         self.donor = tk.StringVar()
@@ -162,11 +165,18 @@ class App(ttk.Frame):
         self.donor_box.grid(row=0, column=3, sticky="ew", padx=6)
 
         ttk.Button(page, text="Scan install", command=self._scan).grid(row=0, column=4)
-        ttk.Label(
+        self.donor_note = ttk.Label(
             page,
             text="The host keeps its hierarchy, skeleton and animations. Only geometry moves.",
-            foreground="#666",
-        ).grid(row=1, column=0, columnspan=5, sticky="w", pady=(6, 0))
+            foreground="#666", wraplength=620,
+        )
+        self.donor_note.grid(row=1, column=0, columnspan=5, sticky="w", pady=(6, 0))
+
+        self.show_all = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            page, text="Show every model, including ones that cannot pair",
+            variable=self.show_all, command=self._refresh_donors,
+        ).grid(row=5, column=0, columnspan=5, sticky="w", pady=(8, 0))
 
         opts = ttk.Frame(page)
         opts.grid(row=2, column=0, columnspan=5, sticky="w", pady=(10, 0))
@@ -260,6 +270,50 @@ class App(ttk.Frame):
             os.startfile(d)  # noqa: S606
         else:
             subprocess.run(["xdg-open", str(d)], check=False)
+
+    def _refresh_donors(self):
+        """Offer only donors that can actually pair with the chosen host."""
+        if self.index is None:
+            return
+        host = self.host.get().strip()
+        if not host or host not in self.index.nodes:
+            self.donor_box.config(values=[])
+            return
+
+        ranked = self.index.donors_for(host, usable_only=not self.show_all.get())
+        self.donor_labels = {c.label(n): n for c, n in ranked}
+        self.donor_box.config(values=list(self.donor_labels))
+
+        usable = [c for c, _ in ranked if c.usable]
+        if not usable and not self.show_all.get():
+            self.donor_note.config(
+                text=(
+                    f"{host} has no compatible donor in the game. Its node names are "
+                    f"its own, so nothing vanilla can be moved into it - custom "
+                    f"geometry is the only route. Tick the box below to see every "
+                    f"model anyway."
+                ),
+                foreground="#a35",
+            )
+        else:
+            good = sum(1 for c, _ in ranked if c.tier == "good")
+            extra = f", {good} sharing its skeleton" if good else ""
+            self.donor_note.config(
+                text=(
+                    f"{len(usable)} donor(s) can pair with {host}{extra}. The number "
+                    f"is how many of the host's parts that donor has; (?) marks a "
+                    f"different skeleton, so the fit is less certain."
+                ),
+                foreground="#666",
+            )
+        if self.donor_labels:
+            self.donor.set(next(iter(self.donor_labels)))
+
+    def _selected_donor(self) -> str:
+        raw = self.donor.get().strip()
+        if raw in self.donor_labels:
+            return self.donor_labels[raw]
+        return raw.split()[0] if raw else ""
 
     def _install(self):
         """Copy the build into Override. The one action that touches the game."""
@@ -365,21 +419,43 @@ class App(ttk.Frame):
         self.worker.start()
 
     def _scan_work(self):
+        """Build the compatibility index.
+
+        A swap only fills nodes the host already has, so the donor list has to be
+        filtered by what actually pairs. Without it a dewback looks as plausible
+        a donor as a human head - it shares one node name, and nothing else.
+        """
         try:
             from pykotor.extract.installation import Installation
             from pykotor.resource.type import ResourceType
 
+            from kmdlswap import layout as kl
+            from kmdlswap import validate as kv
+
+            from . import catalogue as kc
+
             inst = Installation(self.install.get().strip())
-            index: dict[str, set] = {}
+            found: dict[str, dict] = {}
             for r in inst.chitin_resources():
                 if r.restype() in (ResourceType.MDL, ResourceType.MDX):
-                    index.setdefault(r.resname().lower(), set()).add(r.restype())
+                    found.setdefault(r.resname().lower(), {})[r.restype()] = r
             names = sorted(
-                n
-                for n, kinds in index.items()
-                if len(kinds) == 2 and n.startswith(("p_", "n_", "c_"))
+                n for n, k in found.items()
+                if len(k) == 2 and n.startswith(("p_", "n_", "c_"))
             )
-            self.events.put(("models", names))
+
+            index = kc.ModelIndex()
+            for i, name in enumerate(names):
+                if i % 20 == 0:
+                    self.events.put(("progress", (i, len(names), f"reading {name}")))
+                e = found[name]
+                try:
+                    lay = kl.parse(e[ResourceType.MDL].data(), e[ResourceType.MDX].data())
+                    if kv.check(lay).ok:
+                        index.add(kc.describe(lay, name))
+                except Exception:  # noqa: BLE001, S112
+                    continue
+            self.events.put(("index", index))
         except Exception as exc:  # noqa: BLE001
             self.events.put(("error", f"{type(exc).__name__}: {exc}"))
 
@@ -405,11 +481,16 @@ class App(ttk.Frame):
                     self.out_dir.get(), self.intensity.get())
             self.worker = threading.Thread(target=self._effect_work, args=args, daemon=True)
         else:
-            host, donor = self.host.get().strip(), self.donor.get().strip()
+            host, donor = self.host.get().strip(), self._selected_donor()
             if not host or not donor:
                 messagebox.showinfo("kmdlfun", "Pick a host and a donor.")
                 self.build_btn.config(state="normal")
                 return
+            if self.index is not None and host in self.index.nodes:
+                c = self.index.compare(host, donor)
+                if not c.usable:
+                    self._say("\n" + c.why_not(host, donor))
+                    self._say("Building anyway, but expect little to transfer.")
             self._say(f"\n=== {host} <- {donor}{' (preview)' if preview else ''} ===")
             self.worker = threading.Thread(
                 target=self._transplant_work, args=(host, donor, preview), daemon=True
@@ -513,11 +594,12 @@ class App(ttk.Frame):
                     self.progress.config(value=100 * i / max(total, 1))
                     if label != "done":
                         self._say(f"  [{i + 1}/{total}] {label}")
-                elif kind == "models":
-                    self.models = payload
-                    self.host_box.config(values=payload)
-                    self.donor_box.config(values=payload)
-                    self._say(f"found {len(payload)} character models")
+                elif kind == "index":
+                    self.index = payload
+                    self.models = payload.names
+                    self.host_box.config(values=self.models)
+                    self._say(f"indexed {len(self.models)} character models")
+                    self._refresh_donors()
                     self.build_btn.config(state="normal")
                 elif kind == "done_effect":
                     self._finish_effect(payload)

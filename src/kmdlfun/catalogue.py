@@ -179,3 +179,100 @@ def donors_for(family: Family, node_name: str, exclude: str) -> list[ModelEntry]
         if m.name != exclude
         and any(p.node == node_name and p.swappable and p.visible for p in m.parts)
     ]
+
+
+# ---- compatibility ---------------------------------------------------------
+
+# A swap only moves geometry into nodes the host already has, so two models are
+# compatible to the extent their node names agree. Name overlap alone is too
+# weak a test: c_dewback shares exactly one node name with p_carthh - a `head`
+# of an entirely different shape - while a real donor head shares seven or eight.
+# So coverage, model kind and skeleton are all taken into account.
+
+MIN_COVERAGE = 0.5
+
+
+@dataclass(frozen=True)
+class Compatibility:
+    tier: str            # "good" | "possible" | "poor"
+    shared: int
+    coverage: float
+    same_supermodel: bool
+    same_kind: bool
+    host_is_head: bool = False
+    donor_is_head: bool = False
+
+    @property
+    def usable(self) -> bool:
+        return self.tier in ("good", "possible")
+
+    def label(self, donor: str) -> str:
+        return f"{donor}   {self.shared} parts" + ("" if self.tier == "good" else "  (?)")
+
+    def why_not(self, host: str, donor: str) -> str:
+        def kind(is_head: bool) -> str:
+            return "a head model" if is_head else "a body model"
+
+        if not self.same_kind:
+            return (
+                f"{host} is {kind(self.host_is_head)} and {donor} is "
+                f"{kind(self.donor_is_head)}; their parts are not the same parts"
+            )
+        if self.shared == 0:
+            return f"{donor} shares no mesh node names with {host}"
+        return (
+            f"{donor} has only {self.shared} of {host}'s {int(round(self.shared / max(self.coverage, 1e-9)))} "
+            f"parts ({self.coverage:.0%}); they are built differently"
+        )
+
+
+@dataclass
+class ModelIndex:
+    """Just enough about every model to answer compatibility instantly."""
+
+    nodes: dict[str, frozenset] = field(default_factory=dict)
+    head_model: dict[str, bool] = field(default_factory=dict)
+    supermodel: dict[str, str] = field(default_factory=dict)
+
+    def add(self, entry: ModelEntry) -> None:
+        self.nodes[entry.name] = frozenset(
+            p.node.lower() for p in entry.visible_parts if p.swappable
+        )
+        self.head_model[entry.name] = entry.is_head_model
+        self.supermodel[entry.name] = (entry.supermodel or "NULL").lower()
+
+    @property
+    def names(self) -> list[str]:
+        return sorted(self.nodes)
+
+    def compare(self, host: str, donor: str) -> Compatibility:
+        h = self.nodes.get(host, frozenset())
+        d = self.nodes.get(donor, frozenset())
+        shared = len(h & d)
+        coverage = shared / len(h) if h else 0.0
+        same_kind = self.head_model.get(host) == self.head_model.get(donor)
+        same_super = self.supermodel.get(host) == self.supermodel.get(donor)
+        if not same_kind or coverage < MIN_COVERAGE:
+            tier = "poor"
+        elif same_super:
+            tier = "good"
+        else:
+            tier = "possible"
+        return Compatibility(
+            tier, shared, coverage, same_super, same_kind,
+            host_is_head=bool(self.head_model.get(host)),
+            donor_is_head=bool(self.head_model.get(donor)),
+        )
+
+    def donors_for(self, host: str, *, usable_only: bool = True):
+        """Candidate donors, best first."""
+        out = []
+        for donor in self.nodes:
+            if donor == host:
+                continue
+            c = self.compare(host, donor)
+            if usable_only and not c.usable:
+                continue
+            out.append((c, donor))
+        out.sort(key=lambda t: (t[0].tier != "good", -t[0].shared, t[1]))
+        return out
