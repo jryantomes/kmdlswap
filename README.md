@@ -117,6 +117,8 @@ kmdlfun preview --install "<K1 root>" --companion hk47 --effect bighead
 kmdlfun build   --install "<K1 root>" --effect bighead --companion all --out out_fun/
 kmdlfun build   --install "<K1 root>" --effect bighead --companion all --out out/                 --pivot bounds  # the old per-node pivot, kept for comparison
 kmdlfun gui                     # Tkinter desktop app (no extra dependencies)
+kmdlfun render p_hk47 --install "<K1 root>" --highlight head --out shot.png
+kmdlfun render p_hk47 --install "<K1 root>" --compare out/p_hk47.mdl --out before_after.png
 ```
 
 Effects: **bighead**, **smallhead**, **bobblehead**, **chibi**, **bigmitts** —
@@ -151,6 +153,38 @@ a node can scale. That ceiling is real: `chibi` cannot shorten a character,
 because height is where the bones are, and its shrunken limbs still swing about
 joints they are no longer near. Heads and extremities work well; whole-body
 proportions need the rig to scale with the mesh.
+
+### Previewer
+
+The app has a **Preview** tab, and `kmdlfun render` does the same thing from the
+command line. It draws the posed model straight out of MDL/MDX bytes, so
+previewing a build is a check on the output rather than a re-display of the
+input mesh.
+
+It is a software rasteriser in numpy, not Blender. `tools/render_catalogue.py`
+still shells out to Blender and should: for 164 models the several seconds of
+start-up cost amortise away. For one model they do not, and a preview you have
+to wait for is a preview you stop using. A full HK-47 body is 2,467 triangles
+and draws in about 76 ms, which is fast enough to drag with the mouse.
+
+The **comparison** is the part that earns it. A single untextured render tells
+you little — vanilla heads look strange without their texture too. Vanilla drawn
+beside your build, framed by one shared ruler, shows at a glance whether a head
+landed at the right size and in the right place. Its first real use showed the
+decimated Tripo head sitting noticeably smaller than HK-47's own, which had
+previously taken a trip into the game to notice.
+
+Two conventions are pinned by tests because they fail silently by eye. The
+camera sits on -Y looking towards +Y, since KOTOR characters face -Y — invert it
+and every head preview shows the back of the skull and still looks plausible.
+And a before-and-after must share one framing, or a head that changed size looks
+unchanged. There is no backface culling and lighting is two-sided, because the
+head spec tolerates 5% of faces winding against their normals and culling by
+winding would punch holes in meshes we accept.
+
+It draws geometry only: no texture, no animation. So it says nothing about the
+one failure this project knows is real — that a skinned head's vertex count must
+not change. A preview is not proof either.
 
 Findings and measurements:
 [`reports/KMDLFUN_PIVOT_FINDINGS.md`](reports/KMDLFUN_PIVOT_FINDINGS.md).
