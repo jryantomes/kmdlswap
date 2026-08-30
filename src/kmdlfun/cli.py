@@ -61,6 +61,15 @@ def main(argv: list[str] | None = None) -> int:
                          "host vertex lands (implies --reshape)")
     tp.add_argument("--dry-run", action="store_true", help="report matches and fit, write nothing")
 
+    hd = sub.add_parser("head", help="check or install a custom head pack")
+    hd.add_argument("pack", help="folder holding head.obj, and optionally head.tga")
+    hd.add_argument("--install", help="game install, needed to check against a target")
+    hd.add_argument("--host", help="model the head is going into, e.g. p_carthh")
+    hd.add_argument("--node", help="node in that model (default: the pack's target)")
+    hd.add_argument("--out", help="build it here; omit to only check")
+    hd.add_argument("--template", action="store_true",
+                    help="write a head.json template into the folder and stop")
+
     sub.add_parser("gui", help="launch the desktop app")
 
     args = p.parse_args(argv)
@@ -75,6 +84,8 @@ def main(argv: list[str] | None = None) -> int:
             return _build(args)
         if args.cmd == "transplant":
             return _transplant(args)
+        if args.cmd == "head":
+            return _head(args)
         if args.cmd == "gui":
             from .gui import run
 
@@ -274,4 +285,128 @@ def _transplant(args) -> int:
     print(f"{len(done)}/{len(pairs)} node(s) transferred")
     print(f"wrote {out_dir / args.host}.mdl and .mdx")
     print("Copy both into the game's Override directory. Verify in-game.")
+    return 0
+
+
+def _head(args) -> int:
+    """Check a custom head pack, and optionally build it into a model."""
+    from pathlib import Path
+
+    from kmdlswap import obj as kobj
+
+    from . import headpack, headspec
+
+    if args.template:
+        path = headpack.write_template(args.pack)
+        print(f"wrote {path}; fill it in and run again without --template")
+        return 0
+
+    pack = headpack.load(args.pack)
+    print(f"{pack.name}   ({pack.root})")
+    for problem in pack.problems:
+        print(f"  [FAIL] pack: {problem}")
+    if pack.mesh_path is None:
+        return 1
+    print(f"  mesh    {pack.mesh_path.name}")
+    print(f"  texture {pack.texture_path.name if pack.texture_path else '(none - keeps the host texture)'}")
+    print()
+
+    try:
+        mesh = kobj.read_obj(pack.mesh_path)
+    except kobj.ObjError as exc:
+        print(f"  [FAIL] mesh: {exc}", file=sys.stderr)
+        return 1
+
+    verdict = headspec.check_mesh(mesh)
+    for line in verdict.lines():
+        print("  " + line)
+
+    if pack.texture_path:
+        tex = headspec.check_texture(pack.texture_path)
+        for line in tex.lines():
+            print("  " + line)
+        verdict.findings.extend(tex.findings)
+
+    layout = node = None
+    if args.install and args.host:
+        from kmdlswap import layout as kl
+
+        from .library import ModelLibrary
+
+        lib = ModelLibrary(args.install)
+        if not lib.has(args.host):
+            print(f"kmdlfun: no model {args.host!r} in that install", file=sys.stderr)
+            return 1
+        layout = kl.parse(*lib.read(args.host))
+        wanted = args.node or pack.target
+        try:
+            node = layout.node_by_name(wanted)
+        except KeyError as exc:
+            print(f"kmdlfun: {exc}", file=sys.stderr)
+            return 1
+        target = headspec.check_against_target(mesh, layout, node)
+        for line in target.lines():
+            print("  " + line)
+        verdict.findings.extend(target.findings)
+
+    print()
+    if verdict.failures:
+        print(f"REJECTED: {len(verdict.failures)} blocking problem(s), "
+              f"{len(verdict.warnings)} warning(s)")
+        return 1
+    print(f"ACCEPTED with {len(verdict.warnings)} warning(s)")
+
+    if not args.out:
+        return 0
+    if layout is None or node is None:
+        print("kmdlfun: --out needs --install and --host too", file=sys.stderr)
+        return 1
+
+    from kmdlswap import edit as ke
+    from kmdlswap import validate as kv
+    from kmdlswap import layout as kl2
+
+    from . import reshape as kreshape
+    from .apply import is_head_model
+    from .swap import build_replacement
+
+    if node.is_skin and is_head_model(layout):
+        # The vertex count must not change, so the pack is a shape to move the
+        # host's own vertices onto rather than a replacement for them.
+        host_geo = ke.extract(layout, node)
+        moved = kreshape.snap_to_surface(host_geo.positions, mesh.positions, mesh.faces)
+        shaped = kobj.ObjMesh(name=node.name)
+        shaped.positions = moved
+        shaped.faces = [f.vertices for f in host_geo.faces]
+        shaped.materials = [f.material for f in host_geo.faces]
+        if "uv1" in host_geo.columns:
+            shaped.uvs = [tuple(u) for u in host_geo.columns["uv1"]]
+        shaped.normals = kreshape.recompute_vertex_normals(moved, shaped.faces)
+        geo, report = build_replacement(
+            layout, node, shaped, influences=host_geo.influences or None
+        )
+        print("reshaped onto the host's topology (skinned head)")
+    else:
+        geo, report = build_replacement(layout, node, mesh)
+
+    mdl, mdx = ke.replace_geometry(
+        layout, node, geo, texture=pack.texture_resref
+    )
+    if not kv.check(kl2.parse(mdl, mdx)).ok:
+        print("kmdlfun: result failed validation; nothing written", file=sys.stderr)
+        return 1
+
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / f"{args.host}.mdl").write_bytes(mdl)
+    (out / f"{args.host}.mdx").write_bytes(mdx)
+    if pack.texture_path:
+        import shutil
+
+        shutil.copy2(pack.texture_path, out / pack.texture_path.name)
+    for line in report.lines():
+        print("  " + line)
+    print(f"wrote {out / args.host}.mdl, .mdx"
+          + (f" and {pack.texture_path.name}" if pack.texture_path else ""))
+    print("Copy them into Override. A successful build is not proof.")
     return 0
