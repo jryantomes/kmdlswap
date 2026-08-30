@@ -224,6 +224,7 @@ def render(
     size: int = 480,
     bounds: tuple[np.ndarray, float] | None = None,
     zoom: float = 1.0,
+    cull: bool = False,
     supersample: int = 2,
     background: tuple[float, float, float] = BACKGROUND,
 ) -> np.ndarray:
@@ -250,15 +251,34 @@ def render(
     py = dim / 2.0 - view[:, 2] * scale      # screen y grows downwards
     depth = view[:, 1]                        # camera on -Y, so smaller is nearer
 
-    shade = _shading(view, scene.faces)
-    colours = np.clip(scene.face_colour * shade[:, None], 0.0, 1.0)
+    faces = scene.faces
+    face_colour = scene.face_colour
+    face_texture = scene.face_texture
+    if cull:
+        # Draw only what the engine would. Normally this renderer is two-sided,
+        # because our own head spec tolerates 5% of faces winding against their
+        # normals - but that tolerance also makes an inside-out mesh look
+        # perfect here and full of holes in game, which is exactly how one got
+        # there. `cull` is the preview that can see that class of bug.
+        p0 = view[faces[:, 0]]
+        n = np.cross(view[faces[:, 1]] - p0, view[faces[:, 2]] - p0)
+        front = n[:, 1] < 0.0            # camera looks along +Y in view space
+        faces = faces[front]
+        face_colour = face_colour[front]
+        if face_texture is not None:
+            face_texture = face_texture[front]
+        if len(faces) == 0:
+            return _to_uint8(img, size, ss)
+
+    shade = _shading(view, faces)
+    colours = np.clip(face_colour * shade[:, None], 0.0, 1.0)
 
     uv = tex_ids = None
-    if scene.textured and scene.face_texture is not None:
+    if scene.textured and face_texture is not None:
         uv = scene.uvs
-        tex_ids = scene.face_texture.tolist()
+        tex_ids = face_texture.tolist()
 
-    _rasterise(px, py, depth, scene.faces, colours, img, dim,
+    _rasterise(px, py, depth, faces, colours, img, dim,
                uv=uv, tex_ids=tex_ids, textures=scene.textures, shade=shade)
     return _to_uint8(img, size, ss)
 

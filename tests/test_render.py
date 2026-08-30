@@ -299,3 +299,45 @@ def test_the_pose_puts_the_head_above_the_feet(pair):
     head = np.any(scene.face_colour == np.array(render.HIGHLIGHT), axis=1)
     head_z = scene.positions[scene.faces[head].reshape(-1)][:, 2]
     assert head_z.min() > scene.positions[:, 2].min() + 1.0, "head is not above the feet"
+
+
+# --- culling -----------------------------------------------------------------
+
+
+def test_culling_reveals_an_inside_out_mesh(pair):
+    """The preview gap that let a hollow head reach the game.
+
+    Two-sided lighting is right by default - the head spec tolerates 5% of faces
+    winding against their normals - but it also makes an inside-out mesh look
+    perfect. `cull` draws only what the engine draws, so the holes show here
+    instead of in a loading screen.
+    """
+    layout = kl.parse(*pair("p_carthh"))
+    upright = render.from_layout(layout)
+
+    inverted = render.from_layout(layout)
+    inverted.faces = inverted.faces[:, ::-1].copy()
+
+    def diff(a, b):
+        return float(np.abs(a.astype(int) - b.astype(int)).mean())
+
+    kw = dict(size=140, supersample=1)
+    blind = diff(render.render(upright, **kw), render.render(inverted, **kw))
+    seeing = diff(
+        render.render(upright, cull=True, **kw),
+        render.render(inverted, cull=True, **kw),
+    )
+
+    # Two-sided shading uses |n.l| and the depth buffer ignores winding, so the
+    # two renders are the same picture: the inversion is invisible.
+    assert blind == 0.0, f"two-sided rendering should not see winding at all, got {blind}"
+    assert seeing > 5.0, f"culling must expose the inversion, got {seeing}"
+
+
+def test_culling_barely_changes_a_correct_closed_mesh(pair):
+    """On a properly wound model the back faces were hidden anyway, so the
+    silhouette should be about the same."""
+    scene = render.from_layout(kl.parse(*pair("p_carthh")))
+    plain = coverage(render.render(scene, size=140, supersample=1))
+    culled = coverage(render.render(scene, size=140, supersample=1, cull=True))
+    assert culled == pytest.approx(plain, abs=0.03)
