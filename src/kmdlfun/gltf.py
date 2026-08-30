@@ -38,6 +38,10 @@ COMPONENT = {
     5123: ("H", 2), 5125: ("I", 4), 5126: ("f", 4),
 }
 COUNTS = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4, "MAT4": 16}
+NUMPY_TYPE = {
+    5120: np.int8, 5121: np.uint8, 5122: np.int16,
+    5123: np.uint16, 5125: np.uint32, 5126: np.float32,
+}
 TRIANGLES = 4
 
 
@@ -99,11 +103,24 @@ def _accessor(doc, blob: bytes, index: int) -> np.ndarray:
         )
     start = view.get("byteOffset", 0) + acc.get("byteOffset", 0)
     stride = view.get("byteStride") or size * per
+    dtype = NUMPY_TYPE[acc["componentType"]]
 
-    out = np.empty((count, per), dtype=np.float64)
-    for i in range(count):
-        at = start + i * stride
-        out[i] = struct.unpack_from("<" + fmt * per, blob, at)
+    # Vectorised: a scan can carry a million vertices, and a Python loop over
+    # them turns a two-second import into a two-minute one.
+    if stride == size * per:
+        out = np.frombuffer(blob, dtype=dtype, count=count * per, offset=start)
+        out = out.reshape(count, per).astype(np.float64)
+    else:
+        row = size * per
+        want = (start + np.arange(count) * stride)[:, None] + np.arange(row)[None, :]
+        raw = np.frombuffer(blob, dtype=np.uint8)[want]
+        out = np.ascontiguousarray(raw).view(dtype).reshape(count, per).astype(np.float64)
+
+    if acc.get("normalized") and acc["componentType"] != 5126:
+        # Integer attributes can be stored normalised; UVs and colours often are.
+        limit = float(np.iinfo(dtype).max if dtype(0).dtype.kind == "u"
+                      else np.iinfo(dtype).max)
+        out = out / limit
     return out
 
 
