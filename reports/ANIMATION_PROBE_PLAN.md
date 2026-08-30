@@ -323,3 +323,27 @@ unskinned meshes the same way the bug does.
 2. **P1d** — the sentinel.
 3. **P1b** — declared count versus buffer size.
 4. **P1a** — removal instead of addition.
+
+## Probe C re-run — 2026-08-30, confirmed
+
+Rebuilt probe C installed to Override and tested on Carth in conversation:
+**animation broke again.**
+
+This matters more than a repeat usually would, because the file it broke on is
+the one P0b proved is internally perfect. Two possibilities die here:
+
+- **Not a stale field.** Every byte outside the edited node is identical to
+  vanilla or a pointer that shifted by exactly the right amount, and all three
+  size fields updated. There is nothing left in the file to be stale.
+- **Not a phantom.** The failure is real and reproducible, so the original
+  finding stands rather than dissolving on closer measurement.
+
+That leaves the engine doing something with the count that no field in the file
+expresses, and makes the sentinel probe (P1d) the most interesting thing left:
+it is the only structure found so far that divides skinned from unskinned
+meshes on the same axis as the failure.
+
+**Still outstanding from the protocol:** whether the head continues to *turn*
+as a unit. "Animations broke" does not separate "facial bones inert while
+skinning works" from "skinning switched off entirely", and those point in
+opposite directions.
