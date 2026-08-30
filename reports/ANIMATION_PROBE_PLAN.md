@@ -392,3 +392,19 @@ skin setup is sensitive to — from two sides:
    block grows by three rows while `vertex_count` stays at 565 and the MDL does
    not change length at all. Tells us whether the setup keys off the declared
    count or off the buffer geometry.
+
+## P1d, the sentinel — **negative**
+
+Skinned `Head` sentinel rewritten from `1,000,000` to the unskinned
+`10,000,000`, nothing else touched. In game: head turns, all animation normal.
+
+**The sentinel is inert.** The engine does not read it. The perfect
+skinned/unskinned split across 7,290 blocks is a compiler artefact - MDLOps or
+whatever built these models chose the value by mesh type, and nothing consumes
+it. A tidy correlation that meant nothing, which is worth recording precisely
+because it looked so promising.
+
+It did earn something unplanned: **a positive control.** A file written by our
+splice, installed to Override, loads and animates correctly. So probe C's
+failure is not "this tool emits broken models" - the pipeline is sound and the
+failure is specific to what probe C changes.
