@@ -347,3 +347,48 @@ meshes on the same axis as the failure.
 as a unit. "Animations broke" does not separate "facial bones inert while
 skinning works" from "skinning switched off entirely", and those point in
 opposite directions.
+
+## The head is RIGID — skinning is being switched off
+
+Probe C re-observed with the protocol: **Carth's head does not turn.** It is
+rigid, not merely frozen-faced.
+
+This is the most informative single observation the investigation has produced,
+because it changes what is failing. The engine is not losing the facial bone
+animation while continuing to skin the mesh. It is **refusing the mesh as a skin
+mesh at all** and falling back to rigid bind pose. Something validates the skin
+data at load and rejects it.
+
+### It follows that the failure is model-wide, not per-mesh
+
+Probe E grew `tongue` — a skinned mesh the facial bones do not deform — and
+facial animation broke. If a rejected mesh only lost *its own* skinning, the
+`Head` mesh would have been untouched and Carth's face would still have moved.
+It did not. So editing any skinned mesh's count takes down skinning for the
+whole model, which points at a **model-level skin setup that fails wholesale**
+rather than a per-mesh check.
+
+That reframes the target again: look for something the engine builds once, for
+the model, out of all the skinned meshes together.
+
+### What this rules in and out
+
+- **Not the facial bones, not the supermodel, not lipsync.** Head models carry
+  no animation of their own (`p_carthh`'s supermodel is `S_Female02`, which has
+  62 meshes and no skinned ones at all), and none of that machinery is involved
+  in deciding whether to skin a mesh.
+- **Consistent with every earlier probe.** Unskinned `hair` was safe because it
+  never enters the skin setup at all.
+
+### Revised probe order
+
+Both remaining Tier 1 probes now test the same question — what the model-level
+skin setup is sensitive to — from two sides:
+
+1. **P1d, the sentinel** (built, `out_probe/test2_sentinel/`). Twelve bytes, no
+   size change, no count change. The spare MDX row is the only structure known
+   to be chosen *per mesh type*, so it is plausibly part of skin setup.
+2. **P1b, buffer versus count** (built, `out_probe/test3_buffer/`). The MDX
+   block grows by three rows while `vertex_count` stays at 565 and the MDL does
+   not change length at all. Tells us whether the setup keys off the declared
+   count or off the buffer geometry.
