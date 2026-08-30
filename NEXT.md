@@ -32,8 +32,6 @@ so it can smudge where the two head shapes differ most.
 
 ### b) The mechanism probe
 
-### The probe itself
-
 `out_probe2/E_tongue_skinned/p_carthh.mdl` + `.mdx` are built and waiting.
 
 This grows `tongue` — which is **skinned**, like `Head`, but sits at MDX block 24
