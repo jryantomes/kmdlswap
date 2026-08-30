@@ -115,25 +115,45 @@ kmdlfun effects                 # list effects
 kmdlfun companions              # list companions and their models
 kmdlfun preview --install "<K1 root>" --companion hk47 --effect bighead
 kmdlfun build   --install "<K1 root>" --effect bighead --companion all --out out_fun/
+kmdlfun build   --install "<K1 root>" --effect bighead --companion all --out out/                 --pivot bounds  # the old per-node pivot, kept for comparison
 kmdlfun gui                     # Tkinter desktop app (no extra dependencies)
 ```
 
 Effects: **bighead**, **smallhead**, **bobblehead**, **chibi**, **bigmitts** —
-each a per-node uniform scale, with an adjustable intensity.
+each a uniform scale of a part, with an adjustable intensity.
 
-Two things the models forced:
+Four things the models forced:
 
 - **Human companions keep their head in a separate model** (`p_carthh`), which
   holds hair, teeth, eyes, brows and tongue as *separate nodes*. Scaling only
   the node called `head` would leave the hair and eyes at original size, so a
   head model scales entirely, minus the neck that joins the body. Their body
   models carry a small `head_g` stub that is deliberately left alone.
+- **A part must grow about one point, not one point per node.** Scaling each
+  node about its own centre pins every centre where it was, so a ten-node head
+  comes apart as it grows: the face skin swallows the eyeballs and the skullcap
+  sinks into the skull. Parts now scale about the joint they hang from, read
+  from the skeleton (`head_g`), and every distance inside the head scales with
+  it. In-game this was "the eyes seem non-existent" and "her headband has gone
+  see-through"; measured, it was 11.8% of the eyeball showing through the socket
+  in vanilla and **0%** after the effect.
+- **Most meshes in a model are not drawn.** Byte 313 of the trimesh subheader is
+  a render flag, and 18,058 of the 76,767 vanilla mesh nodes have it clear — a
+  human body draws exactly three meshes (`torso`, `LArm`, `RArm`) and carries
+  forty-odd invisible `_g` boxes that are the skeleton. Effects target visible
+  meshes only, so `bigmitts` on a human now says *nothing matches* instead of
+  reporting 42 changed nodes and looking identical.
 - **Node names are not unique** — T3-M4 has two nodes called `FootL` — so
   everything addresses nodes by index, never by name.
 
-Node *positions* live in headers kmdlswap never touches, so only geometry
-inside a node can scale. Heads and extremities work well; `chibi` shrinks torso
-and limbs and can show gaps at joints, which the tool says up front.
+Node *positions* live in headers kmdlswap never touches, so only geometry inside
+a node can scale. That ceiling is real: `chibi` cannot shorten a character,
+because height is where the bones are, and its shrunken limbs still swing about
+joints they are no longer near. Heads and extremities work well; whole-body
+proportions need the rig to scale with the mesh.
+
+Findings and measurements:
+[`reports/KMDLFUN_PIVOT_FINDINGS.md`](reports/KMDLFUN_PIVOT_FINDINGS.md).
 
 ### Skinning census
 

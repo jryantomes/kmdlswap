@@ -55,6 +55,15 @@ class Rewriter:
     def set_u16(self, loc: int, value: int) -> None:
         self._patches[loc] = (_U16, value)
 
+    def set_bytes(self, loc: int, data: bytes) -> None:
+        """Patch raw bytes at an ORIGINAL-file position, size-preserving.
+
+        For fixed header fields that are not pointers and not counts - the
+        per-mesh bounding box, radius and average point - which have to follow
+        the geometry when it moves.
+        """
+        self._patches[loc] = (struct.Struct(f"<{len(data)}s"), data)
+
     # ---- machinery --------------------------------------------------------
 
     @staticmethod

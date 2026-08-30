@@ -121,6 +121,12 @@ Scoped to head models deliberately: body meshes are unaffected — HK-47's
     one. The preset says so, and the build now matches the caution.
   - `chibi` is the one expected to look wrong: shrinking a body cannot shorten
     the character, because height is in the bones.
+- ~~**Auto decimation.**~~ **DONE.** `kmdlfun head --decimate [N]` reduces an
+  over-budget mesh instead of rejecting it (quadric error edge collapse, default
+  budget 690). Density was the only rejection the tool could fix on its own, so
+  it now does. The real Tripo head goes 3312 -> 690 and comes out ACCEPTED with
+  zero warnings; without the flag it is rejected, and the message names the
+  flag. Design notes in `docs/CUSTOM_HEAD_SPEC.md`.
 - **A foreign mesh into a *skinned* node.** Still the largest untested path.
   HK-47's head is unskinned, so weight transfer from genuinely authored geometry
   is proven only by the synthetic box probe. Needs a mesh.
