@@ -144,6 +144,121 @@ def transfer(
     return out
 
 
+def claim_orphan_bones(
+    source_positions: Sequence[tuple[float, ...]],
+    source_influences: Sequence[Sequence[Influence]],
+    target_positions: Sequence[tuple[float, ...]],
+    transferred: list[list[Influence]],
+    *,
+    max_influences: int = MAX_INFLUENCES,
+    min_weight: float = MIN_WEIGHT,
+    core: float = 0.5,
+) -> dict[int, int]:
+    """Give every source bone somewhere to act, in place.
+
+    Transfer samples the source surface at the *target's* vertices, so a bone
+    whose region is small - or which sits where the two shapes disagree - can
+    end up with no sample at all and quietly stop driving anything. In game that
+    reads as "that part of the face doesn't move", with nothing anywhere saying
+    so: measured on a generated head fitted to Carth, 4 of his 16 bones went
+    silent, all three brows among them, and it was only found by watching for it.
+
+    For each orphaned bone this finds the source vertices it actually dominates,
+    maps them to their nearest target vertices, and reinstates the bone there at
+    **the weight it held in the source**. Copying the original share rather than
+    nudging in a fixed amount keeps the region deforming roughly as it did, and
+    keeps the fix proportional: a bone that barely mattered gets barely anything.
+
+    Returns ``{bone_slot: vertices claimed}`` for the bones it had to rescue, so
+    a caller can report the rescue rather than hide it.
+    """
+    present = {i.bone_slot for infl in transferred for i in infl}
+    wanted: dict[int, list[tuple[int, float]]] = {}
+    for idx, infl in enumerate(source_influences):
+        for i in infl:
+            if i.bone_slot not in present and i.weight > 0.0:
+                wanted.setdefault(i.bone_slot, []).append((idx, i.weight))
+    if not wanted:
+        return {}
+
+    src = np.asarray([p[:3] for p in source_positions], dtype=np.float64)
+    tgt = np.asarray([p[:3] for p in target_positions], dtype=np.float64)
+    claimed: dict[int, int] = {}
+
+    for slot, entries in sorted(wanted.items()):
+        # The bone's core: where it genuinely dominates, not every vertex it
+        # brushes. A wide net would drag the bone across half the face.
+        strongest = max(w for _, w in entries)
+        core_entries = [(i, w) for i, w in entries if w >= core * strongest]
+
+        for source_index, weight in core_entries:
+            d = tgt - src[source_index]
+            nearest = int(np.argmin(np.einsum("ij,ij->i", d, d)))
+            before = transferred[nearest]
+            pool = {i.bone_slot: i.weight for i in before}
+            if pool.get(slot, 0.0) >= weight:
+                continue
+
+            # Make room for the bone at exactly the share it held, by scaling
+            # what is already there down to the remainder. Adding it alongside
+            # and renormalising afterwards would dilute it to something smaller
+            # than the host had, which is not what "the weight it held" means.
+            share = min(weight, 0.9)
+            existing = sum(pool.values())
+            if existing > 0.0:
+                pool = {k: v / existing * (1.0 - share) for k, v in pool.items()}
+            pool[slot] = share
+
+            def survives_elsewhere(dropped: set[int]) -> bool:
+                """Would dropping these leave a bone with nowhere to act?
+
+                Every claim scales the weights already on a vertex down by
+                ``1 - share``, so a bone sitting on a popular vertex is ground
+                smaller with each rescue and can eventually be truncated away.
+                That is how an early version of this traded one silent bone for
+                another: it rescued four and quietly evicted a fifth.
+                """
+                if not dropped:
+                    return True
+                others = {
+                    i.bone_slot
+                    for j, infl in enumerate(transferred)
+                    if j != nearest
+                    for i in infl
+                }
+                return dropped <= others
+
+            candidate = _finalise(pool, max_influences, min_weight)
+            if not survives_elsewhere(set(pool) - {i.bone_slot for i in candidate} - {slot}):
+                continue
+            if not any(i.bone_slot == slot for i in candidate):
+                # It ranked below the four strongest and was truncated away. On
+                # a crowded vertex that can happen everywhere the bone might go,
+                # so make room by evicting the weakest influence - but never one
+                # that lives nowhere else, or the rescue orphans somebody new.
+                others = sorted(
+                    ((k, v) for k, v in pool.items() if k != slot),
+                    key=lambda kv: (-kv[1], kv[0]),
+                )
+                keep, evicted = others[: max_influences - 1], others[max_influences - 1 :]
+                if not survives_elsewhere({k for k, _ in evicted}):
+                    continue
+                kept_total = sum(v for _, v in keep)
+                pool = (
+                    {k: v / kept_total * (1.0 - share) for k, v in keep}
+                    if kept_total > 0.0
+                    else {}
+                )
+                pool[slot] = share
+                candidate = _finalise(pool, max_influences, min_weight)
+                if not any(i.bone_slot == slot for i in candidate):
+                    continue
+
+            transferred[nearest] = candidate
+            claimed[slot] = claimed.get(slot, 0) + 1
+    return claimed
+
+
 def _finalise(
     pool: dict[int, float], max_influences: int, min_weight: float = MIN_WEIGHT
 ) -> list[Influence]:
