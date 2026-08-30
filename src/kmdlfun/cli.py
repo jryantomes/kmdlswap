@@ -89,6 +89,13 @@ def main(argv: list[str] | None = None) -> int:
     hd.add_argument("--template", action="store_true",
                     help="write a head.json template into the folder and stop")
 
+    im = sub.add_parser("import", help="turn a .glb into a head pack folder")
+    im.add_argument("file", help="the .glb to read")
+    im.add_argument("--out", required=True, help="pack folder to create")
+    im.add_argument("--name", help="display name for the pack")
+    im.add_argument("--texture-size", type=int, default=512,
+                    help="resize the embedded texture to this, 0 to leave it")
+
     rn = sub.add_parser("render", help="draw a model to a PNG, without the game")
     rn.add_argument("model", help="a model name in the install, or a path to a .mdl")
     rn.add_argument("--install")
@@ -125,6 +132,8 @@ def main(argv: list[str] | None = None) -> int:
             return _transplant(args)
         if args.cmd == "head":
             return _head(args)
+        if args.cmd == "import":
+            return _import(args)
         if args.cmd == "render":
             return _render(args)
         if args.cmd == "gui":
@@ -154,6 +163,86 @@ def _load_layout(name: str, install: str | None):
     from .library import ModelLibrary
 
     return kl.parse(*ModelLibrary(install).read(name))
+
+
+def _import(args) -> int:
+    """Read a .glb and write a head pack beside it."""
+    from pathlib import Path as _Path
+
+    from kmdlswap import obj as kobj
+
+    from . import gltf, headpack
+
+    source = _Path(args.file)
+    if not source.is_file():
+        print(f"kmdlfun: no such file {source}", file=sys.stderr)
+        return 1
+    try:
+        imported = gltf.read_glb(source)
+    except gltf.GltfError as exc:
+        print(f"kmdlfun: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"{source.name}")
+    print(f"  vertices  {len(imported.positions)}")
+    print(f"  triangles {len(imported.faces)}")
+    print(f"  normals   {'yes' if imported.normals else 'no (will be computed)'}")
+    print(f"  uvs       {'yes' if imported.uvs else 'NO - the head will be untextured'}")
+    print(f"  texture   {imported.image_mime or 'none embedded'}"
+          + (f", {len(imported.image)} bytes" if imported.image else ""))
+    for note in imported.notes:
+        print(f"  note: {note}")
+
+    out = _Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+
+    mesh = kobj.ObjMesh(name=out.name)
+    mesh.positions = imported.positions
+    mesh.faces = imported.faces
+    mesh.normals = imported.normals
+    mesh.uvs = imported.uvs
+    kobj.write_obj(mesh, out / "head.obj")
+
+    texture_name = None
+    if imported.image:
+        try:
+            from PIL import Image
+        except ImportError:
+            print("  texture: Pillow is not installed, so it was not converted",
+                  file=sys.stderr)
+        else:
+            import io
+
+            with Image.open(io.BytesIO(imported.image)) as img:
+                img = img.convert("RGB")
+                if args.texture_size:
+                    n = args.texture_size
+                    if img.size != (n, n):
+                        print(f"  texture: {img.size[0]}x{img.size[1]} -> {n}x{n}")
+                        img = img.resize((n, n), Image.LANCZOS)
+                # The resref is the filename, and it has to fit a 16-character
+                # field, so keep it short and predictable.
+                texture_name = out.name.lower()[:14] + "01"
+                img.save(out / f"{texture_name}.tga")
+
+    headpack.write_template(out, name=args.name or out.name)
+    manifest = out / headpack.MANIFEST_NAME
+    import json
+
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    # glTF is Y-up with -Z forward; after the Y-up conversion that lands on +Y,
+    # which is where KOTOR characters look.
+    data["up"] = "y"
+    data["facing"] = "+y"
+    data["notes"] = f"imported from {source.name}"
+    manifest.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+    print(f"\nwrote {out}/head.obj"
+          + (f", {texture_name}.tga" if texture_name else "")
+          + f" and {headpack.MANIFEST_NAME}")
+    print("Check it with:  kmdlfun head " + str(out)
+          + " --install \"<K1 root>\" --host p_carthh --node Head --decimate --fit")
+    return 0
 
 
 def _render(args) -> int:

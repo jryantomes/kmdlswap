@@ -278,10 +278,17 @@ def build_pack(
 
 # Rotation about Z that brings a mesh's stated facing round to -Y, which is
 # where a KOTOR head node looks in its own space.
-FACING_TO_DEGREES = {"-y": 0.0, "+y": 180.0, "+x": -90.0, "-x": 90.0}
+# Which way a mesh must turn about Z to face the game's forward.
+#
+# KOTOR characters face +Y (reports/FACING_FINDINGS.md). This table used to make
+# "-y" the identity, which quietly asserted the opposite: a pack that correctly
+# declared "+y" was spun 180 degrees to face backwards. Default is now "+y",
+# which is still a zero rotation, so a mesh already authored facing the camera
+# behaves exactly as before - only the labels now mean what they say.
+FACING_TO_DEGREES = {"+y": 0.0, "-y": 180.0, "+x": 90.0, "-x": -90.0}
 
 
-def orient(positions, facing: str = "-y", up: str = "z"):
+def orient(positions, facing: str = "+y", up: str = "z"):
     """Rotate a mesh from its own convention into the node's.
 
     `up` handles the other common mismatch: many tools export Y-up, where KOTOR

@@ -308,7 +308,17 @@ def test_orient_brings_a_y_up_mesh_upright():
 
     # A point that is "up" in a Y-up export.
     assert headgen.orient([(0.0, 1.0, 0.0)], up="y")[0] == pytest.approx((0.0, 0.0, 1.0))
-    # Facing rotations bring the stated front round to -Y.
+    # Facing rotations bring the stated front round to +Y, which is where KOTOR
+    # characters look (reports/FACING_FINDINGS.md). This asserted -Y until the
+    # facing error was found, so a pack that correctly said "+x" was turned to
+    # face backwards.
     assert headgen.orient([(1.0, 0.0, 0.0)], facing="+x")[0] == pytest.approx(
-        (0.0, -1.0, 0.0), abs=1e-9
+        (0.0, 1.0, 0.0), abs=1e-9
+    )
+    assert headgen.orient([(0.0, -1.0, 0.0)], facing="-y")[0] == pytest.approx(
+        (0.0, 1.0, 0.0), abs=1e-9
+    )
+    # A mesh already facing the game's forward is left alone.
+    assert headgen.orient([(0.0, 1.0, 0.0)], facing="+y")[0] == pytest.approx(
+        (0.0, 1.0, 0.0), abs=1e-9
     )
