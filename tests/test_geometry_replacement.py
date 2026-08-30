@@ -268,3 +268,21 @@ def test_rebuilt_adjacency_mostly_matches_vanilla(hk47):
         total += len(geo.faces)
         matched += sum(1 for f, a in zip(geo.faces, adj) if f.adjacent == a)
     assert matched / total > 0.95
+
+
+def test_capping_discards_only_the_weakest_influences(hk47):
+    """A cap keeps the strongest influences and renormalises what remains."""
+    node = hk47.node_by_name("TorsoHoses")
+    geo = ke.extract(hk47, node)
+    full = kw.transfer(
+        geo.positions, [f.vertices for f in geo.faces], geo.influences, geo.positions
+    )
+    capped = kw.transfer(
+        geo.positions, [f.vertices for f in geo.faces], geo.influences, geo.positions,
+        max_influences=1,
+    )
+    for a, b in zip(full, capped):
+        assert len(b) == 1
+        assert b[0].weight == pytest.approx(1.0)
+        # The surviving bone is the one that was strongest before capping.
+        assert b[0].bone_slot == max(a, key=lambda x: x.weight).bone_slot

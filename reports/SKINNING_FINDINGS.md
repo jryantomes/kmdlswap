@@ -31,10 +31,54 @@ capped at 4 gives up nothing vanilla uses.
 Examples by ceiling — 1: `c_embmcube:ChamferBox01`, 2: `ad_saul:tongue`,
 3: `3dgui:torso`, 4: `3dgui:BackCape`.
 
-> The brief's Milestone 3 experiment (build variants capped at 1/2/4/8 and test
-> in-game) is still worth running for the 8 case specifically: it would show
-> whether the engine reads a wider stride at all. The 1/2/4 arms are now
-> predictable from vanilla evidence.
+> The brief's Milestone 3 experiment is worked through in the next section. The
+> 8 case turns out not to be reachable at all: the stride holds exactly four
+> (weight, bone) pairs.
+
+## 1b. The influence-cap experiment
+
+The brief asks for variants capped at 1, 2, 4 and 8 influences, tested in-game,
+and calls the finding publishable regardless of whether the tool ships. Measured
+over all 386,120 skinned vertices (`tools/influence_cap_experiment.py`):
+
+| Cap | Vertices affected | Weight discarded (mean) | median | p95 | max |
+|----:|------------------:|------------------------:|-------:|----:|----:|
+| 1 | 189,777 (**49.2%**) | 34.8% | 36.3% | 60.0% | 75.0% |
+| 2 | 38,048 (9.9%) | 19.5% | 22.0% | 33.3% | 50.0% |
+| 3 | 2,881 (**0.75%**) | 12.9% | 13.3% | 25.0% | 25.0% |
+| 4 | 0 | - | - | - | - |
+
+"Weight discarded" is the share of a vertex's total weight held by the
+influences a cap removes, before renormalisation. It bounds the **data** loss
+exactly. It does not predict the **visual** error, which also depends on how far
+apart the dropped bone and its replacements travel during an animation - only
+in-game testing settles that.
+
+**The 8 arm is not reachable.** The MDX vertex stride holds exactly four
+(weight, bone) pairs. A fifth influence cannot be expressed without widening the
+stride, which changes the vertex format rather than the geometry, and is outside
+what this tool does. Reporting that is more useful than inventing a result.
+
+### What this predicts
+
+The striking number is that capping at 1 discards **34.8% of weight on average**,
+with a median of 36%. Vanilla skinning is not "one dominant bone plus a token
+neighbour" - roughly half of all skinned vertices are genuine blends, often near
+65/35. So:
+
+- **Cap 3 should be visually indistinguishable** from vanilla: it touches 0.75%
+  of vertices, and those keep ~87% of their weight.
+- **Cap 2 should be subtle but present**, concentrated at joints.
+- **Cap 1 should visibly crease or snap at joints**, because half of all
+  vertices lose a third of their weighting.
+
+That is a prediction made before the in-game test, not a description of it.
+Worst case throughout is `c_bantha:btBody_front`, where a 4-way even split loses
+75% of its weight at cap 1.
+
+Test variants are built by `kmdlswap replace --max-influences N`; the meshes used
+were `p_hk47:TorsoHoses` (2 influences max) and `p_bastilabb:torso`, the only
+companion mesh found using all four slots.
 
 ## 2. Weights are always normalised
 
