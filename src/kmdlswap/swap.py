@@ -79,9 +79,30 @@ def _face_normals(positions, faces):
     return out
 
 
-def _plane_coefficient(positions, face, normal) -> float:
-    p = positions[face[0]]
-    return -(normal[0] * p[0] + normal[1] * p[1] + normal[2] * p[2])
+def _face_plane(positions, face):
+    """The triangle's own plane: the normalised edge cross product, and the
+    plane constant d in ``n . x + d = 0``.
+
+    This is NOT the average of the three vertex normals. Vertex normals are
+    smoothed for shading and generally do not agree with the plane the triangle
+    actually lies in; averaging them writes a shading value into a geometry
+    field. Measured against 744 vanilla faces of `p_carthh:Head`, the edge cross
+    product reproduces the stored normal and plane to 1.2e-7, while the averaged
+    vertex normal differs on every single face.
+    """
+    p0, p1, p2 = (positions[i] for i in face)
+    u = [p1[i] - p0[i] for i in range(3)]
+    v = [p2[i] - p0[i] for i in range(3)]
+    n = (
+        u[1] * v[2] - u[2] * v[1],
+        u[2] * v[0] - u[0] * v[2],
+        u[0] * v[1] - u[1] * v[0],
+    )
+    length = (n[0] ** 2 + n[1] ** 2 + n[2] ** 2) ** 0.5
+    if length <= 1e-12:  # a degenerate triangle has no plane; keep it harmless
+        return (0.0, 0.0, 1.0), -p0[2]
+    n = tuple(c / length for c in n)
+    return n, -(n[0] * p0[0] + n[1] * p0[1] + n[2] * p0[2])
 
 
 def build_replacement(
@@ -91,6 +112,7 @@ def build_replacement(
     *,
     max_influences: int = weights.MAX_INFLUENCES,
     material: int | None = None,
+    influences: list[list[kmdx.Influence]] | None = None,
 ) -> tuple[MeshGeometry, SwapReport]:
     """Build a MeshGeometry replacing ``node``'s geometry with ``mesh``."""
     original = extract(layout, node)
@@ -136,43 +158,58 @@ def build_replacement(
     normals = columns.get("normal") or _face_normals(mesh.positions, mesh.faces)
     adjacency = topology.build_adjacency(mesh.faces, mesh.positions)
 
+    # Vanilla varies `material` face to face - it reads as a smoothing group -
+    # so flattening a mesh to one value is a real loss. Use the donor's own
+    # values when there are any, then an explicit override, then the value the
+    # replaced mesh used.
     default_material = material
     if default_material is None:
         default_material = original.faces[0].material if original.faces else 1
+    per_face = mesh.materials if len(mesh.materials) == len(mesh.faces) else None
 
     faces = []
     for i, tri in enumerate(mesh.faces):
-        n = normals[tri[0]]
-        fn = (
-            (n[0] + normals[tri[1]][0] + normals[tri[2]][0]) / 3.0,
-            (n[1] + normals[tri[1]][1] + normals[tri[2]][1]) / 3.0,
-            (n[2] + normals[tri[1]][2] + normals[tri[2]][2]) / 3.0,
-        )
-        length = (fn[0] ** 2 + fn[1] ** 2 + fn[2] ** 2) ** 0.5
-        if length > 1e-12:
-            fn = (fn[0] / length, fn[1] / length, fn[2] / length)
+        fn, plane = _face_plane(mesh.positions, tri)
         faces.append(
             Face(
                 normal=fn,
-                plane=_plane_coefficient(mesh.positions, tri, fn),
-                material=default_material,
+                plane=plane,
+                material=per_face[i] if per_face is not None else default_material,
                 adjacent=adjacency[i],
                 vertices=tuple(tri),
             )
         )
 
-    influences: list[list[kmdx.Influence]] = []
-    if node.is_skin:
+    influences_out: list[list[kmdx.Influence]] = []
+    if node.is_skin and influences is not None:
+        # Topology is unchanged, so every vertex keeps its own weights verbatim.
+        # Re-deriving them by nearest point would resample a surface that has
+        # moved, and can silently drop a bone that no longer gets sampled.
+        if len(influences) != mesh.vertex_count:
+            raise ValueError(
+                f"{node.name!r}: {len(influences)} influence lists for "
+                f"{mesh.vertex_count} vertices"
+            )
+        influences_out = influences
+        hist: dict[int, int] = {}
+        used = set()
+        for infl in influences_out:
+            hist[len(infl)] = hist.get(len(infl), 0) + 1
+            used.update(x.bone_slot for x in infl)
+        report.max_influences = max(hist) if hist else 0
+        report.influence_histogram = dict(sorted(hist.items()))
+        report.bones_used = len(used)
+    elif node.is_skin:
         if not original.influences:
             raise ValueError(f"{node.name!r} is skinned but has no source weights to transfer")
-        influences = weights.transfer(
+        influences_out = weights.transfer(
             original.positions,
             [f.vertices for f in original.faces],
             original.influences,
             mesh.positions,
             max_influences=max_influences,
         )
-        problems = weights.check(influences)
+        problems = weights.check(influences_out)
         if problems:
             raise ValueError(
                 f"{node.name!r}: weight transfer produced {len(problems)} bad vertices; "
@@ -180,7 +217,7 @@ def build_replacement(
             )
         hist: dict[int, int] = {}
         used = set()
-        for infl in influences:
+        for infl in influences_out:
             hist[len(infl)] = hist.get(len(infl), 0) + 1
             used.update(x.bone_slot for x in infl)
         report.max_influences = max(hist) if hist else 0
@@ -190,7 +227,7 @@ def build_replacement(
     geo = MeshGeometry(
         vertex_count=mesh.vertex_count,
         columns=columns,
-        influences=influences,
+        influences=influences_out,
         faces=faces,
         trailing=original.trailing,
     )

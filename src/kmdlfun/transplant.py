@@ -33,6 +33,7 @@ from kmdlswap.obj import ObjMesh
 from kmdlswap.swap import AUTHORABLE, SwapReport, build_replacement
 
 from . import parts as kparts
+from . import reshape as kreshape
 from . import space
 
 
@@ -89,6 +90,7 @@ class TransplantResult:
     alignment: Alignment | None = None
     swap: SwapReport | None = None
     error: str | None = None
+    reshaped: bool = False
     warnings: list[str] = field(default_factory=list)
 
     @property
@@ -151,6 +153,7 @@ def to_host_space(
     mesh = ObjMesh(name=donor_node.name)
     mesh.positions = [tuple(v) for v in moved]
     mesh.faces = [f.vertices for f in donor_geo.faces]
+    mesh.materials = [f.material for f in donor_geo.faces]
     if "uv1" in donor_geo.columns:
         mesh.uvs = [tuple(t) for t in donor_geo.columns["uv1"]]
     if "normal" in donor_geo.columns:
@@ -201,8 +204,15 @@ def transplant_node(
     *,
     fit: bool = False,
     max_influences: int = 4,
+    reshape: bool = False,
 ) -> tuple[bytes, bytes, TransplantResult]:
-    """Replace one host node's geometry with a donor node's."""
+    """Replace one host node's geometry with a donor node's.
+
+    With ``reshape=True`` the host's own vertices, faces and weights are kept and
+    only *moved* onto the donor's surface. That leaves the vertex count alone,
+    which is required for a skinned head: changing it breaks facial animation
+    in-game (see reports/HEAD_ANIMATION_FINDINGS.md).
+    """
     host_layout = kl.parse(host_mdl, host_mdx)
     result = TransplantResult(
         host_node=host_node_name, donor_model=donor_name, donor_node=donor_node_name
@@ -225,8 +235,30 @@ def transplant_node(
         )
         result.alignment = alignment
         result.warnings.extend(alignment.notes())
+
+        host_influences = None
+        if reshape:
+            host_geo = ke.extract(host_layout, host_node)
+            host_influences = host_geo.influences or None
+            moved = kreshape.snap_to_surface(
+                host_geo.positions, mesh.positions, mesh.faces
+            )
+            donor_mesh = mesh
+            mesh = ObjMesh(name=host_node.name)
+            mesh.positions = moved
+            mesh.faces = [f.vertices for f in host_geo.faces]
+            mesh.materials = [f.material for f in host_geo.faces]
+            if "uv1" in host_geo.columns:
+                mesh.uvs = [tuple(t) for t in host_geo.columns["uv1"]]
+            mesh.normals = kreshape.recompute_vertex_normals(moved, mesh.faces)
+            result.reshaped = True
+            result.warnings.append(
+                f"reshaped onto the donor: kept the host's {len(moved)} vertices and "
+                f"its UVs, rather than taking the donor's {len(donor_mesh.positions)}"
+            )
         geo, swap_report = build_replacement(
-            host_layout, host_node, mesh, max_influences=max_influences
+            host_layout, host_node, mesh, max_influences=max_influences,
+            influences=host_influences,
         )
         result.swap = swap_report
         result.warnings.extend(swap_report.warnings)

@@ -33,6 +33,10 @@ class ObjMesh:
     uvs: list[tuple[float, float]] = field(default_factory=list)
     normals: list[tuple[float, float, float]] = field(default_factory=list)
     faces: list[tuple[int, int, int]] = field(default_factory=list)
+    # Optional per-face material values. An OBJ cannot express them, but a
+    # transplant from another model can carry the donor's across, and vanilla
+    # meshes vary them face to face.
+    materials: list[int] = field(default_factory=list)
 
     @property
     def vertex_count(self) -> int:
