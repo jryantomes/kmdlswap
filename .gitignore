@@ -15,3 +15,6 @@ dist/
 /out_probe/
 /out_m3/
 /out_fbx/
+/reports/support_matrix.json
+/reports/catalogue.json
+/catalogue/
