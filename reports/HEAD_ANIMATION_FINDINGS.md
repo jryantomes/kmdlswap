@@ -91,6 +91,28 @@ silently dropped a bone (16 slots became 15), because a bone's region no longer
 got sampled. Topology is unchanged in a reshape, so vertex *i* simply keeps its
 own weights.
 
+## Textures ride along safely
+
+A texture reference is a fixed 32-byte field in the trimesh header at `+88`, so
+changing it is a patch in place - no splice, no offsets to fix. All meshes in a
+head model share one texture, so it is one decision per model.
+
+The mapping was the real question. A reshaped head has the *host's* topology, so
+its UVs belong to the host's texture; using the donor's texture needs the
+donor's mapping. `snap_to_surface` already computes barycentric coordinates
+where each host vertex lands on the donor surface, so those interpolate the
+donor's UV at that point.
+
+**Verified in-game (2026-08-29):** `p_carthh` reshaped onto `n_dustilh` with
+`--with-texture`. The face has Dustil's shape and Dustil's texture, the skin
+reads continuous into the neck with no UV scrambling, and facial animation is
+intact. Vertex count, faces and per-vertex weights stay byte-identical to
+vanilla and both file sizes are unchanged - the configuration the engine
+requires.
+
+So a head swap can change shape *and* colouring while keeping animation, as long
+as the vertex count is left alone.
+
 ## Still unknown
 
 Why the count matters. Nothing in the file that this project can identify depends
