@@ -67,6 +67,10 @@ def main(argv: list[str] | None = None) -> int:
     hd.add_argument("--host", help="model the head is going into, e.g. p_carthh")
     hd.add_argument("--node", help="node in that model (default: the pack's target)")
     hd.add_argument("--out", help="build it here; omit to only check")
+    hd.add_argument("--decimate", nargs="?", type=int, const=690, default=None,
+                    metavar="TRIANGLES",
+                    help="reduce the mesh to a triangle budget before anything else "
+                         "(default 690, vanilla's median head)")
     hd.add_argument("--fit", action="store_true",
                     help="scale and place the mesh onto the target node, using the "
                          "pack's facing, up, scale and anchor hints")
@@ -320,6 +324,16 @@ def _head(args) -> int:
         print(f"  [FAIL] mesh: {exc}", file=sys.stderr)
         return 1
 
+    if args.decimate:
+        from . import decimate as kdecimate
+
+        result = kdecimate.simplify(mesh, args.decimate)
+        if result.after < result.before:
+            mesh = result.mesh
+            print(f"  decimated: {result.summary()}")
+        else:
+            print(f"  decimate: already {result.before} triangles, left alone")
+
     verdict = headspec.check_mesh(mesh)
     for line in verdict.lines():
         print("  " + line)
@@ -364,6 +378,9 @@ def _head(args) -> int:
     if verdict.failures:
         print(f"REJECTED: {len(verdict.failures)} blocking problem(s), "
               f"{len(verdict.warnings)} warning(s)")
+        if not args.decimate and any(f.check == "density" for f in verdict.failures):
+            print("Too dense is the one failure the tool can fix itself: "
+                  "add --decimate")
         return 1
     print(f"ACCEPTED with {len(verdict.warnings)} warning(s)")
 

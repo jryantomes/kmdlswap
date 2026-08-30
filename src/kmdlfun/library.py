@@ -66,7 +66,7 @@ def build(
     out_dir: str | Path,
     *,
     intensity: float = 1.0,
-    pivot: str = "bounds",
+    pivot: str = "joint",
     progress=None,
 ) -> BuildReport:
     """Apply one effect to every model of the chosen companions."""

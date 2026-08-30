@@ -56,10 +56,39 @@ different things, and the user should be told which.
 |---|---|---|---|---|
 | Connected pieces | ≤ 2 | 3–4 | > 4 | median 1, worst 2 |
 | Open (boundary) edges | ≤ 6.2% | ≤ 15% | > 15% | median 1.8%, worst 6.2% |
-| Triangles | 440–796 | < 440, or ≤ 1500 | > 1500 | median 690 |
+| Triangles | 440–796 | < 440, or ≤ 1500 | > 1500 | median 690 *(fixable, see below)* |
 | Winding vs normals | ≤ 5% disagree | > 5% | — | — |
 | Texture coordinates | present | absent | — | — |
 | Degenerate faces | none | any | — | — |
+
+### Too dense is the one failure the tool can fix itself
+
+Every other rejection here means the mesh is wrong and someone has to go and fix
+it. Density does not: a mesh can be structurally perfect and merely have far too
+many triangles, which is the normal state of anything coming out of a generator
+or a scan. So `--decimate` reduces it instead of refusing it.
+
+It uses quadric error edge collapse, chosen specifically for what it *cannot* do
+rather than for its output quality: an edge collapse cannot disconnect a mesh,
+and on a closed surface it cannot open one. A mesh that passed `one piece` and
+`closed` before still passes after, at any reduction ratio -- which a simplifier
+that dropped triangles could not promise. Two collapses are refused outright:
+one that would flip a face (the pinched dark creases of bad auto-reduction), and
+one that would make the mesh non-manifold, by the standard link condition.
+
+UVs are deliberately *not* carried through the collapses, because a UV inherited
+from whichever vertex happened to survive is arbitrary. They are resampled at
+the end from the original surface by the same closest-point machinery a reshape
+uses, so the mapping stays tied to the shape.
+
+Measured, on the real Tripo head at full resolution:
+
+    3312 -> 690 triangles in 1305 collapses
+    (83 refused for face flips, 9 for non-manifold)
+    after: 1 component, 0.0% open edges, 0 degenerate -- ACCEPTED
+
+The default budget is 690, vanilla's median head. `--decimate N` sets another.
+A mesh already under budget is left untouched rather than resampled.
 
 Those first two rules exist because of a real failure. The first Tripo head this
 project produced had **6 components and 22% open edges**, and in-game it read as
@@ -163,6 +192,9 @@ the path and to catch regressions along it, not to be worn.
   `scale` and `anchor` hints exist because the tool cannot infer them reliably.
 - **Adjacency is rebuilt at 96.3% fidelity**, not exactly. No visible
   consequence has been observed, but it is not proven harmless.
+- **Decimation preserves topology, not appearance.** It guarantees the mesh
+  stays one closed piece and that no face flips; it does not guarantee a face
+  still reads as that face at 690 triangles. Detail below the budget is gone.
 - **No check for self-intersection or inverted volume.** A mesh can pass every
   rule here and still be inside-out in a way only rendering reveals.
 - **A successful build is not proof.** In-game verification remains the only
