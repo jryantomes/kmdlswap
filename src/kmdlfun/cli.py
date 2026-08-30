@@ -205,6 +205,18 @@ def _transplant(args) -> int:
 
     print(f"{args.host}  <-  {args.donor}   ({len(pairs)} node(s))")
     print()
+
+    # Nodes the donor does not have keep the host's geometry AND the host's
+    # texture, so they end up shaped for the old head and coloured from the old
+    # texture. Carth's hair on Dustil's skull is exactly this. Say so before the
+    # model is written, not after it has been loaded.
+    taken = {h for h, _ in pairs}
+    left = [n.name for n in ktp.kparts.mesh_nodes(host_layout) if n.name not in taken]
+    if left:
+        print(f"  left as {args.host}'s own: {', '.join(left)}")
+        print(f"  ({args.donor} has no node of that name. These keep their original")
+        print("   shape and texture, so they may not sit right on the new head.)")
+        print()
     results = []
     for host_node, donor_node in pairs:
         mdl2, mdx2, r = ktp.transplant_node(
