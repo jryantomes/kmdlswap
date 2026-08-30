@@ -1,11 +1,16 @@
 """Tkinter desktop app for kmdlfun.
 
-Tkinter ships with Python, so the app adds no dependency. It drives exactly the
-same library the CLI does - nothing here reimplements the geometry work.
+Tkinter ships with Python, so the app adds no dependency. It drives the same
+library the CLI does - nothing here reimplements the geometry work.
 
-The build runs on a worker thread so the window stays responsive; Tk is not
-thread-safe, so the worker only posts messages to a queue that the UI drains on
-a timer.
+Two tabs, because there are two genuinely different jobs: applying an effect to
+whole companions, and moving one model's parts into another. They share the
+folder settings, the log and the build button, since those are the same in both
+cases.
+
+Work runs on a worker thread so the window stays responsive; Tk is not
+thread-safe, so the worker only posts messages to a queue the UI drains on a
+timer.
 """
 
 from __future__ import annotations
@@ -43,21 +48,21 @@ class App(ttk.Frame):
         master.columnconfigure(0, weight=1)
         master.rowconfigure(0, weight=1)
         self.columnconfigure(0, weight=1)
-        self.rowconfigure(3, weight=1)
+        self.rowconfigure(2, weight=1)
 
         self.events: queue.Queue = queue.Queue()
         self.worker: threading.Thread | None = None
+        self.models: list[str] = []
 
         self._build_paths()
-        self._build_effect()
-        self._build_companions()
+        self._build_tabs()
         self._build_log()
         self._build_actions()
 
         self.after(100, self._drain)
         self._on_effect_change()
 
-    # ---- sections ---------------------------------------------------------
+    # ---- shared ------------------------------------------------------------
 
     def _build_paths(self):
         box = ttk.LabelFrame(self, text="Folders", padding=8)
@@ -83,13 +88,21 @@ class App(ttk.Frame):
             foreground="#666",
         ).grid(row=2, column=0, columnspan=3, sticky="w", pady=(6, 0))
 
-    def _build_effect(self):
-        box = ttk.LabelFrame(self, text="Effect", padding=8)
-        box.grid(row=1, column=0, sticky="ew", pady=(0, 8))
-        box.columnconfigure(1, weight=1)
+    def _build_tabs(self):
+        self.tabs = ttk.Notebook(self)
+        self.tabs.grid(row=1, column=0, sticky="ew", pady=(0, 8))
+        self._build_effect_tab()
+        self._build_transplant_tab()
+
+    # ---- effects tab -------------------------------------------------------
+
+    def _build_effect_tab(self):
+        page = ttk.Frame(self.tabs, padding=8)
+        self.tabs.add(page, text="Effects")
+        page.columnconfigure(1, weight=1)
 
         self.effect = tk.StringVar(value=keffects.EFFECTS[0].key)
-        row = ttk.Frame(box)
+        row = ttk.Frame(page)
         row.grid(row=0, column=0, columnspan=3, sticky="w")
         for e in keffects.EFFECTS:
             ttk.Radiobutton(
@@ -97,26 +110,24 @@ class App(ttk.Frame):
                 command=self._on_effect_change,
             ).pack(side="left", padx=(0, 10))
 
-        self.effect_desc = ttk.Label(box, text="", wraplength=560, foreground="#333")
+        self.effect_desc = ttk.Label(page, text="", wraplength=560, foreground="#333")
         self.effect_desc.grid(row=1, column=0, columnspan=3, sticky="w", pady=(6, 0))
-        self.effect_caution = ttk.Label(box, text="", wraplength=560, foreground="#a35")
+        self.effect_caution = ttk.Label(page, text="", wraplength=560, foreground="#a35")
         self.effect_caution.grid(row=2, column=0, columnspan=3, sticky="w")
 
-        ttk.Label(box, text="Intensity").grid(row=3, column=0, sticky="w", pady=(8, 0))
+        ttk.Label(page, text="Intensity").grid(row=3, column=0, sticky="w", pady=(8, 0))
         self.intensity = tk.DoubleVar(value=1.0)
         ttk.Scale(
-            box, from_=0.1, to=2.0, variable=self.intensity, orient="horizontal",
+            page, from_=0.1, to=2.0, variable=self.intensity, orient="horizontal",
             command=lambda _=None: self._on_effect_change(),
         ).grid(row=3, column=1, sticky="ew", padx=6, pady=(8, 0))
-        self.intensity_label = ttk.Label(box, text="1.00x", width=8)
+        self.intensity_label = ttk.Label(page, text="1.00x", width=8)
         self.intensity_label.grid(row=3, column=2, sticky="w", pady=(8, 0))
 
-    def _build_companions(self):
-        box = ttk.LabelFrame(self, text="Companions", padding=8)
-        box.grid(row=2, column=0, sticky="ew", pady=(0, 8))
-
+        who = ttk.LabelFrame(page, text="Companions", padding=6)
+        who.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(10, 0))
         self.selected: dict[str, tk.BooleanVar] = {}
-        grid = ttk.Frame(box)
+        grid = ttk.Frame(who)
         grid.pack(fill="x")
         for i, c in enumerate(roster.COMPANIONS):
             var = tk.BooleanVar(value=True)
@@ -124,19 +135,79 @@ class App(ttk.Frame):
             ttk.Checkbutton(grid, text=c.name, variable=var).grid(
                 row=i // 3, column=i % 3, sticky="w", padx=(0, 16)
             )
-        btns = ttk.Frame(box)
+        btns = ttk.Frame(who)
         btns.pack(fill="x", pady=(6, 0))
         ttk.Button(btns, text="All", command=lambda: self._set_all(True)).pack(side="left")
         ttk.Button(btns, text="None", command=lambda: self._set_all(False)).pack(
             side="left", padx=6
         )
 
+    # ---- transplant tab ----------------------------------------------------
+
+    def _build_transplant_tab(self):
+        page = ttk.Frame(self.tabs, padding=8)
+        self.tabs.add(page, text="Transplant")
+        page.columnconfigure(1, weight=1)
+        page.columnconfigure(3, weight=1)
+
+        ttk.Label(page, text="Host").grid(row=0, column=0, sticky="w")
+        self.host = tk.StringVar()
+        self.host_box = ttk.Combobox(page, textvariable=self.host, values=[])
+        self.host_box.grid(row=0, column=1, sticky="ew", padx=6)
+
+        ttk.Label(page, text="Donor").grid(row=0, column=2, sticky="w")
+        self.donor = tk.StringVar()
+        self.donor_box = ttk.Combobox(page, textvariable=self.donor, values=[])
+        self.donor_box.grid(row=0, column=3, sticky="ew", padx=6)
+
+        ttk.Button(page, text="Scan install", command=self._scan).grid(row=0, column=4)
+        ttk.Label(
+            page,
+            text="The host keeps its hierarchy, skeleton and animations. Only geometry moves.",
+            foreground="#666",
+        ).grid(row=1, column=0, columnspan=5, sticky="w", pady=(6, 0))
+
+        opts = ttk.Frame(page)
+        opts.grid(row=2, column=0, columnspan=5, sticky="w", pady=(10, 0))
+        self.opt_reshape = tk.BooleanVar(value=True)
+        self.opt_texture = tk.BooleanVar(value=True)
+        self.opt_hide = tk.BooleanVar(value=True)
+        self.opt_fit = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            opts, text="Reshape (required for heads)", variable=self.opt_reshape
+        ).grid(row=0, column=0, sticky="w", padx=(0, 14))
+        ttk.Checkbutton(
+            opts, text="Take donor's texture", variable=self.opt_texture
+        ).grid(row=0, column=1, sticky="w", padx=(0, 14))
+        ttk.Checkbutton(
+            opts, text="Hide parts the donor lacks", variable=self.opt_hide
+        ).grid(row=1, column=0, sticky="w", padx=(0, 14), pady=(4, 0))
+        ttk.Checkbutton(
+            opts, text="Fit donor to host's size", variable=self.opt_fit
+        ).grid(row=1, column=1, sticky="w", pady=(4, 0))
+
+        ttk.Label(
+            page,
+            text=(
+                "A skinned mesh in a head model must keep its vertex count, or the "
+                "mouth and eyebrows stop moving in-game. Reshape keeps it."
+            ),
+            wraplength=620,
+            foreground="#a35",
+        ).grid(row=3, column=0, columnspan=5, sticky="w", pady=(8, 0))
+
+        ttk.Button(page, text="Preview", command=lambda: self._start(preview=True)).grid(
+            row=4, column=0, sticky="w", pady=(10, 0)
+        )
+
+    # ---- shared bottom -----------------------------------------------------
+
     def _build_log(self):
         box = ttk.LabelFrame(self, text="Log", padding=8)
-        box.grid(row=3, column=0, sticky="nsew")
+        box.grid(row=2, column=0, sticky="nsew")
         box.columnconfigure(0, weight=1)
         box.rowconfigure(0, weight=1)
-        self.log = tk.Text(box, height=12, wrap="word", state="disabled")
+        self.log = tk.Text(box, height=14, wrap="word", state="disabled")
         self.log.grid(row=0, column=0, sticky="nsew")
         bar = ttk.Scrollbar(box, command=self.log.yview)
         bar.grid(row=0, column=1, sticky="ns")
@@ -144,7 +215,7 @@ class App(ttk.Frame):
 
     def _build_actions(self):
         row = ttk.Frame(self)
-        row.grid(row=4, column=0, sticky="ew", pady=(8, 0))
+        row.grid(row=3, column=0, sticky="ew", pady=(8, 0))
         row.columnconfigure(0, weight=1)
         self.progress = ttk.Progressbar(row, mode="determinate")
         self.progress.grid(row=0, column=0, sticky="ew", padx=(0, 8))
@@ -154,7 +225,7 @@ class App(ttk.Frame):
             row=0, column=2, padx=(6, 0)
         )
 
-    # ---- behaviour --------------------------------------------------------
+    # ---- behaviour ---------------------------------------------------------
 
     def _set_all(self, value: bool):
         for var in self.selected.values():
@@ -197,43 +268,162 @@ class App(ttk.Frame):
         self.log.see("end")
         self.log.configure(state="disabled")
 
-    def _start(self):
-        if self.worker and self.worker.is_alive():
-            return
-        install = self.install.get().strip()
-        if not (Path(install) / "chitin.key").is_file():
+    def _check_install(self) -> bool:
+        if not (Path(self.install.get().strip()) / "chitin.key").is_file():
             messagebox.showerror(
                 "kmdlfun",
-                "That folder does not look like a KOTOR install "
-                "(no chitin.key inside it).",
+                "That folder does not look like a KOTOR install (no chitin.key inside it).",
             )
-            return
-        keys = [k for k, v in self.selected.items() if v.get()]
-        if not keys:
-            messagebox.showinfo("kmdlfun", "Pick at least one companion.")
-            return
+            return False
+        return True
 
+    def _scan(self):
+        if not self._check_install() or (self.worker and self.worker.is_alive()):
+            return
+        self._say("\nscanning install for character models ...")
         self.build_btn.config(state="disabled")
-        self.progress.config(value=0, maximum=100)
-        effect = keffects.resolve(self.effect.get())
-        self._say(f"\n=== {effect.label} @ {self.intensity.get():.2f}x ===")
-
-        args = (install, self.effect.get(), keys, self.out_dir.get(), self.intensity.get())
-        self.worker = threading.Thread(target=self._work, args=args, daemon=True)
+        self.worker = threading.Thread(target=self._scan_work, daemon=True)
         self.worker.start()
 
-    def _work(self, install, effect_key, keys, out_dir, intensity):
+    def _scan_work(self):
+        try:
+            from pykotor.extract.installation import Installation
+            from pykotor.resource.type import ResourceType
+
+            inst = Installation(self.install.get().strip())
+            index: dict[str, set] = {}
+            for r in inst.chitin_resources():
+                if r.restype() in (ResourceType.MDL, ResourceType.MDX):
+                    index.setdefault(r.resname().lower(), set()).add(r.restype())
+            names = sorted(
+                n
+                for n, kinds in index.items()
+                if len(kinds) == 2 and n.startswith(("p_", "n_", "c_"))
+            )
+            self.events.put(("models", names))
+        except Exception as exc:  # noqa: BLE001
+            self.events.put(("error", f"{type(exc).__name__}: {exc}"))
+
+    def _start(self, preview: bool = False):
+        if self.worker and self.worker.is_alive():
+            return
+        if not self._check_install():
+            return
+
+        tab = self.tabs.tab(self.tabs.select(), "text")
+        self.build_btn.config(state="disabled")
+        self.progress.config(value=0, maximum=100)
+
+        if tab == "Effects":
+            keys = [k for k, v in self.selected.items() if v.get()]
+            if not keys:
+                messagebox.showinfo("kmdlfun", "Pick at least one companion.")
+                self.build_btn.config(state="normal")
+                return
+            effect = keffects.resolve(self.effect.get())
+            self._say(f"\n=== {effect.label} @ {self.intensity.get():.2f}x ===")
+            args = (self.install.get().strip(), self.effect.get(), keys,
+                    self.out_dir.get(), self.intensity.get())
+            self.worker = threading.Thread(target=self._effect_work, args=args, daemon=True)
+        else:
+            host, donor = self.host.get().strip(), self.donor.get().strip()
+            if not host or not donor:
+                messagebox.showinfo("kmdlfun", "Pick a host and a donor.")
+                self.build_btn.config(state="normal")
+                return
+            self._say(f"\n=== {host} <- {donor}{' (preview)' if preview else ''} ===")
+            self.worker = threading.Thread(
+                target=self._transplant_work, args=(host, donor, preview), daemon=True
+            )
+        self.worker.start()
+
+    def _effect_work(self, install, effect_key, keys, out_dir, intensity):
         def progress(i, total, label):
             self.events.put(("progress", (i, total, label)))
 
         try:
-            report = build(
-                install, effect_key, keys, out_dir,
-                intensity=intensity, progress=progress,
-            )
-            self.events.put(("done", report))
+            report = build(install, effect_key, keys, out_dir,
+                           intensity=intensity, progress=progress)
+            self.events.put(("done_effect", report))
         except Exception as exc:  # noqa: BLE001
-            self.events.put(("error", f"{type(exc).__name__}: {exc}\n{traceback.format_exc(limit=3)}"))
+            self.events.put(("error", f"{type(exc).__name__}: {exc}\n"
+                                      f"{traceback.format_exc(limit=3)}"))
+
+    def _transplant_work(self, host, donor, preview):
+        try:
+            from kmdlswap import layout as kl
+            from kmdlswap import validate as kv
+
+            from . import parts as kparts
+            from . import transplant as ktp
+            from . import visibility as kvis
+            from .library import ModelLibrary
+
+            lib = ModelLibrary(self.install.get().strip())
+            for name in (host, donor):
+                if not lib.has(name):
+                    self.events.put(("error", f"no model named {name!r} in that install"))
+                    return
+
+            mdl, mdx = lib.read(host)
+            donor_layout = kl.parse(*lib.read(donor))
+            host_layout = kl.parse(mdl, mdx)
+            pairs = ktp.match_nodes(host_layout, donor_layout)
+            if not pairs:
+                self.events.put(("error",
+                                 f"{host} and {donor} share no mesh node names, "
+                                 f"so there is nothing to move between them"))
+                return
+
+            lines = [f"{len(pairs)} matching node(s)"]
+            taken = {h for h, _ in pairs}
+            left = [n.name for n in kparts.mesh_nodes(host_layout) if n.name not in taken]
+            if left:
+                lines.append(f"donor has no: {', '.join(left)}"
+                             + ("  (will hide)" if self.opt_hide.get() else ""))
+
+            reshape = self.opt_reshape.get() or self.opt_texture.get()
+            ok = 0
+            for i, (host_node, donor_node) in enumerate(pairs):
+                self.events.put(("progress", (i, len(pairs), f"{host_node} <- {donor_node}")))
+                new_mdl, new_mdx, r = ktp.transplant_node(
+                    mdl, mdx, donor_layout, donor, host_node, donor_node,
+                    fit=self.opt_fit.get(), reshape=reshape,
+                    with_texture=self.opt_texture.get(),
+                )
+                if not r.ok:
+                    lines.append(f"  {host_node}: REFUSED {r.error}")
+                    continue
+                ok += 1
+                a = r.alignment
+                lines.append(f"  {host_node} <- {donor_node}   fit {a.worst_ratio:.2f}x"
+                             f"   drift {a.drift:.3f}")
+                if not preview:
+                    mdl, mdx = new_mdl, new_mdx
+
+            if preview:
+                lines.append(f"preview only: {ok}/{len(pairs)} would transfer")
+                self.events.put(("done_text", lines))
+                return
+
+            if self.opt_hide.get() and left:
+                mdl, hidden = kvis.hide_nodes(kl.parse(mdl, mdx), mdl, left)
+                lines.append(f"hid {len(hidden)}: {', '.join(hidden)}")
+
+            if not kv.check(kl.parse(mdl, mdx)).ok:
+                self.events.put(("error", "result failed validation; nothing written"))
+                return
+
+            out = Path(self.out_dir.get())
+            out.mkdir(parents=True, exist_ok=True)
+            (out / f"{host}.mdl").write_bytes(mdl)
+            (out / f"{host}.mdx").write_bytes(mdx)
+            lines.append(f"wrote {out / host}.mdl and .mdx")
+            lines.append("Copy both into Override. A successful build is not proof.")
+            self.events.put(("done_text", lines))
+        except Exception as exc:  # noqa: BLE001
+            self.events.put(("error", f"{type(exc).__name__}: {exc}\n"
+                                      f"{traceback.format_exc(limit=3)}"))
 
     def _drain(self):
         try:
@@ -244,8 +434,19 @@ class App(ttk.Frame):
                     self.progress.config(value=100 * i / max(total, 1))
                     if label != "done":
                         self._say(f"  [{i + 1}/{total}] {label}")
-                elif kind == "done":
-                    self._finish(payload)
+                elif kind == "models":
+                    self.models = payload
+                    self.host_box.config(values=payload)
+                    self.donor_box.config(values=payload)
+                    self._say(f"found {len(payload)} character models")
+                    self.build_btn.config(state="normal")
+                elif kind == "done_effect":
+                    self._finish_effect(payload)
+                elif kind == "done_text":
+                    for line in payload:
+                        self._say(line)
+                    self.progress.config(value=100)
+                    self.build_btn.config(state="normal")
                 elif kind == "error":
                     self._say("ERROR: " + payload)
                     self.build_btn.config(state="normal")
@@ -253,7 +454,7 @@ class App(ttk.Frame):
             pass
         self.after(100, self._drain)
 
-    def _finish(self, report):
+    def _finish_effect(self, report):
         self.progress.config(value=100)
         self.build_btn.config(state="normal")
         self._say(f"\nWrote {report.written} model(s), {report.total_nodes} node(s) changed.")
@@ -271,8 +472,8 @@ class App(ttk.Frame):
 
 def run() -> int:
     root = tk.Tk()
-    root.title("kmdlfun - KOTOR companion effects")
-    root.geometry("640x720")
+    root.title("kmdlfun - KOTOR model tools")
+    root.geometry("720x820")
     try:
         ttk.Style().theme_use("vista")
     except tk.TclError:

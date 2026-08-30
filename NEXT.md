@@ -103,21 +103,32 @@ Scoped to head models deliberately: body meshes are unaffected — HK-47's
 
 ## 4. Open work, roughly in order of value
 
-- **Expose `transplant` in the GUI.** It is CLI-only. The parts-bin artifact
-  (https://claude.ai/code/artifact/cdc78304-bbe2-4fc4-a7e5-fae58f0bcf28) shows
-  what is swappable; the GUI should let you pick host + donor + parts and build.
-- **Verify the five `kmdlfun` effects in-game.** Only `bighead` on HK-47 has ever
-  been checked. `chibi` is expected to show joint gaps and says so, but nobody
-  has looked. Note the pivot rework in `space.py` landed after the last builds in
-  `out_fun/`, so rebuild before testing.
-- **A foreign mesh into a *skinned* node.** Still the largest untested path:
+- ~~**Expose `transplant` in the GUI.**~~ **DONE.** The app is now two tabs -
+  Effects and Transplant - sharing the folder settings, log and build button.
+  The Transplant tab has host/donor pickers populated by *Scan install*, the
+  four options (reshape, donor texture, hide unmatched, fit), and a **Preview**
+  that reports matches, fit ratios and what the donor lacks without writing
+  anything. Its worker logic is exercised headlessly as well, so the path is not
+  only tested by clicking it.
+- **Verify the five effects in-game.** All five are rebuilt in `out_fun/` with
+  the current pivot code and validate. Only `bighead` on HK-47 has ever been
+  seen in-game. Two things to know before testing:
+  - Node counts are much lower than the old builds (`bighead` 66 rather than
+    170) because effects now target *visible* meshes only. That is the render
+    flag working, not a regression.
+  - `bigmitts` writes only 2 models. A human body draws its hands as part of the
+    torso and arm meshes, so there is no hand node to scale - only droids have
+    one. The preset says so, and the build now matches the caution.
+  - `chibi` is the one expected to look wrong: shrinking a body cannot shorten
+    the character, because height is in the bones.
+- **A foreign mesh into a *skinned* node.** Still the largest untested path.
   HK-47's head is unskinned, so weight transfer from genuinely authored geometry
-  is proven only by the synthetic box probe.
-- **Repo hygiene.** `out_fun/` binaries were committed by an early `git add -A`
-  of mine — 80+ model files that should be gitignored like `out_m3/` and
-  `out_fbx/`. Needs `git rm --cached` plus a `.gitignore` line.
-- **Retire `tools/roundtrip_eval.py` and `tools/diff_anatomy.py`.** They existed
-  only to evaluate PyKotor and inform nothing now.
+  is proven only by the synthetic box probe. Needs a mesh.
+- ~~**Repo hygiene.**~~ **DONE.** `out_fun/`, `out_caps/`, `out_tripo/` and
+  `out_probe2/` are untracked and ignored; zero binaries are tracked now.
+- ~~**Retire the PyKotor harnesses.**~~ **DONE.** Moved to `tools/legacy/` rather
+  than deleted - they are the evidence behind the decision to write our own
+  reader, and that is worth keeping re-runnable.
 
 ## 5. Housekeeping
 
