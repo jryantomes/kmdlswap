@@ -16,31 +16,12 @@ The last session found and bounded a real engine constraint:
 `kmdlfun transplant --reshape` works within that and is verified in-game.
 Full write-up: `reports/HEAD_ANIMATION_FINDINGS.md`.
 
-## 1. One test still to run (~5 minutes)
+## 1. Tests: all run
 
-### a) ~~Textures~~ — DONE, verified in-game
-
-Carth reshaped onto Dustil's head with Dustil's texture: shape, colouring and
-facial animation all correct, skin continuous into the neck, no UV smearing.
-**The texture half of a character creator is solved.**
-
-### b) The mechanism probe — still to run
-
-`out_probe2/E_tongue_skinned/p_carthh.mdl` + `.mdx` are built and waiting.
-
-This grows `tongue` — which is **skinned**, like `Head`, but sits at MDX block 24
-of 26 rather than last — by 3 unreferenced vertices. `Head` itself is untouched
-and byte-identical.
-
-Copy both into `Override/`, talk to Carth, watch his mouth and eyebrows.
-
-| Result | What it means |
-|---|---|
-| **Animation breaks** | The trigger is resizing *any skinned mesh in a head model*, not the Head specifically. The guard below should widen to all skinned meshes in head models. |
-| **Animation works** | The trigger is specific to the `Head` mesh — the one the facial bones actually deform. The guard is correctly scoped as-is. |
-
-Either answer sharpens `HEAD_ANIMATION_FINDINGS.md` from "we know the rule" to
-"we know its shape". Nothing else in the project is blocked on it.
+Probe E is done. Growing `tongue` - skinned, but not the mesh the facial bones
+deform and not the last MDX block - broke facial animation, while growing the
+unskinned `hair` did not. **The discriminator is skinning**, so the guard's
+existing scope (any skinned mesh in a head model) was already right.
 
 ## 2. Texture swapping — what is now known and built
 

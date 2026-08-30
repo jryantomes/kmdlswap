@@ -175,12 +175,17 @@ def to_host_space(
 
 
 def would_break_facial_animation(host_layout, host_node, donor_node) -> bool:
-    """Would this pairing change a head model's skinned vertex count?
+    """Would this pairing change the vertex count of a *skinned* mesh in a head
+    model?
 
-    Established in-game: doing that stops the mouth and eyebrows moving. See
-    reports/HEAD_ANIMATION_FINDINGS.md. Body meshes are unaffected - HK-47's
-    TorsoHoses went 124 -> 24 vertices and still animated - so the check is
-    deliberately scoped to head models rather than to all skinned meshes.
+    Established by bisection in-game (reports/HEAD_ANIMATION_FINDINGS.md).
+    Growing `Head` by three unreferenced vertices breaks facial animation; so
+    does growing `tongue`, a different skinned mesh that the facial bones do not
+    deform and that is not even the last block in the MDX. Growing `hair`, which
+    is *unskinned*, does not.
+
+    So the discriminator is skinning, not which mesh or where it sits. Any
+    skinned mesh in a head model is covered.
     """
     from .apply import is_head_model
 
@@ -189,6 +194,31 @@ def would_break_facial_animation(host_layout, host_node, donor_node) -> bool:
         and is_head_model(host_layout)
         and donor_node.vertex_count != host_node.vertex_count
     )
+
+
+def resize_risk(host_layout, host_node, donor_node) -> str | None:
+    """A caution for resizing a skinned mesh outside a head model.
+
+    Only one body case has ever been checked in-game - HK-47's TorsoHoses went
+    from 124 vertices to 24 and still moved with his torso - and that test only
+    confirmed gross motion, not fine deformation. Given that every skinned resize
+    tried in a head model broke something, one weak positive is not enough to
+    call body meshes safe, but it is also not enough to refuse them.
+    """
+    from .apply import is_head_model
+
+    if (
+        host_node.is_skin
+        and not is_head_model(host_layout)
+        and donor_node.vertex_count != host_node.vertex_count
+    ):
+        return (
+            f"{host_node.name!r} is skinned and its vertex count changes "
+            f"({host_node.vertex_count} -> {donor_node.vertex_count}). In head models "
+            f"that breaks facial animation; body meshes have only been checked once, "
+            f"and only for gross motion. Use --reshape if the result looks wrong."
+        )
+    return None
 
 
 def check_pair(host_layout, host_node, donor_layout, donor_node) -> str | None:
@@ -263,6 +293,10 @@ def transplant_node(
         )
         result.alignment = alignment
         result.warnings.extend(alignment.notes())
+        if not reshape:
+            risk = resize_risk(host_layout, host_node, donor_node)
+            if risk:
+                result.warnings.append(risk)
 
         host_influences = None
         new_texture = None

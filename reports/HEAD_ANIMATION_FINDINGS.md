@@ -15,6 +15,7 @@ vertex count changes.**
 | A | Head vertex positions scaled 1.25×; count, faces, weights untouched | **works** |
 | C | 3 duplicate vertices appended that no face references; positions, faces, weights otherwise untouched | **breaks** |
 | D | `hair` grown by 3 vertices; Head untouched | **works** |
+| E | `tongue` grown by 3 vertices; Head byte-identical | **breaks** |
 
 Vanilla was confirmed as a control: Carth's mouth and eyes move in the same
 conversation.
@@ -44,8 +45,24 @@ Also eliminated, each by measurement rather than assumption:
 - **Model header** — identical between the working and broken probes except
   `mdx_size`, which both update the same way.
 
-Body meshes do **not** behave this way: HK-47's `TorsoHoses` went from 124
-vertices to 24 and still moved with his torso.
+Probe E sharpened the rule. `tongue` is skinned like `Head`, but the facial bones
+do not deform it and it is not the last MDX block - growing it broke facial
+animation anyway. `hair` is *unskinned*, and growing it did not. All three probes
+changed the same thing in kind, and the amounts do not separate them:
+
+| Probe | Mesh | Skinned | Stride | MDX bytes added | Result |
+|---|---|---|---|---|---|
+| C | `Head` | yes | 64 | 192 | breaks |
+| E | `tongue` | yes | 64 | 192 | breaks |
+| D | `hair` | **no** | 32 | 96 | works |
+
+**The discriminator is skinning** - not which mesh, not where it sits in the MDX,
+not how much the file grows. Any skinned mesh in a head model is affected.
+
+Body meshes may differ: HK-47's `TorsoHoses` went from 124 vertices to 24 and
+still moved with his torso. But that is a single case, and it only confirmed
+gross motion rather than fine deformation, so it is treated as a caution rather
+than a clearance.
 
 ## Two real bugs found on the way
 
