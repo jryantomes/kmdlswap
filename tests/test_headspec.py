@@ -202,3 +202,109 @@ def test_texture_must_be_power_of_two(tmp_path):
     v = headspec.check_texture(p)
     assert not v.accepted
     assert any(f.check == "texture size" for f in v.failures)
+
+
+# --- placement --------------------------------------------------------------
+
+
+def test_a_raw_foreign_export_is_rejected_on_placement(pair):
+    """Topology checks say nothing about scale or position, and a raw export
+    from any other tool has neither right - nothing outside KOTOR knows what
+    units or origin a head node uses."""
+    from kmdlfun import headgen
+
+    layout = kl.parse(*pair("p_hk47"))
+    node = layout.node_by_name("head")
+
+    dirs, faces, uvs = headgen.uv_sphere(13, 22)
+    raw = [headgen.shape(d) for d in dirs]
+    # metres, Y-up, sitting at head height like a whole-body export
+    raw = [(p[0] * 0.9, p[2] * 0.9, -p[1] * 0.9 + 1.7) for p in raw]
+    mesh = kobj.ObjMesh(name="raw")
+    mesh.positions = raw
+    mesh.faces = faces
+    mesh.uvs = uvs
+
+    assert headspec.check_mesh(mesh).accepted, "topology is fine; only placement is wrong"
+
+    v = headspec.check_placement(mesh, layout, node)
+    assert not v.accepted
+    checks = {f.check for f in v.failures}
+    assert "size" in checks and "placement" in checks
+
+
+def test_fitting_makes_it_acceptable(pair):
+    from kmdlfun import headgen
+    from kmdlswap import edit as ke
+
+    layout = kl.parse(*pair("p_hk47"))
+    node = layout.node_by_name("head")
+    host = ke.extract(layout, node)
+    hlo = [min(p[i] for p in host.positions) for i in range(3)]
+    hhi = [max(p[i] for p in host.positions) for i in range(3)]
+    size = [hhi[i] - hlo[i] for i in range(3)]
+    centre = [(hhi[i] + hlo[i]) / 2 for i in range(3)]
+
+    dirs, faces, uvs = headgen.uv_sphere(13, 22)
+    raw = [headgen.shape(d) for d in dirs]
+    raw = [(p[0] * 0.9, p[2] * 0.9, -p[1] * 0.9 + 1.7) for p in raw]
+
+    oriented = headgen.orient(raw, facing="-y", up="y")
+    fitted = headgen.fit_to(oriented, size, centre, anchor="chin")
+
+    mesh = kobj.ObjMesh(name="fitted")
+    mesh.positions = fitted
+    mesh.faces = faces
+    mesh.uvs = uvs
+    v = headspec.check_placement(mesh, layout, node)
+    assert v.accepted, [str(f) for f in v.failures]
+
+
+def test_narrower_than_the_node_is_allowed_but_tiny_is_not(pair):
+    """Uniform scaling under-fills the other axes when proportions differ; that
+    is a proportion difference, not a placement error."""
+    from kmdlswap import edit as ke
+
+    layout = kl.parse(*pair("p_hk47"))
+    node = layout.node_by_name("head")
+    host = ke.extract(layout, node)
+    centre = [
+        (max(p[i] for p in host.positions) + min(p[i] for p in host.positions)) / 2
+        for i in range(3)
+    ]
+
+    def box(scale):
+        m = kobj.ObjMesh(name="b")
+        for sx in (-1, 1):
+            for sy in (-1, 1):
+                for sz in (-1, 1):
+                    m.positions.append(
+                        tuple(centre[i] + (sx, sy, sz)[i] * scale for i in range(3))
+                    )
+        m.faces = [(0, 1, 2)]
+        return m
+
+    # 0.24 across against a 0.30 x 0.33 x 0.27 node: narrower, but clearly there.
+    ok = headspec.check_placement(box(0.12), layout, node)
+    assert ok.accepted, [str(f) for f in ok.failures]
+
+    # 0.10 across is a third of the node - it would be lost inside the model.
+    tiny = headspec.check_placement(box(0.05), layout, node)
+    assert not tiny.accepted
+    assert any(f.check == "size" for f in tiny.failures)
+
+    # And too big is rejected from the other side.
+    huge = headspec.check_placement(box(0.40), layout, node)
+    assert not huge.accepted
+    assert any("too big" in f.detail for f in huge.failures)
+
+
+def test_orient_brings_a_y_up_mesh_upright():
+    from kmdlfun import headgen
+
+    # A point that is "up" in a Y-up export.
+    assert headgen.orient([(0.0, 1.0, 0.0)], up="y")[0] == pytest.approx((0.0, 0.0, 1.0))
+    # Facing rotations bring the stated front round to -Y.
+    assert headgen.orient([(1.0, 0.0, 0.0)], facing="+x")[0] == pytest.approx(
+        (0.0, -1.0, 0.0), abs=1e-9
+    )

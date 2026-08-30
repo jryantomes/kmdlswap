@@ -38,6 +38,7 @@ MANIFEST_NAME = "head.json"
 
 VALID_FACING = ("-y", "+y", "-x", "+x")
 VALID_ANCHOR = ("chin", "centre", "center")
+VALID_UP = ("z", "y")
 
 
 @dataclass
@@ -74,6 +75,11 @@ class HeadPack:
     @property
     def facing(self) -> str:
         return str(self.manifest.get("facing") or "-y").lower()
+
+    @property
+    def up(self) -> str:
+        """Which axis the mesh calls up. KOTOR is Z-up; many tools export Y-up."""
+        return str(self.manifest.get("up") or "z").lower()
 
     @property
     def texture_resref(self) -> str | None:
@@ -136,6 +142,10 @@ def load(folder: str | Path) -> HeadPack:
             pack.problems.append(
                 f"anchor {pack.anchor!r} is not one of {', '.join(VALID_ANCHOR)}"
             )
+        if pack.up not in VALID_UP:
+            pack.problems.append(
+                f"up {pack.up!r} is not one of {', '.join(VALID_UP)}"
+            )
         if not 0.1 <= pack.scale <= 10.0:
             pack.problems.append(f"scale {pack.scale} is outside a sane 0.1 to 10")
     return pack
@@ -154,6 +164,7 @@ def write_template(folder: str | Path, name: str = "My Head") -> Path:
                 "notes": "",
                 "target": "head",
                 "facing": "-y",
+                "up": "z",
                 "scale": 1.0,
                 "anchor": "chin",
             },

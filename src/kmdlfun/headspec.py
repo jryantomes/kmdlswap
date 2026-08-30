@@ -276,6 +276,74 @@ def check_against_target(mesh: ObjMesh, layout, node) -> Verdict:
     return v
 
 
+OVERSIZE_LIMIT = 1.25     # bigger than the node's box on any axis clips the body
+UNDERSIZE_LIMIT = 0.60    # smaller than this and the head is lost in the model
+DRIFT_TOLERANCE = 0.5     # centre offset, as a fraction of the node's own size
+
+
+def bounds(points):
+    lo = [min(p[i] for p in points) for i in range(3)]
+    hi = [max(p[i] for p in points) for i in range(3)]
+    return lo, hi
+
+
+def check_placement(mesh: ObjMesh, layout, node) -> Verdict:
+    """Is the mesh anywhere near where the node expects geometry?
+
+    The topology checks say nothing about this, and they should not - a mesh can
+    be flawless and still be six times too big, on its side, and floating above
+    the neck. That is exactly what a raw export from another tool looks like,
+    because nothing outside KOTOR knows what scale or origin a head node uses.
+    """
+    from kmdlswap import edit as ke
+
+    v = Verdict()
+    host = ke.extract(layout, node)
+    hlo, hhi = bounds(host.positions)
+    mlo, mhi = bounds(mesh.positions)
+    hsize = [hhi[i] - hlo[i] for i in range(3)]
+    msize = [mhi[i] - mlo[i] for i in range(3)]
+
+    # Too big is a real problem - it clips through the body. Being narrower is
+    # not: a uniform scale into a box necessarily under-fills the other axes
+    # whenever the proportions differ, and forcing a match would distort the
+    # head. So the two directions are judged differently.
+    fmt = lambda s: "x".join(f"{c:.3f}" for c in s)  # noqa: E731
+    over = max(
+        (msize[i] / hsize[i]) if hsize[i] > 1e-9 else 1.0 for i in range(3)
+    )
+    occupancy = (
+        max(msize) / max(hsize) if max(hsize) > 1e-9 else 0.0
+    )
+    if over > OVERSIZE_LIMIT:
+        v.add("fail", "size",
+              f"{fmt(msize)} against the node's {fmt(hsize)} - {over:.1f}x too big "
+              f"on its worst axis, so it will clip through the body. "
+              f"Build with --fit to scale it onto the node")
+    elif occupancy < UNDERSIZE_LIMIT:
+        v.add("fail", "size",
+              f"{fmt(msize)} against the node's {fmt(hsize)} - only "
+              f"{occupancy:.0%} of its size, so it would be lost inside the model. "
+              f"Build with --fit to scale it onto the node")
+    else:
+        v.add("pass", "size",
+              f"{fmt(msize)} against the node's {fmt(hsize)} "
+              f"({occupancy:.0%} of its largest dimension)")
+
+    hmid = [(hhi[i] + hlo[i]) / 2 for i in range(3)]
+    mmid = [(mhi[i] + mlo[i]) / 2 for i in range(3)]
+    drift = max(abs(mmid[i] - hmid[i]) for i in range(3))
+    span = max(max(hsize), 1e-9)
+    if drift <= DRIFT_TOLERANCE * span:
+        v.add("pass", "placement", f"centre within {drift:.3f} of the node's geometry")
+    else:
+        v.add("fail", "placement",
+              f"centre is {drift:.3f} away from the node's geometry "
+              f"({drift / span:.0%} of its size) - it would float. "
+              f"Build with --fit to place it")
+    return v
+
+
 def check_texture(path) -> Verdict:
     """Judge a texture that ships with a custom head."""
     from pathlib import Path
