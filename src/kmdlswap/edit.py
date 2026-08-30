@@ -22,6 +22,51 @@ from .rewrite import RewriteError, Rewriter
 
 _FACE = struct.Struct("<3ffI3H3H")
 _VEC3 = struct.Struct("<3f")
+_F32 = struct.Struct("<f")
+
+# Fixed fields inside the trimesh subheader that describe where the geometry is.
+BBOX_MIN_AT = 20
+BBOX_MAX_AT = 32
+RADIUS_AT = 44
+AVERAGE_AT = 48
+
+
+@dataclass(frozen=True)
+class UniformScale:
+    """The affine map a caller applied to a mesh's positions: ``v -> f*v + d``.
+
+    Handed to :func:`replace_geometry` so the stored per-mesh bounds can follow
+    the geometry. The engine culls and sorts meshes by those bounds, so leaving
+    them describing the old geometry is a real defect once a mesh changes size.
+
+    They are *transported* under the same map rather than recomputed from the
+    new vertices, because vanilla's bounds are not always tight. Over all 76,703
+    vanilla mesh nodes (``tools/mesh_bounds_census.py``): 40,063 store a box
+    strictly larger than their geometry and 36,640 a tight one - but **none**
+    stores one too small, so a stored box is always a valid bound; ``radius`` is
+    the largest distance from ``average`` in 76,337 of them; and ``average`` is
+    the vertex centroid in only 28,776. Recomputing would therefore shrink
+    deliberately padded boxes and invent an ``average`` two meshes in three do
+    not use. Under ``v -> f*v + d`` with ``f > 0`` the transported box is exactly
+    the image of the stored one, so whatever slack vanilla chose is preserved.
+    """
+
+    factor: float
+    offset: tuple[float, float, float] = (0.0, 0.0, 0.0)
+
+    def point(self, p: tuple[float, ...]) -> tuple[float, float, float]:
+        return tuple(p[i] * self.factor + self.offset[i] for i in range(3))
+
+
+def bounds(layout: Layout, node: NodeInfo) -> tuple[tuple[float, ...], tuple[float, ...], float, tuple[float, ...]]:
+    """The stored ``(bbox_min, bbox_max, radius, average)`` of a mesh node."""
+    t = node.trimesh_at
+    return (
+        _VEC3.unpack_from(layout.mdl, t + BBOX_MIN_AT),
+        _VEC3.unpack_from(layout.mdl, t + BBOX_MAX_AT),
+        _F32.unpack_from(layout.mdl, t + RADIUS_AT)[0],
+        _VEC3.unpack_from(layout.mdl, t + AVERAGE_AT),
+    )
 
 
 @dataclass(slots=True)
@@ -167,13 +212,30 @@ def build_mdx_block(layout: Layout, node: NodeInfo, geo: MeshGeometry) -> bytes:
     return block
 
 
-def replace_geometry(layout: Layout, node: NodeInfo, geo: MeshGeometry) -> tuple[bytes, bytes]:
+TEXTURE_AT = 88
+TEXTURE_FIELD = 32
+
+
+def replace_geometry(
+    layout: Layout,
+    node: NodeInfo,
+    geo: MeshGeometry,
+    *,
+    moved: UniformScale | None = None,
+    texture: str | None = None,
+) -> tuple[bytes, bytes]:
     """Rewrite one mesh node's geometry. Returns new (mdl, mdx) bytes.
 
     Only the arrays that belong to this node are touched. Node names, the
     hierarchy, controllers, supermodel references, skin bone tables, and every
     other node's data pass through untouched; offsets displaced by the splice
     are corrected by the rewriter.
+
+    ``moved`` states that the new positions are the old ones under a uniform
+    scale plus a translation; given it, the stored bounding box, radius and
+    average point are transported the same way. Without it they are left alone,
+    which is right for a same-size edit and wrong for anything that resizes -
+    see :class:`UniformScale`.
     """
     _require_swappable(node)
     if node.is_skin and len(geo.influences) != geo.vertex_count:
@@ -193,6 +255,16 @@ def replace_geometry(layout: Layout, node: NodeInfo, geo: MeshGeometry) -> tuple
 
     rw = Rewriter(layout)
     t = node.trimesh_at
+
+    if texture is not None:
+        # A texture reference is a fixed 32-byte field, so this is a patch in
+        # place - nothing moves and no offset needs fixing up.
+        raw = texture.encode("ascii", "strict")
+        if len(raw) >= TEXTURE_FIELD:
+            raise RewriteError(
+                f"texture name {texture!r} does not fit the {TEXTURE_FIELD}-byte field"
+            )
+        rw.set_bytes(t + TEXTURE_AT, raw.ljust(TEXTURE_FIELD, bytes(1)))
     spans = {s.kind: s for s in layout.spans_of(node.index)}
 
     # --- MDX block
@@ -225,5 +297,17 @@ def replace_geometry(layout: Layout, node: NodeInfo, geo: MeshGeometry) -> tuple
     rw.set_u32(t + 12, len(geo.faces))
     rw.set_u32(t + 16, len(geo.faces))
     rw.set_u16(t + 304, geo.vertex_count)
+
+    # --- bounds, when the caller can say how the geometry moved
+    if moved is not None:
+        if moved.factor <= 0:
+            raise RewriteError(f"{node.name}: scale factor {moved.factor} is not positive")
+        bmin, bmax, radius, average = bounds(layout, node)
+        lo = moved.point(bmin)
+        hi = moved.point(bmax)
+        rw.set_bytes(t + BBOX_MIN_AT, _VEC3.pack(*lo))
+        rw.set_bytes(t + BBOX_MAX_AT, _VEC3.pack(*hi))
+        rw.set_bytes(t + RADIUS_AT, _F32.pack(radius * moved.factor))
+        rw.set_bytes(t + AVERAGE_AT, _VEC3.pack(*moved.point(average)))
 
     return rw.apply()
