@@ -148,7 +148,12 @@ Scoped to head models deliberately: body meshes are unaffected — HK-47's
 - **Regenerate the catalogue.** Every image in it shows the back of the
   character's head - see below. `python tools/render_catalogue.py --install
   "<K1 root>"` with the fixed camera.
-- **A foreign mesh into a *skinned* node.** Still the largest untested path.
+- ~~**A foreign mesh into a *skinned* node.**~~ **DONE 2026-08-30.** Tripo head
+  onto Carth's skinned `Head`, 565 -> 1574 vertices, weights transferred. Head
+  turns, mouth moves, brows do not - all three predicted in advance. The
+  remaining gap is that a host bone which receives no transferred weight goes
+  silent; the fix is to have every such bone claim its nearest vertex.
+- ~~**A foreign mesh into a *skinned* node** (old note)~~ Still the largest untested path.
   HK-47's head is unskinned, so weight transfer from genuinely authored geometry
   is proven only by the synthetic box probe. Needs a mesh.
 - ~~**Repo hygiene.**~~ **DONE.** `out_fun/`, `out_caps/`, `out_tripo/` and

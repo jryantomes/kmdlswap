@@ -136,3 +136,46 @@ that felt like verification, and both fell to a test that *could have come out
 the other way*. The marker probe could only ever show the camera pointed at
 whatever it pointed at; the diff could only ever show changes, never omissions.
 When a check confirms a belief, ask what result would have falsified it.
+
+## A foreign mesh into a skinned node — confirmed 2026-08-30
+
+The largest untested path in the project, and the one the vertex-count rule had
+blocked outright. A Tripo-generated head, decimated to 900 triangles, fitted and
+weight-transferred onto Carth's skinned `Head` node:
+
+```
+vertices    565 -> 1574        (foreign topology, not a reshape)
+triangles   744 -> 900
+skinning    transferred; max 4 influences/vertex, 12 bones
+```
+
+**In game: head turns, mouth moves in dialogue, brows do not.**
+
+All three were predicted before the test, including the negative one. Weight
+transfer kept 12 of the host's 16 bones and dropped `f_lbrw_g`, `f_mdbrw_g`,
+`f_rbrw_g` and `f_rns_g` — the brow bones, because the donor head is smooth
+where Carth's brow ridge is and no transferred vertex landed in their regions.
+Predicting a specific absence and observing it is much stronger evidence that
+the model is right than another success would have been.
+
+So the pointer fix holds for genuine geometry replacement, not only for padding
+probes, and barycentric weight transfer onto foreign topology works.
+
+### Known gap: bones with no transferred weight go silent
+
+Weight transfer samples the host surface at the donor's vertices. A bone whose
+region is small, or which sits where the donor's shape differs, gets no sample
+and simply stops driving anything. It fails quietly and looks like "that part of
+the face doesn't animate".
+
+The fix is bounded: after transfer, any host bone with no influence should claim
+the vertex nearest its region, at a small weight, with renormalisation. That
+guarantees every bone the host had still moves something. Not yet built.
+
+### Not a pipeline problem: the donor mesh
+
+The result looks like a lumpy blob with a topknot. That is the input.
+`tripo_full.obj` is a poor carve — bulging cheeks, protruding eyeball spheres,
+no real face — and rendering it undecimated beside the decimated version shows
+decimation reproducing it faithfully. The pipeline is sound; the mesh is not.
+Worth remembering when judging future results by eye.
