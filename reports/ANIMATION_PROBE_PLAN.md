@@ -408,3 +408,33 @@ It did earn something unplanned: **a positive control.** A file written by our
 splice, installed to Override, loads and animates correctly. So probe C's
 failure is not "this tool emits broken models" - the pipeline is sound and the
 failure is specific to what probe C changes.
+
+## P1b, buffer versus count — **the buffer is innocent**
+
+MDX block grown by three rows, both MDX size fields updated, `vertex_count` left
+at 565, MDL length unchanged. In game: **head turns, everything works.**
+
+So the engine does not care how large the vertex buffer is, or what `mdx_size`
+says. It reads the declared count and is satisfied. Combined with probe C, the
+trigger is on the MDL side.
+
+### Standing after four in-game probes
+
+| probe | `vertex_count` | MDL arrays | MDX block | skinning |
+|---|---|---|---|---|
+| vanilla | 565 | 565 | 565+1 | works |
+| C | **568** | **568** | **568+1** | **rigid** |
+| P1d sentinel | 565 | 565 | 565+1 (value changed) | works |
+| P1b buffer | 565 | 565 | **568+1** | works |
+
+Probe C still moves two things at once - the count field and the MDL vertex
+array, whose growth shifts ~295 pointers. P1e separates them: it does everything
+probe C does and then writes the old count back, so the engine is told 565 while
+every array behind it holds 568.
+
+- **works** → the count field alone is the trigger, and growing a skinned mesh's
+  arrays is otherwise harmless.
+- **breaks** → the count is innocent and growing a *skinned* mesh's MDL arrays
+  is the problem. Probe D already showed that growing an *unskinned* mesh's
+  arrays and shifting pointers is fine, so this would localise it to skinned
+  geometry specifically.
