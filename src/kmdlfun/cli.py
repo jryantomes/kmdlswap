@@ -49,6 +49,10 @@ def main(argv: list[str] | None = None) -> int:
     tp.add_argument("--out", required=True)
     tp.add_argument("--fit", action="store_true", help="scale the donor part to the host part's size")
     tp.add_argument("--max-influences", type=int, default=4)
+    tp.add_argument("--reshape", action="store_true",
+                    help="keep the host's vertices and move them onto the donor's surface; "
+                         "required for heads, whose facial animation breaks if the vertex "
+                         "count changes")
     tp.add_argument("--dry-run", action="store_true", help="report matches and fit, write nothing")
 
     sub.add_parser("gui", help="launch the desktop app")
@@ -202,7 +206,7 @@ def _transplant(args) -> int:
     for host_node, donor_node in pairs:
         mdl2, mdx2, r = ktp.transplant_node(
             mdl, mdx, donor_layout, args.donor, host_node, donor_node,
-            fit=args.fit, max_influences=args.max_influences,
+            fit=args.fit, max_influences=args.max_influences, reshape=args.reshape,
         )
         results.append(r)
         if r.ok and not args.dry_run:
