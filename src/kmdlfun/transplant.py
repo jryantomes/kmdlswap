@@ -222,6 +222,7 @@ def transplant_node(
     fit: bool = False,
     max_influences: int = 4,
     reshape: bool = False,
+    with_texture: bool = False,
 ) -> tuple[bytes, bytes, TransplantResult]:
     """Replace one host node's geometry with a donor node's.
 
@@ -264,32 +265,48 @@ def transplant_node(
         result.warnings.extend(alignment.notes())
 
         host_influences = None
+        new_texture = None
         if reshape:
             host_geo = ke.extract(host_layout, host_node)
             host_influences = host_geo.influences or None
-            moved = kreshape.snap_to_surface(
-                host_geo.positions, mesh.positions, mesh.faces
+            donor_uvs = mesh.uvs if (with_texture and mesh.has_uvs) else None
+            snapped = kreshape.snap_to_surface(
+                host_geo.positions, mesh.positions, mesh.faces, target_uvs=donor_uvs
             )
+            moved, sampled_uvs = snapped if donor_uvs else (snapped, None)
             donor_mesh = mesh
             mesh = ObjMesh(name=host_node.name)
             mesh.positions = moved
             mesh.faces = [f.vertices for f in host_geo.faces]
             mesh.materials = [f.material for f in host_geo.faces]
-            if "uv1" in host_geo.columns:
+            if sampled_uvs is not None:
+                # The donor's mapping, sampled where each host vertex landed, so
+                # the donor's texture can be used with the host's topology.
+                mesh.uvs = sampled_uvs
+                new_texture = donor_node.textures[0] or None
+            elif "uv1" in host_geo.columns:
                 mesh.uvs = [tuple(t) for t in host_geo.columns["uv1"]]
             mesh.normals = kreshape.recompute_vertex_normals(moved, mesh.faces)
             result.reshaped = True
-            result.warnings.append(
-                f"reshaped onto the donor: kept the host's {len(moved)} vertices and "
-                f"its UVs, rather than taking the donor's {len(donor_mesh.positions)}"
-            )
+            if new_texture:
+                result.warnings.append(
+                    f"reshaped onto the donor: kept the host's {len(moved)} vertices, "
+                    f"took the donor's UVs and texture {new_texture!r}"
+                )
+            else:
+                result.warnings.append(
+                    f"reshaped onto the donor: kept the host's {len(moved)} vertices "
+                    f"and its own UVs and texture"
+                )
         geo, swap_report = build_replacement(
             host_layout, host_node, mesh, max_influences=max_influences,
             influences=host_influences,
         )
         result.swap = swap_report
         result.warnings.extend(swap_report.warnings)
-        new_mdl, new_mdx = ke.replace_geometry(host_layout, host_node, geo)
+        new_mdl, new_mdx = ke.replace_geometry(
+            host_layout, host_node, geo, texture=new_texture
+        )
     except Exception as exc:  # noqa: BLE001
         result.error = f"{type(exc).__name__}: {exc}"
         return host_mdl, host_mdx, result

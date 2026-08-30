@@ -33,13 +33,20 @@ def snap_to_surface(
     target_positions: Sequence[tuple[float, ...]],
     target_faces: Sequence[tuple[int, int, int]],
     *,
+    target_uvs: Sequence[tuple[float, ...]] | None = None,
     strength: float = 1.0,
     chunk: int = 256,
-) -> list[tuple[float, float, float]]:
+):
     """Move each point onto the closest point of a target surface.
 
     ``strength`` blends between the original shape (0.0) and the target surface
     (1.0), so a partial reshape is possible.
+
+    Pass ``target_uvs`` to also carry the target's texture coordinates across:
+    each point lands somewhere inside a target triangle, and the same barycentric
+    weights that place it interpolate the UV there. That is what lets a reshaped
+    mesh use the donor's texture - it has the host's topology but the donor's
+    mapping. Returns ``(positions, uvs)`` when asked, otherwise just positions.
     """
     if not target_faces:
         raise ValueError("target mesh has no faces to snap to")
@@ -49,7 +56,9 @@ def snap_to_surface(
     pts = np.asarray([p[:3] for p in points], dtype=np.float64)
     a, b, c = src[tri[:, 0]], src[tri[:, 1]], src[tri[:, 2]]
 
+    uv_src = np.asarray([t[:2] for t in target_uvs], dtype=np.float64) if target_uvs else None
     out: list[tuple[float, float, float]] = []
+    out_uv: list[tuple[float, float]] = []
     for start in range(0, len(pts), chunk):
         block = pts[start : start + chunk]
         dist2, bary = _closest_points_on_triangles(block, a, b, c)
@@ -60,7 +69,14 @@ def snap_to_surface(
             landed = w[0] * src[corners[0]] + w[1] * src[corners[1]] + w[2] * src[corners[2]]
             final = block[i] + (landed - block[i]) * strength
             out.append((float(final[0]), float(final[1]), float(final[2])))
-    return out
+            if uv_src is not None:
+                uv = (
+                    w[0] * uv_src[corners[0]]
+                    + w[1] * uv_src[corners[1]]
+                    + w[2] * uv_src[corners[2]]
+                )
+                out_uv.append((float(uv[0]), float(uv[1])))
+    return (out, out_uv) if uv_src is not None else out
 
 
 def recompute_vertex_normals(

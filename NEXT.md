@@ -16,7 +16,23 @@ The last session found and bounded a real engine constraint:
 `kmdlfun transplant --reshape` works within that and is verified in-game.
 Full write-up: `reports/HEAD_ANIMATION_FINDINGS.md`.
 
-## 1. One 5-minute test, ready to run
+## 1. Two tests ready to run, ~5 minutes each
+
+### a) Textures — already installed in Override
+
+`out_swap/carth_dustil_tex/` is in your Override now: Carth reshaped onto
+Dustil's head **with Dustil's texture**. All eight head nodes.
+
+Talk to him. Expect a face that is Dustil's shape *and* Dustil's colouring, with
+the mouth and eyebrows still animating. If the texture looks right, the texture
+half of a character creator is solved.
+
+Watch specifically for UV seams or smearing: the mapping is sampled, not copied,
+so it can smudge where the two head shapes differ most.
+
+### b) The mechanism probe
+
+### The probe itself
 
 `out_probe2/E_tongue_skinned/p_carthh.mdl` + `.mdx` are built and waiting.
 
@@ -34,7 +50,36 @@ Copy both into `Override/`, talk to Carth, watch his mouth and eyebrows.
 Either answer sharpens `HEAD_ANIMATION_FINDINGS.md` from "we know the rule" to
 "we know its shape". Nothing else in the project is blocked on it.
 
-## 2. Guard rail added
+## 2. Texture swapping — what is now known and built
+
+- A texture reference is a **fixed 32-byte field** in the trimesh header at
+  `+88` (`+120` is the lightmap, empty on characters). Changing it is a patch in
+  place: nothing moves, no offset needs fixing. Far safer than geometry.
+- **All meshes in a head model share one texture** (`P_CarthH01`,
+  `N_DustilH01`), so it is one decision per model, not per node.
+- Head textures live in `swpc_tex_tpa`, not `chitin.key` — all four checked
+  resolve there.
+- `snap_to_surface` already computed barycentric coordinates on the donor
+  surface and discarded them. It now uses them to interpolate the **donor's UV**
+  where each host vertex lands, which is what makes a donor texture usable with
+  host topology.
+
+`kmdlfun transplant --with-texture` does all of it (and implies `--reshape`).
+Verified on file: vertex count, faces and per-vertex weights byte-identical to
+vanilla, file sizes unchanged, UVs replaced, texture field now `N_DustilH01`.
+
+### Still open on textures
+
+- **Body models use several textures** (`n_rodian` has `N_Rodian01` on the head
+  and `N_Rodian02` on torso and arms), so a body swap needs per-node texture
+  decisions rather than one per model.
+- **Nothing copies the texture file itself.** The swap points at a texture that
+  already ships with the game. Using a *custom* texture means writing a TPC/TGA
+  into Override alongside the model, which this tool does not do.
+- **Skin tone and lighting will not match** across donors, so a head from one
+  character on another's body can show a seam at the neck.
+
+## 3. Guard rail added
 
 `transplant` now **refuses** to change a head model's skinned vertex count and
 points at `--reshape`:
@@ -49,7 +94,7 @@ its vertices onto the donor's surface instead.
 Scoped to head models deliberately: body meshes are unaffected — HK-47's
 `TorsoHoses` went 124 → 24 vertices and still animated. Probe E may widen this.
 
-## 3. Open work, roughly in order of value
+## 4. Open work, roughly in order of value
 
 - **Expose `transplant` in the GUI.** It is CLI-only. The parts-bin artifact
   (https://claude.ai/code/artifact/cdc78304-bbe2-4fc4-a7e5-fae58f0bcf28) shows
@@ -67,18 +112,18 @@ Scoped to head models deliberately: body meshes are unaffected — HK-47's
 - **Retire `tools/roundtrip_eval.py` and `tools/diff_anatomy.py`.** They existed
   only to evaluate PyKotor and inform nothing now.
 
-## 4. Housekeeping
+## 5. Housekeeping
 
 Still in `Override/` from testing:
 
-- `p_carthh` — Carth with the reshaped Rodian head
+- `p_carthh` — Carth reshaped onto Dustil's head, with Dustil's texture (test a)
 - `p_bastilabb` — Bastila's cap-1 armor body
 
 Both are safe to delete; vanilla lives in the BIFs. **`p_hkrfk.mdl`/`.mdx` are
 yours** (HK recruit mod, June) and have not been touched all session — do not
 delete those.
 
-## 5. What is genuinely unknown
+## 6. What is genuinely unknown
 
 Why a head's vertex count matters. Every candidate the file exposes was measured
 and eliminated: bone slots, weight distribution and its spatial fidelity, MDX

@@ -180,3 +180,43 @@ def test_reshape_is_allowed_and_preserves_the_host_exactly(pair):
         assert {x.bone_slot: round(x.weight, 5) for x in p} == {
             x.bone_slot: round(x.weight, 5) for x in q
         }
+
+
+def test_with_texture_takes_the_donors_mapping_and_texture(pair):
+    """A textured reshape: host topology, donor UVs, donor texture."""
+    import struct
+
+    host_mdl, host_mdx = pair("p_carthh")
+    donor = kl.parse(*pair("n_dustilh"))
+    before = kl.parse(host_mdl, host_mdx)
+    new_mdl, new_mdx, result = ktp.transplant_node(
+        host_mdl, host_mdx, donor, "n_dustilh", "Head", "Head",
+        reshape=True, with_texture=True,
+    )
+    assert result.ok, result.error
+    # Still the safe configuration: nothing resizes.
+    assert len(new_mdl) == len(host_mdl) and len(new_mdx) == len(host_mdx)
+
+    after = kl.parse(new_mdl, new_mdx)
+    a, b = before.node_by_name("Head"), after.node_by_name("Head")
+
+    def texture_of(layout, node):
+        raw = layout.mdl[node.trimesh_at + 88 : node.trimesh_at + 120]
+        return raw.split(b"\x00")[0].decode("ascii")
+
+    assert texture_of(before, a) == "P_CarthH01"
+    assert texture_of(after, b) == "N_DustilH01"
+    ga, gb = ke.extract(before, a), ke.extract(after, b)
+    assert ga.columns.get("uv1") != gb.columns.get("uv1"), "UVs should be the donor's"
+    assert [f.vertices for f in ga.faces] == [f.vertices for f in gb.faces]
+
+
+def test_texture_name_must_fit_the_field(pair):
+    from kmdlswap.rewrite import RewriteError
+
+    mdl, mdx = pair("p_carthh")
+    lay = kl.parse(mdl, mdx)
+    node = lay.node_by_name("Head")
+    geo = ke.extract(lay, node)
+    with pytest.raises(RewriteError, match="does not fit"):
+        ke.replace_geometry(lay, node, geo, texture="x" * 40)

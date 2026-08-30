@@ -53,6 +53,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="keep the host's vertices and move them onto the donor's surface; "
                          "required for heads, whose facial animation breaks if the vertex "
                          "count changes")
+    tp.add_argument("--with-texture", action="store_true",
+                    help="also take the donor's texture, sampling its UVs where each "
+                         "host vertex lands (implies --reshape)")
     tp.add_argument("--dry-run", action="store_true", help="report matches and fit, write nothing")
 
     sub.add_parser("gui", help="launch the desktop app")
@@ -206,7 +209,8 @@ def _transplant(args) -> int:
     for host_node, donor_node in pairs:
         mdl2, mdx2, r = ktp.transplant_node(
             mdl, mdx, donor_layout, args.donor, host_node, donor_node,
-            fit=args.fit, max_influences=args.max_influences, reshape=args.reshape,
+            fit=args.fit, max_influences=args.max_influences, reshape=args.reshape or args.with_texture,
+            with_texture=args.with_texture,
         )
         results.append(r)
         if r.ok and not args.dry_run:
