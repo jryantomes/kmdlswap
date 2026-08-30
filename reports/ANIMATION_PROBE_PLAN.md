@@ -223,3 +223,103 @@ Any one of: a stale count-derived field found by scanning (P0d), a community
 head with a non-vanilla count that animates (P0a), or a diff against an
 MDLedit-built file (P3a). The first two cost no game time, and none of the three
 requires understanding the engine — only finding what disagrees.
+
+---
+
+# Results — 2026-08-30
+
+Tier 0 executed with `tools/probe_diff.py` against a rebuilt probe C
+(`p_carthh`, `Head`, 565 → 568 inert vertices).
+
+## P0d — no stale copy of the vertex count. **Negative.**
+
+The scan initially flagged four "surviving" values, including the promising
+`36160 = 565 x stride 64`. All four were **u16 coincidences landing inside
+`face_array`** — ordinary index data that happens to equal those numbers. The
+only location holding a genuine count is `trimesh_header of Head +304`, and it
+updated 565 → 568 correctly.
+
+Method note: the first scan conflated u16 and u32 hits, and a follow-up
+comparison read *unaligned* words, producing a screen of impressive-looking
+deltas that were all the same +36 pointer shift seen through misaligned windows
+(36<<24, 36<<16, 36<<8). Both were artefacts of the tool, not findings.
+
+## P0b — the file is internally perfect. **Negative, and strongly so.**
+
+Comparing span by span, with every pointer and count the parser knows masked out:
+
+```
+offsets: vanilla 552, probe 552
+counts : vanilla 619, probe 619
+count fields differing: 3
+    mdl_data_size   @0x00004: 80026 -> 80062
+    mdx_size        @0x00008: 53120 -> 53312
+    model_mdx_size  @0x000bc: 53120 -> 53312
+
+spans differing outside 'Head' AFTER masking known pointers/counts: 0
+```
+
+**Zero.** Every byte outside the edited node is either identical or a pointer
+that shifted by exactly the right amount, and the three size fields all updated
+correctly. Since the coverage validator already proves every byte lies in
+exactly one span, this is not a spot check — it is exhaustive.
+
+So the probe C file is exactly what a 568-vertex `p_carthh` should look like,
+and the engine still mishandles it. **The "stale field" reframing is dead.**
+
+## A real format discovery: every MDX block carries a sentinel row
+
+Every mesh block is exactly one vertex longer than `vertex_count x stride`.
+Across all 164 character models and **7,290 mesh blocks, without a single
+exception**, the extra row is there. Its first three floats are a parked
+position, and the value splits perfectly by mesh type:
+
+| mesh type | sentinel position | blocks |
+|---|---|---|
+| unskinned | `10,000,000` | 6,795 |
+| skinned | `1,000,000` | 495 |
+
+No exceptions either way. For `p_carthh:Head` the full row is position
+`1e6, 1e6, 1e6`, normal zero, UV zero, weights `(1, 0, 0, 0)`, bone indices
+`(0, 0, 0, 0)`.
+
+Our splice preserves it byte-identically, so it is **not** the bug. But the
+engine evidently chooses this value per mesh type, which means something reads
+it — and it splits on *exactly the axis that discriminates our failure*.
+That earns it a probe of its own.
+
+## Where this leaves the plan
+
+P0d and P0b are both spent, and both came back clean. The file is right. That
+leaves three possibilities, and the ordering has changed:
+
+1. **The observation is wrong.** A provably-clean file that misbehaves should
+   raise suspicion of the measurement before the engine. The in-game checks so
+   far returned one ambiguous bit and never recorded whether the head still
+   turns. Given how the camera-facing error survived a check that felt like
+   verification, this now deserves to go first.
+2. **The engine allocates or caches something from the count** that no field in
+   the file expresses. P1b is the sharpest remaining build.
+3. **Something outside the MDL/MDX** — a `.lip`, a 2DA, a cached resource.
+
+### New probe: P1d — write the wrong sentinel
+
+Change a skinned head's sentinel from `1e6` to `1e7` (the unskinned value) and
+change nothing else: same vertex count, same everything, one float triple
+rewritten.
+
+| result | meaning |
+|---|---|
+| facial animation breaks | the engine reads the sentinel, and we have a mechanism to pull on — the first one this investigation has had |
+| nothing happens | the sentinel is inert bookkeeping and the skinned/unskinned split is a compiler artefact |
+
+Cheap, safe, and it tests the only structure yet found that divides skinned from
+unskinned meshes the same way the bug does.
+
+### Revised order
+
+1. **Re-observe** probe C in game with the five-point protocol (especially: does
+   the head still turn?).
+2. **P1d** — the sentinel.
+3. **P1b** — declared count versus buffer size.
+4. **P1a** — removal instead of addition.
