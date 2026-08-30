@@ -12,7 +12,7 @@ See [`MDL_SWAP_TOOL_BRIEF.md`](MDL_SWAP_TOOL_BRIEF.md) for the full project brie
 | 0 — Byte-exact MDL/MDX round-trip | **Done — 2832/2832 (100%)** of vanilla K1 models. |
 | 1 — Inspect | **Done** — `kmdlswap inspect` |
 | 2 — No-op swap | **Done — 76,703/76,703 mesh nodes, and verified in-game.** |
-| 3 — Geometry replacement | **Done — verified in-game.** |
+| 3 — Geometry replacement | **Done — verified in-game, including a foreign FBX mesh.** |
 | 4 — CLI | **Done** — `inspect`, `extract`, `replace` |
 
 ### Milestone 0 result
@@ -91,7 +91,18 @@ onto entirely new topology, plus a shrinking splice). The box moves with HK-47's
 torso, which is the evidence that matters: none of its vertices inherited weights
 by index.
 
-Findings: [`reports/MILESTONE_3_FINDINGS.md`](reports/MILESTONE_3_FINDINGS.md).
+**Definition of done, met.** A Tripo-generated character auto-rigged with Mixamo
+was carved down to its head, decimated to 1,198 triangles, fitted and rotated
+into HK-47's `head` node — and renders correctly in-game, forward-facing, with
+his body untouched.
+
+Findings: [`reports/MILESTONE_3_FINDINGS.md`](reports/MILESTONE_3_FINDINGS.md)
+and [`reports/FOREIGN_MESH_FINDINGS.md`](reports/FOREIGN_MESH_FINDINGS.md) — the
+latter is the important one for anyone bringing in outside geometry, because
+**every mistake on that path is silent**: world-space export, a surviving
+armature modifier, a node origin that is not the geometry centre, and a differing
+axis convention each produced a model that passed every validator and was still
+wrong.
 
 ## kmdlfun — companion effects app
 
