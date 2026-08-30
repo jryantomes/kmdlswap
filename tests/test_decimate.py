@@ -25,6 +25,25 @@ def dense_head(rings=40, segments=60):
 
 
 @pytest.fixture(scope="module")
+def seamed_mesh():
+    """A sphere whose UVs are split into per-face islands, like a
+    photogrammetry atlas. Every corner gets its own UV, so nothing may be
+    shared across a face boundary."""
+    m = dense_head(rings=24, segments=36)
+    seamed = kobj.ObjMesh(name="seamed")
+    for i, (a, b, c) in enumerate(m.faces):
+        base = len(seamed.positions)
+        for v in (a, b, c):
+            seamed.positions.append(m.positions[v])
+        # A small distinct island per face, tiled across the atlas.
+        u = (i % 32) / 32.0
+        w = ((i // 32) % 32) / 32.0
+        seamed.uvs.extend([(u, w), (u + 0.02, w), (u, w + 0.02)])
+        seamed.faces.append((base, base + 1, base + 2))
+    return seamed
+
+
+@pytest.fixture(scope="module")
 def reduced():
     return decimate.simplify(dense_head(), 700)
 
@@ -62,9 +81,76 @@ def test_it_keeps_the_silhouette(reduced):
         assert abs(a[i] - b[i]) / b[i] < 0.06, f"axis {i} moved {b[i]:.3f} -> {a[i]:.3f}"
 
 
-def test_uvs_are_resampled_onto_the_survivors(reduced):
+def test_uvs_are_present_and_in_range(reduced):
     assert len(reduced.mesh.uvs) == len(reduced.mesh.positions)
     assert all(0.0 - 1e-6 <= u <= 1.0 + 1e-6 for uv in reduced.mesh.uvs for u in uv)
+
+
+def uv_outlier_fraction(mesh):
+    """How many faces have a UV area wildly out of step with their 3D area.
+
+    Coherent UVs give a tight distribution. UVs that jump across an atlas - a
+    seam crossed by mistake - give a long tail, which is what a scrambled
+    texture looks like numerically.
+    """
+    import statistics
+
+    ratios = []
+    for a, b, c in mesh.faces:
+        p0, p1, p2 = (mesh.positions[i] for i in (a, b, c))
+        u0, u1, u2 = (mesh.uvs[i] for i in (a, b, c))
+        e1 = [p1[i] - p0[i] for i in range(3)]
+        e2 = [p2[i] - p0[i] for i in range(3)]
+        n = (e1[1] * e2[2] - e1[2] * e2[1],
+             e1[2] * e2[0] - e1[0] * e2[2],
+             e1[0] * e2[1] - e1[1] * e2[0])
+        area3 = 0.5 * sum(x * x for x in n) ** 0.5
+        area2 = 0.5 * abs((u1[0] - u0[0]) * (u2[1] - u0[1])
+                          - (u2[0] - u0[0]) * (u1[1] - u0[1]))
+        if area3 > 1e-12:
+            ratios.append(area2 / area3)
+    median = statistics.median(ratios)
+    return sum(1 for r in ratios if r > median * 20) / len(ratios)
+
+
+def test_uvs_do_not_cross_seams(seamed_mesh):
+    """The test that would have caught the real bug.
+
+    Resampling UVs by closest point ignores seams, and a photogrammetry atlas is
+    mostly seam - one face in five came out with a UV area twenty times the
+    median, and the texture rendered as concentric garbage. Checking that UVs
+    merely exist and lie in [0, 1] could never have seen it.
+    """
+    before = uv_outlier_fraction(seamed_mesh)
+    after = uv_outlier_fraction(decimate.simplify(seamed_mesh, 400).mesh)
+    assert after < before + 0.03, (
+        f"UV coherence collapsed: {before:.1%} of faces were outliers before, "
+        f"{after:.1%} after"
+    )
+
+
+def test_seams_are_split_back_out(seamed_mesh):
+    """A position whose corners carry different UVs must become several
+    vertices again, or the seam is gone."""
+    result = decimate.simplify(seamed_mesh, 400)
+    unique_positions = {tuple(round(c, 6) for c in p) for p in result.mesh.positions}
+    assert len(result.mesh.positions) > len(unique_positions), "no seam survived"
+
+
+def test_shading_stays_smooth_across_a_seam(seamed_mesh):
+    """Splitting at seams must not split the *normals* too, or the mesh shades
+    faceted along every seam - which on this kind of atlas is most of it."""
+    result = decimate.simplify(seamed_mesh, 400)
+    by_position: dict = {}
+    for p, n in zip(result.mesh.positions, result.mesh.normals):
+        by_position.setdefault(tuple(round(c, 6) for c in p), []).append(n)
+    shared = [ns for ns in by_position.values() if len(ns) > 1]
+    assert shared, "no split positions to check"
+    for ns in shared:
+        for other in ns[1:]:
+            assert all(abs(a - b) < 1e-9 for a, b in zip(ns[0], other)), (
+                "vertices sharing a position disagree on their normal"
+            )
 
 
 def test_normals_are_recomputed(reduced):

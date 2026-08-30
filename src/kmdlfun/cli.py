@@ -72,9 +72,20 @@ def main(argv: list[str] | None = None) -> int:
                     metavar="TRIANGLES",
                     help="reduce the mesh to a triangle budget before anything else "
                          "(default 690, vanilla's median head)")
+    hd.add_argument("--reshape", action="store_true",
+                    help="keep the host's topology, UVs and weights and move its "
+                         "vertices onto the pack's surface, instead of replacing "
+                         "the mesh. No longer required for skinned heads, but "
+                         "still useful when you want the host's own UVs")
     hd.add_argument("--fit", action="store_true",
                     help="scale and place the mesh onto the target node, using the "
                          "pack's facing, up, scale and anchor hints")
+    hd.add_argument("--hide", nargs="*", metavar="NODE", default=None,
+                    help="stop drawing these of the host's own nodes. With no "
+                         "names, hides every other visible mesh in the head "
+                         "model - hair, eyes, lids, teeth, tongue - which is "
+                         "usually what a whole custom head wants, since those "
+                         "are shaped for the face being replaced")
     hd.add_argument("--template", action="store_true",
                     help="write a head.json template into the folder and stop")
 
@@ -160,9 +171,12 @@ def _render(args) -> int:
         extra = [_Path(d) for d in args.texture_dir]
         # A build's own texture sits beside it, and is the one the game will use
         # once both are in Override - so look there before anything installed.
-        model_dir = _Path(args.model).parent
-        if model_dir.is_dir():
-            extra.insert(0, model_dir)
+        for candidate in (args.model, args.compare):
+            if not candidate:
+                continue
+            folder = _Path(candidate).parent
+            if folder.is_dir() and folder not in extra:
+                extra.insert(0, folder)
         cache = ktextures.TextureCache(args.install, extra=extra)
         lookup = cache.get
 
@@ -516,12 +530,16 @@ def _head(args) -> int:
     from kmdlswap import layout as kl2
 
     from . import reshape as kreshape
-    from .apply import is_head_model
     from kmdlswap.swap import build_replacement
 
-    if node.is_skin and is_head_model(layout):
-        # The vertex count must not change, so the pack is a shape to move the
-        # host's own vertices onto rather than a replacement for them.
+    host_positions = ke.extract(layout, node).positions
+
+    if args.reshape:
+        # Opt-in now. This used to be forced for every skinned head, because a
+        # changing vertex count appeared to break facial animation; that was a
+        # stale pointer in our own writer, since fixed and confirmed in game
+        # (reports/SKIN_ROOT_POINTER_FINDINGS.md). It survives because keeping
+        # the host's UVs and weights is sometimes what you actually want.
         host_geo = ke.extract(layout, node)
         moved = kreshape.snap_to_surface(host_geo.positions, mesh.positions, mesh.faces)
         shaped = kobj.ObjMesh(name=node.name)
@@ -534,13 +552,32 @@ def _head(args) -> int:
         geo, report = build_replacement(
             layout, node, shaped, influences=host_geo.influences or None
         )
-        print("reshaped onto the host's topology (skinned head)")
+        print("reshaped onto the host's topology")
     else:
         geo, report = build_replacement(layout, node, mesh)
+        if node.is_skin:
+            print(f"weights transferred from the host's {len(host_positions)} "
+                  f"vertices onto the pack's {mesh.vertex_count}")
 
     mdl, mdx = ke.replace_geometry(
         layout, node, geo, texture=pack.texture_resref
     )
+
+    if args.hide is not None:
+        from . import parts as kparts
+        from . import visibility as kvis
+
+        after = kl2.parse(mdl, mdx)
+        if args.hide:
+            wanted = list(args.hide)
+        else:
+            # Everything visible except the node we just replaced. These are
+            # shaped for the face that is gone, so they float.
+            wanted = [n.name for n in kparts.mesh_nodes(after)
+                      if n.name.lower() != node.name.lower()]
+        mdl, hidden = kvis.hide_nodes(after, mdl, wanted)
+        if hidden:
+            print(f"hidden (host parts that no longer fit): {', '.join(hidden)}")
     if not kv.check(kl2.parse(mdl, mdx)).ok:
         print("kmdlfun: result failed validation; nothing written", file=sys.stderr)
         return 1

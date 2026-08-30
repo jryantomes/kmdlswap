@@ -19,10 +19,22 @@ Two collapses are refused rather than allowed to make a mess:
   condition - the two endpoints must share exactly the two neighbours opposite
   the edge, or the collapse pinches the surface together.
 
-UVs are not carried through the collapses. They are resampled at the end from
-the original surface, by the same closest-point machinery a reshape uses, which
-keeps the mapping tied to the shape rather than to whichever vertex happened to
-survive.
+UVs are carried **per face corner**, not per vertex, and not resampled.
+
+That is the second design here that had to be measured rather than reasoned
+about. Resampling by closest point looks principled - it ties the mapping to the
+shape rather than to whichever vertex survived - but it ignores UV seams. A
+photogrammetry atlas is mostly seam: the Tripo head carries 2,941 vertices for
+3,312 faces, so roughly 1,300 of them are seam duplicates sharing a position
+with a different UV. Welding by position (which the collapses need, or the mesh
+tears) merges those, and closest-point resampling then hands back whichever side
+of the seam it happened to hit. Measured on that head, one face in five ended up
+with a UV area more than twenty times the median, and the texture rendered as
+concentric garbage.
+
+Carrying corner UVs cannot cross a seam, because a corner keeps the UV it was
+authored with. Vertices are re-split on output wherever corners disagree, which
+is how the seam survives into the MDX.
 """
 
 from __future__ import annotations
@@ -83,10 +95,16 @@ def simplify(mesh: ObjMesh, target_faces: int) -> Result:
     """Reduce a mesh towards `target_faces`, preserving its topology class."""
     verts, mapping = _weld(mesh.positions)
     faces = []
+    corner_uv: list[list[tuple]] = []
+    has_uvs = mesh.has_uvs and len(mesh.uvs) == len(mesh.positions)
     for a, b, c in mesh.faces:
         t = (mapping[a], mapping[b], mapping[c])
         if len({*t}) == 3:
             faces.append(list(t))
+            if has_uvs:
+                corner_uv.append(
+                    [tuple(mesh.uvs[a]), tuple(mesh.uvs[b]), tuple(mesh.uvs[c])]
+                )
     before = len(faces)
     if before <= target_faces or before == 0:
         return Result(mesh, before, before, 0, 0, 0)
@@ -206,29 +224,38 @@ def simplify(mesh: ObjMesh, target_faces: int) -> Result:
             c, t = cost(i, k)
             heapq.heappush(heap, (c, min(i, k), max(i, k), tuple(t)))
 
-    # Rebuild a compact mesh.
+    # Rebuild a compact mesh, splitting a vertex wherever its corners carry
+    # different UVs - that is what puts the seams back.
     remap: dict = {}
     out = ObjMesh(name=mesh.name)
     for fi, f in enumerate(faces):
         if not alive_face[fi]:
             continue
         tri = []
-        for v in f:
-            if v not in remap:
-                remap[v] = len(out.positions)
+        for k, v in enumerate(f):
+            uv = corner_uv[fi][k] if has_uvs else None
+            key = (v, uv)
+            if key not in remap:
+                remap[key] = len(out.positions)
                 out.positions.append(tuple(float(c) for c in positions[v]))
-            tri.append(remap[v])
+                if uv is not None:
+                    out.uvs.append(uv)
+            tri.append(remap[key])
         if len({*tri}) == 3:
             out.faces.append(tuple(tri))
 
-    if mesh.has_uvs:
-        out.uvs = resample_uvs(out.positions, mesh)
     out.normals = _normals(out.positions, out.faces)
     return Result(out, before, len(out.faces), collapses, refused_flip, refused_manifold)
 
 
 def resample_uvs(points, source: ObjMesh):
-    """Take each new vertex's UV from where it lands on the original surface."""
+    """Closest-point UV resampling. **Not used by `simplify` any more.**
+
+    Kept because it is the right tool when the target genuinely has no UVs of
+    its own - a reshape, where the host's vertices move onto a donor surface and
+    must pick up the donor's mapping. It is the wrong tool for decimation, where
+    the mesh already has UVs and seams to preserve; see the module docstring.
+    """
     from .reshape import snap_to_surface
 
     _, uvs = snap_to_surface(
@@ -238,7 +265,21 @@ def resample_uvs(points, source: ObjMesh):
 
 
 def _normals(positions, faces):
-    acc = [[0.0, 0.0, 0.0] for _ in positions]
+    """Smooth normals, averaged across every vertex sharing a position.
+
+    Splitting vertices at UV seams means one point on the surface can be several
+    vertices. Averaging per vertex would then give each side of a seam its own
+    normal, and the mesh shades faceted along every seam - which on a
+    photogrammetry atlas is most of the mesh. Averaging per *position* keeps the
+    shading smooth across seams, which is what the seam is for.
+    """
+    groups: dict = {}
+    of_vertex = []
+    for pos in positions:
+        key = tuple(round(c, 7) for c in pos[:3])
+        of_vertex.append(groups.setdefault(key, len(groups)))
+
+    acc = [[0.0, 0.0, 0.0] for _ in groups]
     for i0, i1, i2 in faces:
         p0, p1, p2 = positions[i0], positions[i1], positions[i2]
         u = [p1[i] - p0[i] for i in range(3)]
@@ -250,11 +291,12 @@ def _normals(positions, faces):
         )
         for i in (i0, i1, i2):
             for k in range(3):
-                acc[i][k] += n[k]
-    out = []
+                acc[of_vertex[i]][k] += n[k]
+
+    unit = []
     for n in acc:
         length = (n[0] ** 2 + n[1] ** 2 + n[2] ** 2) ** 0.5
-        out.append(
+        unit.append(
             tuple(c / length for c in n) if length > 1e-12 else (0.0, 0.0, 1.0)
         )
-    return out
+    return [unit[g] for g in of_vertex]
