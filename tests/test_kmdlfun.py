@@ -70,18 +70,193 @@ def test_scaling_changes_size_but_not_topology(pair):
     assert len(geo.faces) == node.face_count
 
 
-def test_bounds_pivot_keeps_the_mesh_in_place(pair):
+def _model_space_nodes(layout) -> dict[str, list[tuple[float, ...]]]:
+    """Every visible mesh's vertices in model space, keyed by node name."""
     from kmdlswap import edit as ke
 
-    layout = kl.parse(*pair("p_hk47"))
-    geo = ke.extract(layout, layout.node_by_name("head"))
-    centre = lambda g: [  # noqa: E731
-        (max(p[i] for p in g.positions) + min(p[i] for p in g.positions)) / 2
-        for i in range(3)
-    ]
-    before = centre(geo)
-    kapply.scale_geometry(geo, 1.6, pivot="bounds")
-    assert centre(geo) == pytest.approx(before, abs=1e-5)
+    from kmdlfun import space
+
+    pose = space.rest_pose(layout)
+    out = {}
+    for node in parts.mesh_nodes(layout):
+        rest = pose[node.index]
+        out[node.name] = [
+            tuple(
+                rest.position[i] + sum(rest.rotation[i][k] * v[k] for k in range(3))
+                for i in range(3)
+            )
+            for v in ke.extract(layout, node).positions
+        ]
+    return out
+
+
+def _centre(vs):
+    return [sum(v[i] for v in vs) / len(vs) for i in range(3)]
+
+
+def _spacing(world: dict) -> dict[tuple[str, str], float]:
+    """Distance between every pair of node centres - the thing that has to scale
+    with the group if the head is to stay assembled."""
+    import math
+
+    names = sorted(world)
+    return {
+        (a, b): math.dist(_centre(world[a]), _centre(world[b]))
+        for i, a in enumerate(names)
+        for b in names[i + 1 :]
+    }
+
+
+def test_a_head_made_of_many_nodes_stays_assembled(pair):
+    """The bug this pivot exists for: with every node grown about its own centre
+    the eyes stay where they were while the face skin grows past them, and they
+    end up inside the skull. Under a shared joint pivot every distance inside
+    the head scales by the same factor, so the head is the same head, bigger."""
+    mdl, mdx = pair("p_missionh")
+    before = _spacing(_model_space_nodes(kl.parse(mdl, mdx)))
+    assert len(before) > 20, "expected a head model built from many nodes"
+
+    joint_mdl, joint_mdx, res = kapply.apply_to_model(
+        mdl, mdx, {"head": 1.6}, pivot="joint", model_name="p_missionh"
+    )
+    assert res.ok, res.error
+    after = _spacing(_model_space_nodes(kl.parse(joint_mdl, joint_mdx)))
+    for key, d in before.items():
+        assert after[key] == pytest.approx(d * 1.6, rel=1e-4), f"{key} lost registration"
+
+
+def test_the_old_per_node_pivot_pulls_a_head_apart(pair):
+    """Kept as the counter-example: 'bounds' pins every node's centre where it
+    was, so the parts of a head no longer line up once they change size."""
+    mdl, mdx = pair("p_missionh")
+    before = _spacing(_model_space_nodes(kl.parse(mdl, mdx)))
+    bounds_mdl, bounds_mdx, res = kapply.apply_to_model(
+        mdl, mdx, {"head": 1.6}, pivot="bounds", model_name="p_missionh"
+    )
+    assert res.ok, res.error
+    after = _spacing(_model_space_nodes(kl.parse(bounds_mdl, bounds_mdx)))
+    unchanged = [k for k, d in before.items() if after[k] == pytest.approx(d, rel=1e-3)]
+    assert unchanged, "expected node spacing to be left behind by the bounds pivot"
+
+
+def test_eyes_keep_their_clearance_from_the_face(pair):
+    """The reported symptom, measured: an eyeball sits ~3mm off the face skin,
+    and after a big head it should sit 1.6x that - not be swallowed."""
+    import math
+
+    mdl, mdx = pair("p_missionh")
+    def clearance(layout):
+        world = _model_space_nodes(layout)
+        return min(min(math.dist(p, q) for q in world["head"]) for p in world["eyeLA"])
+
+    vanilla = clearance(kl.parse(mdl, mdx))
+    new_mdl, new_mdx, res = kapply.apply_to_model(
+        mdl, mdx, {"head": 1.6}, pivot="joint", model_name="p_missionh"
+    )
+    assert res.ok, res.error
+    assert clearance(kl.parse(new_mdl, new_mdx)) == pytest.approx(vanilla * 1.6, rel=1e-3)
+
+
+def _ray_hits_mesh(origin, direction, triangles) -> bool:
+    """Moller-Trumbore, forward hits only."""
+    for a, b, c in triangles:
+        e1 = [b[i] - a[i] for i in range(3)]
+        e2 = [c[i] - a[i] for i in range(3)]
+        p = [
+            direction[1] * e2[2] - direction[2] * e2[1],
+            direction[2] * e2[0] - direction[0] * e2[2],
+            direction[0] * e2[1] - direction[1] * e2[0],
+        ]
+        det = sum(e1[i] * p[i] for i in range(3))
+        if abs(det) < 1e-12:
+            continue
+        inv = 1.0 / det
+        t0 = [origin[i] - a[i] for i in range(3)]
+        u = sum(t0[i] * p[i] for i in range(3)) * inv
+        if u < 0.0 or u > 1.0:
+            continue
+        q = [
+            t0[1] * e1[2] - t0[2] * e1[1],
+            t0[2] * e1[0] - t0[0] * e1[2],
+            t0[0] * e1[1] - t0[1] * e1[0],
+        ]
+        v = sum(direction[i] * q[i] for i in range(3)) * inv
+        if v < 0.0 or u + v > 1.0:
+            continue
+        if sum(e2[i] * q[i] for i in range(3)) * inv > 1e-6:
+            return True
+    return False
+
+
+def _eyeball_visibility(layout) -> float:
+    """Share of eyeball vertices with a clear line out through the eye socket.
+
+    The reported symptom - "the eyes seem non-existent" - measured directly:
+    the face points along +y, so an eyeball vertex is visible exactly when no
+    face-skin triangle sits in front of it.
+    """
+    from kmdlswap import edit as ke
+
+    world = _model_space_nodes(layout)
+    skin_faces = ke.extract(layout, layout.node_by_name("head")).faces
+    skin = world["head"]
+    triangles = [tuple(skin[i] for i in f.vertices) for f in skin_faces]
+    eye = world["eyeLA"]
+    clear = sum(1 for p in eye if not _ray_hits_mesh(p, (0.0, 1.0, 0.0), triangles))
+    return clear / len(eye)
+
+
+def test_the_eyeball_is_still_visible_through_the_socket(pair):
+    """Vanilla shows a sliver of eyeball through the socket. Growing the face
+    skin about its own centre closed that sliver completely - the eyes went
+    missing. Growing the whole head about its joint leaves it exactly as it was."""
+    mdl, mdx = pair("p_missionh")
+    vanilla = _eyeball_visibility(kl.parse(mdl, mdx))
+    assert vanilla > 0.0, "expected some eyeball to show in vanilla"
+
+    joint_mdl, joint_mdx, res = kapply.apply_to_model(
+        mdl, mdx, {"head": 1.6}, pivot="joint", model_name="p_missionh"
+    )
+    assert res.ok, res.error
+    assert _eyeball_visibility(kl.parse(joint_mdl, joint_mdx)) == pytest.approx(vanilla)
+
+    old_mdl, old_mdx, res = kapply.apply_to_model(
+        mdl, mdx, {"head": 1.6}, pivot="bounds", model_name="p_missionh"
+    )
+    assert res.ok, res.error
+    assert _eyeball_visibility(kl.parse(old_mdl, old_mdx)) == 0.0
+
+
+def test_stored_mesh_bounds_follow_the_geometry(pair):
+    """The engine culls and sorts by the per-mesh box; a resized mesh whose box
+    still describes the old geometry is a mesh the engine can get wrong."""
+    from kmdlswap import edit as ke
+
+    mdl, mdx = pair("p_missionh")
+    new_mdl, new_mdx, res = kapply.apply_to_model(
+        mdl, mdx, {"head": 1.6}, pivot="joint", model_name="p_missionh"
+    )
+    assert res.ok, res.error
+    layout = kl.parse(new_mdl, new_mdx)
+    for node in parts.mesh_nodes(layout):
+        bmin, bmax, radius, _average = ke.bounds(layout, node)
+        ps = ke.extract(layout, node).positions
+        for i in range(3):
+            assert bmin[i] <= min(p[i] for p in ps) + 1e-6
+            assert bmax[i] >= max(p[i] for p in ps) - 1e-6
+        assert radius > 0
+
+
+def test_invisible_scaffolding_is_left_alone(pair):
+    """A human body draws three meshes; the forty-odd `_g` boxes are skeleton.
+    Scaling those was work with nothing to show for it."""
+    layout = kl.parse(*pair("p_missionbb"))
+    visible = {n.name for n in parts.mesh_nodes(layout)}
+    assert visible == {"torso", "LArm", "RArm"}
+    assert not any(n.name.endswith("_g") for n in parts.mesh_nodes(layout))
+    # ... and the parts that only exist as bones now honestly match nothing.
+    assert kapply.targets(layout, "hand") == []
+    assert kapply.targets(layout, "foot") == []
 
 
 @pytest.mark.parametrize("effect_key", [e.key for e in keffects.EFFECTS])
@@ -127,3 +302,57 @@ def test_unknown_names_are_rejected():
         roster.resolve(["gandalf"])
     with pytest.raises(KeyError):
         keffects.resolve("explode")
+
+
+def test_compatibility_rejects_a_wildly_different_donor(pair):
+    """c_dewback shares a `head` node name with a human head model and nothing
+    else. Name overlap alone is not compatibility."""
+    from kmdlfun import catalogue as kc
+    from kmdlswap import layout as kl
+
+    idx = kc.ModelIndex()
+    for name in ("p_carthh", "n_dustilh", "c_dewback"):
+        idx.add(kc.describe(kl.parse(*pair(name)), name))
+
+    good = idx.compare("p_carthh", "n_dustilh")
+    assert good.tier == "good"
+    assert good.shared >= 6
+    assert good.same_supermodel
+
+    bad = idx.compare("p_carthh", "c_dewback")
+    assert bad.tier == "poor"
+    assert not bad.usable
+    assert bad.shared <= 1, "a dewback should not share human head parts"
+    # A head model and a body model do not have the same parts, and the message
+    # must say which is which rather than guess.
+    why = bad.why_not("p_carthh", "c_dewback")
+    assert "p_carthh is a head model" in why
+    assert "c_dewback is a body model" in why
+
+
+def test_donors_are_ranked_and_filtered(pair):
+    from kmdlfun import catalogue as kc
+    from kmdlswap import layout as kl
+
+    idx = kc.ModelIndex()
+    for name in ("p_carthh", "n_dustilh", "c_dewback"):
+        idx.add(kc.describe(kl.parse(*pair(name)), name))
+
+    usable = idx.donors_for("p_carthh")
+    assert [n for _, n in usable] == ["n_dustilh"]
+    everything = idx.donors_for("p_carthh", usable_only=False)
+    assert {n for _, n in everything} == {"n_dustilh", "c_dewback"}
+    # Best first.
+    assert everything[0][1] == "n_dustilh"
+
+
+def test_a_model_with_unique_node_names_has_no_donors(pair):
+    """HK-47's node names are his own, so nothing vanilla can be moved into him.
+    The app should say that rather than offer a list of junk."""
+    from kmdlfun import catalogue as kc
+    from kmdlswap import layout as kl
+
+    idx = kc.ModelIndex()
+    for name in ("p_hk47", "p_carthh", "c_dewback"):
+        idx.add(kc.describe(kl.parse(*pair(name)), name))
+    assert idx.donors_for("p_hk47") == []
