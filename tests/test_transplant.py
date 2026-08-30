@@ -128,3 +128,48 @@ def test_refuses_a_saber_or_unauthorable_node(pair):
     host_node = host.node_by_name("Head")
     donor_node = donor.node_by_name("RLeg")
     assert ktp.check_pair(host, host_node, donor, donor_node) is not None
+
+
+def test_refuses_to_change_a_head_models_vertex_count(pair):
+    """Established in-game: it stops the mouth and eyebrows moving."""
+    host_mdl, host_mdx = pair("p_carthh")
+    donor = kl.parse(*pair("n_dustilh"))
+    _, _, result = ktp.transplant_node(
+        host_mdl, host_mdx, donor, "n_dustilh", "Head", "Head"
+    )
+    assert not result.ok
+    assert "vertices rather than" in result.error
+    assert "--reshape" in result.error
+
+
+def test_reshape_is_allowed_and_preserves_the_host_exactly(pair):
+    """The reshape path keeps count, faces, UVs and weights, moving positions."""
+    from kmdlswap import mdx as kmdx
+
+    host_mdl, host_mdx = pair("p_carthh")
+    donor = kl.parse(*pair("n_dustilh"))
+    before = kl.parse(host_mdl, host_mdx)
+    new_mdl, new_mdx, result = ktp.transplant_node(
+        host_mdl, host_mdx, donor, "n_dustilh", "Head", "Head", reshape=True
+    )
+    assert result.ok, result.error
+    assert result.reshaped
+    # File sizes must not move: that is the property the engine cares about.
+    assert len(new_mdl) == len(host_mdl)
+    assert len(new_mdx) == len(host_mdx)
+
+    after = kl.parse(new_mdl, new_mdx)
+    a = before.node_by_name("Head")
+    b = after.node_by_name("Head")
+    assert b.vertex_count == a.vertex_count
+    ga, gb = ke.extract(before, a), ke.extract(after, b)
+    assert [f.vertices for f in ga.faces] == [f.vertices for f in gb.faces]
+    assert ga.columns.get("uv1") == gb.columns.get("uv1")
+
+    # Weights pass through verbatim; re-deriving them silently drops a bone.
+    ia = kmdx.influences(before, a)
+    ib = kmdx.influences(after, b)
+    for p, q in zip(ia, ib):
+        assert {x.bone_slot: round(x.weight, 5) for x in p} == {
+            x.bone_slot: round(x.weight, 5) for x in q
+        }
