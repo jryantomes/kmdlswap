@@ -251,6 +251,25 @@ class _Parser:
         r.skip(4)  # anim_scale
         self.L.supermodel = r.cstr(32)
 
+        # A node pointer sitting immediately after the supermodel name, which
+        # this parser skipped over for a long time and so never relocated.
+        #
+        # It resolves to the *exact start of a node header* in all 164 vanilla
+        # character models - `neck_g` in head models, the model's own root in
+        # body models - so it is a pointer, not data. Leaving it stale is what
+        # made the engine refuse to skin a model: grow any array that sits
+        # before its target and it lands 36 bytes short, inside the previous
+        # node, and the whole model loads rigid. That reproduced every in-game
+        # probe result, including the two that had looked like a
+        # skinned-versus-unskinned distinction.
+        #
+        # The name is inferred from where it points, not from documentation.
+        # See reports/SKIN_ROOT_POINTER_FINDINGS.md.
+        r.seek(base + 168)
+        super_root = r.u32()
+        if super_root not in NULL_OFFSETS:
+            self.off(base + 168, super_root, "node_header")
+
         r.seek(base + 176)
         self.cnt(base + 176, r.u32(), "model_mdx_size")
         self.cnt(base + 180, r.u32(), "model_mdx_offset")
