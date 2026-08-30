@@ -175,35 +175,31 @@ def to_host_space(
 
 
 def would_break_facial_animation(host_layout, host_node, donor_node) -> bool:
-    """Would this pairing change the vertex count of a *skinned* mesh in a head
-    model?
+    """Always False. Kept so callers and tests have something to point at.
 
-    Established by bisection in-game (reports/HEAD_ANIMATION_FINDINGS.md).
-    Growing `Head` by three unreferenced vertices breaks facial animation; so
-    does growing `tongue`, a different skinned mesh that the facial bones do not
-    deform and that is not even the last block in the MDX. Growing `hair`, which
-    is *unskinned*, does not.
+    This used to refuse any pairing that changed a skinned head mesh's vertex
+    count, on the strength of five in-game probes. The rule was wrong. The cause
+    was a node pointer at model header +168 that the parser never read and so
+    never relocated; grow an array before its target and the engine loads the
+    model rigid. Skinning was a coincidence - `hair` happened to sit after that
+    target and `Head` and `tongue` before it.
 
-    So the discriminator is skinning, not which mesh or where it sits. Any
-    skinned mesh in a head model is covered.
+    Fixed in `kmdlswap.layout`, and offset closure now proves the pointer
+    resolves, so failing to move it is a build-time error rather than a silent
+    in-game one. Confirmed in game 2026-08-30 with the probe that had broken
+    every previous time. See reports/SKIN_ROOT_POINTER_FINDINGS.md.
     """
-    from .apply import is_head_model
-
-    return (
-        host_node.is_skin
-        and is_head_model(host_layout)
-        and donor_node.vertex_count != host_node.vertex_count
-    )
+    return False
 
 
 def resize_risk(host_layout, host_node, donor_node) -> str | None:
     """A caution for resizing a skinned mesh outside a head model.
 
-    Only one body case has ever been checked in-game - HK-47's TorsoHoses went
-    from 124 vertices to 24 and still moved with his torso - and that test only
-    confirmed gross motion, not fine deformation. Given that every skinned resize
-    tried in a head model broke something, one weak positive is not enough to
-    call body meshes safe, but it is also not enough to refuse them.
+    The head-model failures that made this look alarming turned out to be a
+    stale pointer, now fixed, so the caution is much weaker than it was. It
+    stays because the evidence for body meshes is still thin: one in-game case,
+    HK-47's TorsoHoses going from 124 vertices to 24, and that only confirmed
+    gross motion rather than fine deformation.
     """
     from .apply import is_head_model
 
@@ -214,8 +210,8 @@ def resize_risk(host_layout, host_node, donor_node) -> str | None:
     ):
         return (
             f"{host_node.name!r} is skinned and its vertex count changes "
-            f"({host_node.vertex_count} -> {donor_node.vertex_count}). In head models "
-            f"that breaks facial animation; body meshes have only been checked once, "
+            f"({host_node.vertex_count} -> {donor_node.vertex_count}). Body meshes "
+            f"have only been checked once, "
             f"and only for gross motion. Use --reshape if the result looks wrong."
         )
     return None
@@ -275,16 +271,6 @@ def transplant_node(
     problem = check_pair(host_layout, host_node, donor_layout, donor_node)
     if problem:
         result.error = problem
-        return host_mdl, host_mdx, result
-
-    if not reshape and would_break_facial_animation(host_layout, host_node, donor_node):
-        result.error = (
-            f"{host_node.name!r} is a skinned mesh in a head model and the donor has "
-            f"{donor_node.vertex_count} vertices rather than {host_node.vertex_count}. "
-            f"Changing a head's vertex count stops the mouth and eyebrows moving "
-            f"in-game. Use --reshape to keep the host's topology and move its "
-            f"vertices onto the donor's surface instead."
-        )
         return host_mdl, host_mdx, result
 
     try:

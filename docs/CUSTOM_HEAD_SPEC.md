@@ -100,7 +100,7 @@ have caught it before anything was built.
 | Check | Meaning |
 |---|---|
 | Authorable columns | The node must need only `vertex`, `normal` and one UV set. A node carrying `uv2`, vertex colour or tangent frames is **rejected** — an OBJ cannot express them and inventing them is not acceptable. |
-| Skinned head | A **warning**, not a refusal. A skinned mesh in a head model cannot change its vertex count or facial animation breaks, so the custom mesh is used as a *shape to reshape onto* — the host keeps its own vertices, UVs and weights. |
+| Skinned head | **No longer a constraint.** A skinned mesh in a head model may change its vertex count freely. The failure that produced this rule was a node pointer at model header `+168` our writer never relocated — fixed and confirmed in game ([SKIN_ROOT_POINTER_FINDINGS.md](../reports/SKIN_ROOT_POINTER_FINDINGS.md)). `--reshape` remains available when you *want* the host's topology, UVs and weights kept. |
 | Unskinned target | The mesh's own topology and UVs are used as they are. This is the good case: HK-47 and T3-M4. |
 | Whole-model budget | Warns above 4,000 triangles, the brief's practical ceiling. |
 

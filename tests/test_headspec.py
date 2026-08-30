@@ -116,13 +116,17 @@ def test_every_vanilla_head_passes_its_own_rules(pair):
         assert v.accepted, f"{model}:{node_name} rejected: {[str(f) for f in v.failures]}"
 
 
-def test_target_check_flags_a_skinned_head(pair):
+def test_a_skinned_head_is_no_longer_flagged(pair):
+    """The warning here claimed a skinned head's vertex count could not change.
+    It came from a stale pointer in our own writer, now fixed and confirmed in
+    game, so the check reports a pass and says so."""
     layout = kl.parse(*pair("p_carthh"))
     node = layout.node_by_name("Head")
     v = headspec.check_against_target(cube(), layout, node)
-    assert v.accepted  # a warning, not a refusal
-    warn = next(f for f in v.findings if f.check == "skinned head")
-    assert "vertex count cannot change" in warn.detail
+    assert v.accepted
+    finding = next(f for f in v.findings if f.check == "skinned head")
+    assert finding.level == "pass"
+    assert "free to change" in finding.detail
 
 
 def test_target_check_refuses_unauthorable_columns(pair):

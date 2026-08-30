@@ -1,7 +1,7 @@
 # The head-animation constraint was our own stale pointer
 
 **Date:** 2026-08-30
-**Status:** cause identified, fixed in the parser, awaiting in-game confirmation
+**Status:** cause identified, fixed, and **confirmed in game 2026-08-30**
 **Supersedes the central claim of:** [HEAD_ANIMATION_FINDINGS.md](HEAD_ANIMATION_FINDINGS.md)
 
 ## The finding
@@ -104,7 +104,9 @@ resolves to `neck_g`, where before it stayed at `47630` and resolved to nothing.
 
 ## What this changes
 
-If confirmed in game, the following all dissolve:
+**Confirmed in game on 2026-08-30.** The rebuilt probe C - the same edit that
+had come back rigid every previous time - loads with the head turning and all
+animation working. The following all dissolve:
 
 - **The vertex-count rule.** Skinned head meshes can change vertex count.
 - **`--reshape` as a requirement.** It stays useful for keeping a host's UVs and
@@ -114,8 +116,17 @@ If confirmed in game, the following all dissolve:
 - **`docs/CUSTOM_HEAD_SPEC.md`'s skinned-head warning**, and the support matrix
   rows built on it.
 
-None of that should be rewritten until it is confirmed in game. A successful
-build is not proof.
+All of these have now been updated. `would_break_facial_animation` returns
+False and is kept only so callers and tests have something to point at; the
+headspec check reports a pass; the transplant refusal is gone and `--reshape` is
+no longer forced.
+
+The regression test is
+`tests/test_transplant.py::test_the_super_root_pointer_survives_a_growing_edit`.
+It grows `Head` (whose array sits *before* the pointer's target, so the pointer
+must move) and `hair` (which sits after, so it must not), and requires both to
+resolve to a node header. It can fail in either direction rather than merely
+confirming.
 
 ## Method note worth keeping
 
