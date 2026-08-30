@@ -67,6 +67,9 @@ def main(argv: list[str] | None = None) -> int:
     hd.add_argument("--host", help="model the head is going into, e.g. p_carthh")
     hd.add_argument("--node", help="node in that model (default: the pack's target)")
     hd.add_argument("--out", help="build it here; omit to only check")
+    hd.add_argument("--fit", action="store_true",
+                    help="scale and place the mesh onto the target node, using the "
+                         "pack's facing, up, scale and anchor hints")
     hd.add_argument("--template", action="store_true",
                     help="write a head.json template into the folder and stop")
 
@@ -344,10 +347,18 @@ def _head(args) -> int:
         except KeyError as exc:
             print(f"kmdlfun: {exc}", file=sys.stderr)
             return 1
+        if args.fit:
+            mesh = _fit_mesh(mesh, pack, layout, node)
+
         target = headspec.check_against_target(mesh, layout, node)
         for line in target.lines():
             print("  " + line)
         verdict.findings.extend(target.findings)
+
+        placement = headspec.check_placement(mesh, layout, node)
+        for line in placement.lines():
+            print("  " + line)
+        verdict.findings.extend(placement.findings)
 
     print()
     if verdict.failures:
@@ -410,3 +421,39 @@ def _head(args) -> int:
           + (f" and {pack.texture_path.name}" if pack.texture_path else ""))
     print("Copy them into Override. A successful build is not proof.")
     return 0
+
+
+def _fit_mesh(mesh, pack, layout, node):
+    """Orient, scale and place a foreign mesh onto a node.
+
+    Nothing outside KOTOR knows what scale or origin a head node uses, so a raw
+    export always needs this. The pack's hints say which way it was authored;
+    the node's own geometry says where it has to end up.
+    """
+    from kmdlswap import edit as ke
+
+    from . import headgen
+
+    host = ke.extract(layout, node)
+    hlo = [min(p[i] for p in host.positions) for i in range(3)]
+    hhi = [max(p[i] for p in host.positions) for i in range(3)]
+    size = [hhi[i] - hlo[i] for i in range(3)]
+    centre = [(hhi[i] + hlo[i]) / 2 for i in range(3)]
+
+    positions = headgen.orient(mesh.positions, facing=pack.facing, up=pack.up)
+    if pack.scale != 1.0:
+        size = [s * pack.scale for s in size]
+    positions = headgen.fit_to(positions, size, centre, anchor=pack.anchor)
+
+    before = mesh.positions
+    mesh.positions = positions
+    mesh.normals = headgen.vertex_normals(positions, mesh.faces) if mesh.normals else []
+    b_lo = [min(p[i] for p in before) for i in range(3)]
+    b_hi = [max(p[i] for p in before) for i in range(3)]
+    a_lo = [min(p[i] for p in positions) for i in range(3)]
+    a_hi = [max(p[i] for p in positions) for i in range(3)]
+    fmt = lambda s: "x".join(f"{c:.3f}" for c in s)  # noqa: E731
+    print(f"  fitted: {fmt([b_hi[i]-b_lo[i] for i in range(3)])} -> "
+          f"{fmt([a_hi[i]-a_lo[i] for i in range(3)])}"
+          f"   facing {pack.facing}, up {pack.up}, anchor {pack.anchor}")
+    return mesh

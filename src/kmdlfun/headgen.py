@@ -274,3 +274,25 @@ def build_pack(
         encoding="utf-8",
     )
     return root
+
+
+# Rotation about Z that brings a mesh's stated facing round to -Y, which is
+# where a KOTOR head node looks in its own space.
+FACING_TO_DEGREES = {"-y": 0.0, "+y": 180.0, "+x": -90.0, "-x": 90.0}
+
+
+def orient(positions, facing: str = "-y", up: str = "z"):
+    """Rotate a mesh from its own convention into the node's.
+
+    `up` handles the other common mismatch: many tools export Y-up, where KOTOR
+    is Z-up, and a head exported that way arrives lying on its back.
+    """
+    out = list(positions)
+    if up.lower() == "y":
+        out = [(x, -z, y) for (x, y, z) in out]
+    degrees = FACING_TO_DEGREES.get(facing.lower(), 0.0)
+    if degrees:
+        a = math.radians(degrees)
+        ca, sa = math.cos(a), math.sin(a)
+        out = [(x * ca - y * sa, x * sa + y * ca, z) for (x, y, z) in out]
+    return out
