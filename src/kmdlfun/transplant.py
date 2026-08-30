@@ -174,6 +174,23 @@ def to_host_space(
     return mesh, alignment
 
 
+def would_break_facial_animation(host_layout, host_node, donor_node) -> bool:
+    """Would this pairing change a head model's skinned vertex count?
+
+    Established in-game: doing that stops the mouth and eyebrows moving. See
+    reports/HEAD_ANIMATION_FINDINGS.md. Body meshes are unaffected - HK-47's
+    TorsoHoses went 124 -> 24 vertices and still animated - so the check is
+    deliberately scoped to head models rather than to all skinned meshes.
+    """
+    from .apply import is_head_model
+
+    return (
+        host_node.is_skin
+        and is_head_model(host_layout)
+        and donor_node.vertex_count != host_node.vertex_count
+    )
+
+
 def check_pair(host_layout, host_node, donor_layout, donor_node) -> str | None:
     """Why this pairing cannot be done, or None."""
     for label, layout, node in (
@@ -227,6 +244,16 @@ def transplant_node(
     problem = check_pair(host_layout, host_node, donor_layout, donor_node)
     if problem:
         result.error = problem
+        return host_mdl, host_mdx, result
+
+    if not reshape and would_break_facial_animation(host_layout, host_node, donor_node):
+        result.error = (
+            f"{host_node.name!r} is a skinned mesh in a head model and the donor has "
+            f"{donor_node.vertex_count} vertices rather than {host_node.vertex_count}. "
+            f"Changing a head's vertex count stops the mouth and eyebrows moving "
+            f"in-game. Use --reshape to keep the host's topology and move its "
+            f"vertices onto the donor's surface instead."
+        )
         return host_mdl, host_mdx, result
 
     try:
