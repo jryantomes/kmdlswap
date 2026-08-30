@@ -53,6 +53,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="keep the host's vertices and move them onto the donor's surface; "
                          "required for heads, whose facial animation breaks if the vertex "
                          "count changes")
+    tp.add_argument("--hide-unmatched", action="store_true",
+                    help="stop drawing host nodes the donor does not have, so the swap "
+                         "does not leave the old character's hair or accessories behind")
     tp.add_argument("--with-texture", action="store_true",
                     help="also take the donor's texture, sampling its UVs where each "
                          "host vertex lands (implies --reshape)")
@@ -212,10 +215,14 @@ def _transplant(args) -> int:
     # model is written, not after it has been loaded.
     taken = {h for h, _ in pairs}
     left = [n.name for n in ktp.kparts.mesh_nodes(host_layout) if n.name not in taken]
-    if left:
+    if left and not args.hide_unmatched:
         print(f"  left as {args.host}'s own: {', '.join(left)}")
         print(f"  ({args.donor} has no node of that name. These keep their original")
-        print("   shape and texture, so they may not sit right on the new head.)")
+        print("   shape and texture, so they may not sit right on the new head.")
+        print("   Use --hide-unmatched to stop drawing them.)")
+        print()
+    elif left:
+        print(f"  will hide (donor has no such node): {', '.join(left)}")
         print()
     results = []
     for host_node, donor_node in pairs:
@@ -247,6 +254,12 @@ def _transplant(args) -> int:
     if not done:
         print("nothing transferred", file=sys.stderr)
         return 1
+
+    if args.hide_unmatched and left:
+        from . import visibility as kvis
+
+        mdl, hidden = kvis.hide_nodes(kl.parse(mdl, mdx), mdl, left)
+        print(f"hid {len(hidden)} node(s) the donor does not have: {', '.join(hidden)}")
 
     final = kv.check(kl.parse(mdl, mdx))
     if not final.ok:
