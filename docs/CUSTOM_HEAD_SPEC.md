@@ -106,6 +106,30 @@ which means:
 So a custom head for a human companion is a *sculpting target*, and one for a
 droid is a *replacement*. Author accordingly.
 
+## A worked example
+
+`kmdlfun.headgen` generates a head that satisfies every criterion by
+construction, used by the test suite as a known-good fixture:
+
+```bash
+python tools/make_head.py --out packs/moldy_one --install "<K1 root>"
+kmdlfun head packs/moldy_one --install "<K1 root>" --host p_hk47 --node head
+```
+
+It starts from a UV sphere for exactly the reasons listed above - closed, one
+piece, consistently wound, naturally UV-mapped - and shapes it with radial
+falloffs, which move vertices without touching topology. The topology criteria
+therefore cannot fail however the shaping is tuned. It comes out at 266
+vertices, 528 triangles, 0.0% open edges, with a 256x256 texture.
+
+It is generated rather than committed: the generator is deterministic, so a
+fixture built on demand cannot drift from the code that makes it, and no
+binaries end up in the repo.
+
+Being straight about it: structurally it is a valid head, but procedural radial
+shaping gives an organic blob rather than a designed face. It exists to prove
+the path and to catch regressions along it, not to be worn.
+
 ## What is still not covered
 
 - **Nothing validates that the head looks right.** These are structural checks.
