@@ -220,3 +220,37 @@ def test_texture_name_must_fit_the_field(pair):
     geo = ke.extract(lay, node)
     with pytest.raises(RewriteError, match="does not fit"):
         ke.replace_geometry(lay, node, geo, texture="x" * 40)
+
+
+def test_hiding_a_node_is_a_one_byte_patch(pair):
+    """A node the donor lacks cannot be removed - the hierarchy is never
+    touched - but it can be told not to draw, which is what vanilla does to the
+    18,058 mesh nodes it keeps as invisible skeleton boxes."""
+    from kmdlfun import parts as kparts
+    from kmdlfun import visibility as kvis
+
+    mdl, mdx = pair("p_carthh")
+    lay = kl.parse(mdl, mdx)
+    node = lay.node_by_name("hair")
+    assert kparts.renders(lay, node)
+
+    out = kvis.set_rendered(mdl, node, False)
+    assert len(out) == len(mdl)
+    assert sum(1 for a, b in zip(mdl, out) if a != b) == 1
+
+    after = kl.parse(out, mdx)
+    assert not kparts.renders(after, after.node_by_name("hair"))
+    assert kv.check(after).ok
+    # Nothing else moved.
+    assert [n.name for n in after.nodes] == [n.name for n in lay.nodes]
+    assert len(kparts.mesh_nodes(after)) == len(kparts.mesh_nodes(lay)) - 1
+
+
+def test_hide_nodes_reports_what_it_hid(pair):
+    from kmdlfun import visibility as kvis
+
+    mdl, mdx = pair("p_carthh")
+    lay = kl.parse(mdl, mdx)
+    out, hidden = kvis.hide_nodes(lay, mdl, ["hair", "nonexistent"])
+    assert hidden == ["hair"]
+    assert kv.check(kl.parse(out, mdx)).ok

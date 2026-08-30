@@ -78,16 +78,18 @@ writing:
    shape and texture, so they may not sit right on the new head.)
 ```
 
-Worth thinking about tomorrow, roughly in order of appeal:
+**Solved with `--hide-unmatched`.** Byte 313 of the trimesh subheader is the
+render flag, and vanilla clears it on 18,058 of its 76,767 mesh nodes - it is how
+a body carries invisible `_g` skeleton boxes. Clearing it on an unmatched node
+tells the engine not to draw it: a **one-byte patch**, no geometry change, no
+vertex count change, hierarchy untouched. Verified on file: exactly one byte
+differs, sizes identical, visible meshes 9 -> 8.
 
-1. **Pick donors that have the same parts.** The catalogue already knows who has
-   what; the creator could simply prefer donors whose node set covers the host's.
-2. **Retexture unmatched nodes to the donor's texture** without reshaping them.
-   Cheap - it is a header patch - but their UVs still belong to the host texture,
-   so it may look worse, not better.
-3. **Shrink an unwanted node to nothing.** Scaling its geometry to near-zero
-   effectively hides it without touching the hierarchy. Crude, but it would let a
-   bald donor actually look bald.
+`out_swap/carth_dustil_full/` (Dustil's head, Dustil's texture, hair hidden) is
+in Override for test (a).
+
+Still worth considering: preferring donors whose node set already covers the
+host's, which the catalogue knows how to answer.
 
 ### Still open on textures
 
