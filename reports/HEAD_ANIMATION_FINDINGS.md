@@ -79,6 +79,18 @@ The trade-off is real and worth stating: the result has the **host's** resolutio
 and the **host's** UVs. A donor with finer detail cannot express it, and where the
 two shapes differ greatly the host's topology stretches to reach.
 
+**Verified in-game (2026-08-29).** `p_carthh` reshaped onto `n_rodian`'s head:
+the face is visibly changed - the Rodian snout pulls his profile forward - and
+his mouth animates normally in dialogue. Vertex count, faces, UVs and per-vertex
+weights are byte-identical to vanilla; only positions moved, and both files are
+exactly the original size.
+
+One detail that mattered: weights must pass through **verbatim**, not be
+re-derived. Re-deriving them by nearest point after the surface has moved
+silently dropped a bone (16 slots became 15), because a bone's region no longer
+got sampled. Topology is unchanged in a reshape, so vertex *i* simply keeps its
+own weights.
+
 ## Still unknown
 
 Why the count matters. Nothing in the file that this project can identify depends
