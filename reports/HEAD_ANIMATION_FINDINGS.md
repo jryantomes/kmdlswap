@@ -135,3 +135,81 @@ as the vertex count is left alone.
 Why the count matters. Nothing in the file that this project can identify depends
 on a skinned head mesh's vertex count. The engine evidently does. Until that is
 understood, `--reshape` is a workaround, not a fix, and head swaps should use it.
+
+## What the modding community knows (searched 2026-08-30)
+
+Short version: **nobody has published this.** The constraint we measured is not
+documented anywhere findable, and the canonical reverse-engineering thread lists
+our exact questions as open.
+
+### The canonical thread is explicit about the gap
+
+[Kotor/TSL Model Format (MDL/MDX) Technical
+Details](https://deadlystream.com/topic/4501-kotortsl-model-format-mdlmdx-technical-details/)
+is the community's format reference. It acknowledges as unresolved:
+
+- the flag structures distinguishing node types,
+- skin mesh header composition (bonemap, bone indices),
+- **whether per-frame vertex arrays or morph targets exist**,
+- bone count limitations.
+
+Those are precisely the places we would have to look. The thread is described by
+its own participants as ongoing reverse-engineering rather than documentation.
+
+### What the community does say, and why none of it fits
+
+| Claim | Source | Does it explain our failure? |
+|---|---|---|
+| Head models have no animations of their own; they inherit from a **supermodel** | [Missing animations in head models](https://deadlystream.com/topic/5551-tsl-missing-animations-in-head-models/) | No. We never touch the supermodel field, and the same file animates correctly until the vertex count changes. |
+| Broken animation comes from **bad bone weights** in the MDX | same | No. Probe C kept weights byte-identical to vanilla and animation still broke. |
+| KOTOR "bones" are **objects acting as bones**, not a real skeleton | [Creating new facial animations](https://deadlystream.com/topic/7429-creating-new-facial-animations/) | Consistent with what we see, but not a mechanism. |
+| Changing vertex counts "complicates animation **retargeting**" | [Missing animations in head models](https://deadlystream.com/topic/5551-tsl-missing-animations-in-head-models/) | Closest thing to our finding anywhere, but it is a passing remark about workflow, with no mechanism and no distinction between skinned and unskinned meshes. |
+| Max **16 bones per mesh** | [Creating new facial animations](https://deadlystream.com/topic/7429-creating-new-facial-animations/) | Half right - see below. |
+
+### Two things worth having, from reading kotorblender
+
+[kotorblender](https://github.com/seedhartha/kotorblender) is an independent
+implementation that round-trips these files, so it is a real second opinion.
+
+**Our skin header reading is correct.** Field for field, its reader agrees with
+ours: an unknown array def, the two MDX stride offsets for weights and bone
+indices, the bonemap offset and count, qbone/tbone/garbage array defs, then a
+fixed 16-entry `bone_indices` table. This eliminates a live hypothesis - we are
+not misreading a field.
+
+**Nothing in the skin header is derived from the vertex count.** The bonemap is
+sized by node count, qbones and tbones by bone count, and the two MDX offsets are
+positions *within* the vertex stride, so they do not move when the count changes.
+An independent implementation having no vertex-count-dependent field either is
+decent evidence that the dependency is not in the file at all.
+
+### A community claim our corpus contradicts
+
+The "16 bones per mesh" limit is the size of the fixed `bone_indices[16]` table
+in the skin header, not a cap on what a mesh may use. Across all 164 character
+models and 495 skinned meshes:
+
+| bone slots used | 1-9 | 10-13 | 14 | 15 | 16 | **17** |
+|---|---|---|---|---|---|---|
+| meshes | 115 | 99 | 124 | 80 | 67 | **10** |
+
+Ten vanilla meshes use 17, including `n_yoda:Head`, `n_trandoshan:Head` and
+`p_juhanibb:torso`. So the bonemap, not the 16-slot table, is what the engine
+reads - which is what this project already concluded independently, and why
+`NodeInfo.bones` carries the note to prefer the bonemap.
+
+### One hypothesis this killed
+
+The search suggested morph-target / per-frame vertex animation as a mechanism -
+which would explain the constraint perfectly, since stored vertex arrays would
+have the old count. It is wrong for KOTOR characters: the `ANIM` node flag
+(0x80) exists in the format but **no node in `p_carthh`, `p_hk47` or
+`p_bastilah` carries it**. Every mesh is `mesh`, `mesh|skin` or `mesh|dangly`.
+
+### Where this leaves us
+
+There is no wheel to avoid reinventing. The constraint is real, ours is
+apparently the first measurement of it, and an independent reader of the same
+format exposes nothing that would explain it - so the dependency is most likely
+in the engine's runtime handling of skinned geometry, not in a field we are
+failing to update. `--reshape` remains the right answer.
