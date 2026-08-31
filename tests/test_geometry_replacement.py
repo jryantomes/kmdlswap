@@ -175,7 +175,8 @@ def test_swap_with_different_topology(hk47):
 @pytest.mark.parametrize(
     ("model", "node_name", "column"),
     [
-        ("c_bmspecdiff", "RLeg", "tangent"),
+        # `tangent` used to be here and is now authored - see test_tangents.py.
+        # `uv2` is the last column in the game this tool will not invent.
         ("crossgob", "Corner09", "uv2"),
     ],
 )

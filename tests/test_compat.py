@@ -82,17 +82,35 @@ def test_a_donor_shaped_nothing_like_the_host_ranks_below_one_that_is(k1):
     assert not rodian.blocked, "a usable donor must not be refused"
 
 
-def test_a_donor_that_cannot_be_read_is_reported_not_raised(k1):
-    """Some vanilla heads carry MDX columns the writer cannot author. That is a
-    real limit and the list must say so, rather than dropping the donor
-    silently or failing the whole ranking."""
-    fits = compat.rank(*k1.read(HOST), k1, ["n_selkath", "n_dustilh"], host_name=HOST)
+def test_no_vanilla_head_is_refused_any_more(k1):
+    """`n_selkath` and ten others were refused for carrying a tangent column.
 
-    blocked = [f for f in fits if f.blocked]
-    assert len(blocked) == 1 and blocked[0].donor == "n_selkath"
-    assert "tangent" in blocked[0].blocked
-    assert blocked[0].grade == "blocked"
-    assert fits[-1].blocked, "blocked donors sort last, never above a usable one"
+    That column is now authored, and it was the last one any head in the game
+    carries - so every vanilla head is reachable. The refusal path still exists
+    for a column this tool genuinely cannot invent; `uv2` is the remaining one,
+    and no head has it.
+    """
+    names = [n for n in ("n_selkath", "n_rakata", "n_xorh", "twilek_m",
+                         "c_rakghoul", "n_dustilh") if k1.has(n)]
+    fits = compat.rank(*k1.read(HOST), k1, names, host_name=HOST)
+
+    blocked = [f.donor for f in fits if f.blocked]
+    assert not blocked, f"still refused: {blocked}"
+
+
+def test_a_refused_donor_is_reported_rather_than_dropped():
+    """The mechanism, without needing a model that trips it: a refusal has to
+    be visible in the list and sort below everything usable, never vanish."""
+    good = compat.Fit(donor="fine", donor_node="Head", host=HOST,
+                      host_node="head", far=0.30)
+    bad = compat.Fit(donor="nope", donor_node="Head", host=HOST,
+                     host_node="head", blocked="donor 'Head' carries uv2")
+
+    assert bad.grade == "blocked"
+    assert "uv2" in bad.line and "uv2" in " ".join(bad.notes())
+    assert sorted([bad, good], key=lambda f: f.rank_key)[-1] is bad, (
+        "blocked donors sort last, never above a usable one"
+    )
 
 
 def test_a_name_the_library_does_not_have_is_skipped(k1):

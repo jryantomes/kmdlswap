@@ -20,7 +20,11 @@ from .layout import Layout, NodeInfo
 from .obj import ObjMesh
 
 # Columns we can produce from an OBJ.
-AUTHORABLE = {"vertex", "normal", "uv1"}
+# `tangent` joined this once the column was understood: it is nine floats in
+# (bitangent, tangent, normal) order, and it can be derived from the geometry
+# and UVs the replacement already has. See `kmdlswap.tangents`. Twenty-one head
+# models across the two games were refused solely for carrying it.
+AUTHORABLE = {"vertex", "normal", "uv1", "tangent"}
 
 
 @dataclass
@@ -40,6 +44,7 @@ class SwapReport:
     bones_claimed: dict[int, int] = field(default_factory=dict)
     normals_source: str = "obj"
     uv_source: str = "obj"
+    tangent_source: str = ""
     warnings: list[str] = field(default_factory=list)
 
     def lines(self) -> list[str]:
@@ -50,6 +55,8 @@ class SwapReport:
             f"normals     from {self.normals_source}",
             f"texcoords   from {self.uv_source}",
         ]
+        if self.tangent_source:
+            out.append(f"tangents    {self.tangent_source}")
         if self.skinned:
             out.append(
                 f"skinning    transferred; max {self.max_influences} influences/vertex, "
@@ -167,6 +174,22 @@ def build_replacement(
             )
 
     normals = columns.get("normal") or _face_normals(mesh.positions, mesh.faces)
+
+    if "tangent" in stride.columns:
+        # Derived rather than carried: an OBJ has no tangent basis, and the one
+        # the replaced mesh had described geometry that is gone.
+        from . import tangents as ktangents
+
+        columns["tangent"] = ktangents.compute(
+            mesh.positions, mesh.faces, columns.get("uv1") or [], normals
+        )
+        report.tangent_source = "computed from the UV gradient"
+        if not mesh.has_uvs:
+            report.warnings.append(
+                "the mesh carries a tangent basis but the OBJ has no UVs, so the "
+                "basis is arbitrary; bump mapping will look wrong"
+            )
+
     adjacency = topology.build_adjacency(mesh.faces, mesh.positions)
 
     # Vanilla varies `material` face to face - it reads as a smoothing group -

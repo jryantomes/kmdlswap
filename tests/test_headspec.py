@@ -130,11 +130,11 @@ def test_a_skinned_head_is_no_longer_flagged(pair):
 
 
 def test_target_check_refuses_unauthorable_columns(pair):
-    layout = kl.parse(*pair("c_bmspecdiff"))
-    node = layout.node_by_name("RLeg")  # carries tangent frames
+    layout = kl.parse(*pair("crossgob"))
+    node = layout.node_by_name("Corner09")  # carries a second UV set
     v = headspec.check_against_target(cube(), layout, node)
     assert not v.accepted
-    assert any("tangent" in f.detail for f in v.failures)
+    assert any("uv2" in f.detail for f in v.failures)
 
 
 # --- the pack format --------------------------------------------------------

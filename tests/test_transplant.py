@@ -131,9 +131,9 @@ def test_fit_rescales_a_mismatched_donor(pair):
 
 def test_refuses_a_saber_or_unauthorable_node(pair):
     host = kl.parse(*pair("p_carthh"))
-    donor = kl.parse(*pair("c_bmspecdiff"))  # carries tangent frames
+    donor = kl.parse(*pair("crossgob"))  # carries a second UV set
     host_node = host.node_by_name("Head")
-    donor_node = donor.node_by_name("RLeg")
+    donor_node = donor.node_by_name("Corner09")
     assert ktp.check_pair(host, host_node, donor, donor_node) is not None
 
 
