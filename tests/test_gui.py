@@ -231,10 +231,22 @@ def test_the_app_can_take_a_donor_from_the_second_game(app, tmp_path):
     assert "tent01" in log and "tent04" in log
     # Not fitting still places it, rather than leaving it inside the chest.
     assert "drift 0.000" in log
-    # And the donor's texture has to travel with it or the model loads grey.
-    assert (tmp_path / "N_QuarrenH01.tpc").is_file(), sorted(
-        p.name for p in tmp_path.iterdir()
-    )
+    # Builds are kept in their own named folder rather than overwriting the
+    # output directory, so the texture lives beside the model it belongs to.
+    from kmdlfun import builds as kbuilds
+
+    found = kbuilds.find(tmp_path)
+    assert len(found) == 1, [b.name for b in found]
+    build = found[0]
+    assert "quarren" in build.name.lower()
+    names = {f["name"] for f in build.manifest["files"]}
+    assert names == {"p_carthh.mdl", "p_carthh.mdx", "N_QuarrenH01.tpc"}, names
+    assert not build.check(), build.check()
+
+    # The manifest has to say what it is, or a good result cannot be repeated.
+    assert build.manifest["donor"]["game"] == "K2"
+    assert build.manifest["host"]["game"] == "K1"
+    assert set(build.manifest["merged"]) == {"tent01", "tent02", "tent03", "tent04"}
 
 
 def test_the_anchor_is_the_biggest_part_not_the_first(pair):
