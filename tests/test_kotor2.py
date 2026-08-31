@@ -161,3 +161,101 @@ def test_every_k2_model_parses(k2_path):
             bad += 1
     assert checked > 3000
     assert bad == 0, f"{bad} of {checked} K2 models failed"
+
+
+# --- the donor's own rig -----------------------------------------------------
+
+
+def test_both_games_use_the_same_facial_rig(k2, pair):
+    """Why a K2 head can keep its own weights at all.
+
+    Bone *slots* are per-model indices and cannot be copied across. Bone *names*
+    can - and all 16 of Carth's appear on a KOTOR 2 Quarren.
+    """
+    from kmdlfun import transplant as ktp
+
+    host = kl.parse(*pair("p_carthh"))
+    donor = kl.parse(*k2.read("n_quarren"))
+    assert ktp.rigs_match(donor, donor.node_by_name("head"),
+                          host, host.node_by_name("Head"))
+
+
+def test_the_donors_weights_are_remapped_by_name_not_copied(k2, pair):
+    """Slots differ between models; the mapping has to go through names."""
+    from kmdlfun import transplant as ktp
+    from kmdlswap import weights as kw
+
+    host = kl.parse(*pair("p_carthh"))
+    hn = host.node_by_name("Head")
+    donor = kl.parse(*k2.read("n_quarren"))
+    dn = donor.node_by_name("head")
+    geo = ke.extract(donor, dn)
+
+    out, absent = ktp.remap_influences(donor, dn, host, hn, geo.influences)
+    assert not absent, absent
+    assert len(out) == len(geo.influences)
+    assert not kw.check(out)
+
+    host_slots = {s for s in hn.bonemap if s >= 0}
+    used = {i.bone_slot for infl in out for i in infl}
+    assert used <= host_slots, "every weight must land on a slot the host has"
+    assert len(used) == 16
+
+    # Same weight *values*, different slot numbers - the donor's rigging is kept.
+    # Not bit-exact: remapping renormalises, and the stored weights sum to 1.0
+    # only within float32, so each shifts by about 1e-5.
+    assert sorted(i.weight for i in out[0]) == pytest.approx(
+        sorted(i.weight for i in geo.influences[0]), abs=1e-4
+    )
+
+
+def test_a_bone_the_host_lacks_is_dropped_and_reported(k2, pair):
+    """Never invent one. Drop it, renormalise, and say which."""
+    from kmdlfun import transplant as ktp
+    from kmdlswap import weights as kw
+
+    host = kl.parse(*pair("p_carthh"))
+    hn = host.node_by_name("Head")
+    donor = kl.parse(*k2.read("n_quarren"))
+    dn = donor.node_by_name("head")
+    geo = ke.extract(donor, dn)
+
+    # Pretend the host has no jaw.
+    crippled = type(hn)(**{f: getattr(hn, f) for f in hn.__slots__})
+    jaw = next(i for i, n in enumerate(host.nodes) if n.name == "f_jaw_g")
+    bonemap = list(hn.bonemap)
+    bonemap[jaw] = -1
+    crippled.bonemap = tuple(bonemap)
+
+    out, absent = ktp.remap_influences(donor, dn, host, crippled, geo.influences)
+    assert absent == ["f_jaw_g"]
+    assert not kw.check([i for i in out if i]), "the rest must still be valid"
+
+
+def test_place_moves_without_resizing(k2, pair):
+    """The point of --place. Fitting shrinks a donor until its widest axis fits
+    the host's box, which makes a Quarren that is not Quarren-sized."""
+    import numpy as np
+
+    from kmdlfun import transplant as ktp
+
+    host = kl.parse(*pair("p_carthh"))
+    hn = host.node_by_name("Head")
+    donor = kl.parse(*k2.read("n_quarren"))
+    dn = donor.node_by_name("head")
+
+    def box(mesh):
+        P = np.asarray(mesh.positions)
+        return P.max(axis=0) - P.min(axis=0)
+
+    native, _ = ktp.to_host_space(donor, dn, host, hn, place=True)
+    fitted, _ = ktp.to_host_space(donor, dn, host, hn, fit=True)
+    raw, _ = ktp.to_host_space(donor, dn, host, hn)
+
+    assert np.allclose(box(native), box(raw)), "place must not resize"
+    assert (box(fitted) < box(native)).all(), "fit shrinks this donor"
+
+    # ...but it does move it onto the host part.
+    host_mid = np.asarray(ke.extract(host, hn).positions).mean(axis=0)
+    assert np.linalg.norm(np.asarray(native.positions).mean(axis=0) - host_mid) < \
+        np.linalg.norm(np.asarray(raw.positions).mean(axis=0) - host_mid)
