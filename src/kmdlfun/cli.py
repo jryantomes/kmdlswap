@@ -704,7 +704,7 @@ def _transplant(args) -> int:
         from . import textures as ktextures
 
         for line in ktextures.export_donor_textures(
-            mdl, mdx, args.donor_install, out_dir
+            mdl, mdx, args.donor_install, out_dir, host_install=args.install
         ):
             print(f"  {line}")
 

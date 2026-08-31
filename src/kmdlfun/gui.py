@@ -1822,7 +1822,8 @@ class App(ttk.Frame):
                 from . import textures as ktextures
 
                 lines.extend(ktextures.export_donor_textures(
-                    mdl, mdx, cfg.donor_install, out
+                    mdl, mdx, cfg.donor_install, out,
+                    host_install=cfg.install,
                 ))
             build = kbuilds.adopt(out, {
                 "kind": "transplant",

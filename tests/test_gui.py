@@ -690,3 +690,40 @@ def test_a_self_contained_host_is_previewed_on_its_own(app, tmp_path):
     assert app.viewport.labels == ["p_hk47 (now)", "p_hk47 <- p_carthh"], (
         "a self-contained model should be drawn as itself, with no ' on ...'"
     )
+
+
+def test_a_cross_game_build_ships_only_what_the_host_lacks(app, tmp_path, k2_path):
+    """A built model still names the host's own textures on the parts that did
+    not change - Carth keeps `P_CarthH01` on his hair and teeth - and both games
+    ship a file by that name. Copying the donor game's copy into Override puts a
+    KOTOR 2 asset in front of the KOTOR 1 one for every model that uses it, not
+    just this build.
+    """
+    transplant_tab(app)
+    app.install2.set(str(k2_path))
+    app.donor_game.set("K2")
+    app._refresh_donors()
+    mira = [v for v in app.donor_choices() if v.startswith("p_mirah")]
+    if not mira:
+        pytest.skip("p_mirah not offered from this K2 install")
+
+    app.out_dir.set(str(tmp_path))
+    app.host.set("p_carthh")
+    app.donor.set(mira[0])
+    app.opt_texture.set(True)
+    app.opt_hide.set(True)
+    app.opt_fit.set(False)
+    app._start(preview=False)
+    pump(app, seconds=20.0)
+
+    log = app.log.get("1.0", "end")
+    assert "ERROR" not in log, log[-400:]
+
+    built = list(tmp_path.glob("*/p_carthh.mdl"))
+    assert built, list(tmp_path.iterdir())
+    shipped = {p.name.lower() for p in built[0].parent.iterdir()}
+
+    assert "p_mirah.tpc" in shipped, f"the donor's texture is missing: {shipped}"
+    assert not any(n.startswith("p_carthh01") for n in shipped), (
+        f"shipped a KOTOR 2 copy of a KOTOR 1 texture: {shipped}"
+    )

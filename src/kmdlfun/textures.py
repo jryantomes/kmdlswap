@@ -79,6 +79,34 @@ class TextureCache:
                         self._loose.setdefault(p.stem.lower(), p)
         return self._loose.get(resref.lower())
 
+    def packed(self, resref: str) -> np.ndarray | None:
+        """Only what the game *ships*, ignoring Override.
+
+        The difference matters when deciding whether a build has to carry a
+        texture with it. Override is where this tool puts things, so a plain
+        lookup answers "is it there now" - and after installing one Quarren
+        build, the next one would decide the host already had that texture and
+        ship without it. The question is what the game supplies on its own.
+        """
+        if not self.install:
+            return None
+        try:
+            from pykotor.extract.installation import Installation, SearchLocation
+
+            if self._inst is None:
+                self._inst = Installation(str(self.install))
+            # An explicit order without OVERRIDE. The default order includes it,
+            # which is the whole thing this method exists to avoid.
+            tpc = self._inst.texture(resref, order=[
+                SearchLocation.TEXTURES_TPA,
+                SearchLocation.TEXTURES_TPB,
+                SearchLocation.TEXTURES_TPC,
+                SearchLocation.CHITIN,
+            ])
+            return None if tpc is None else _from_tpc_object(tpc)
+        except Exception:  # noqa: BLE001
+            return None
+
     def _from_packs(self, resref: str) -> np.ndarray | None:
         if not self.install:
             return None
@@ -154,14 +182,22 @@ def raw_texture(install: str | Path, resref: str) -> tuple[bytes, str] | None:
     return bytes(data), str(ext).lstrip(".")
 
 
-def export_donor_textures(mdl: bytes, mdx: bytes, donor_install, out_dir) -> list[str]:
-    """Write out any texture the built model names that the donor game supplies.
+def export_donor_textures(mdl: bytes, mdx: bytes, donor_install, out_dir,
+                          host_install=None) -> list[str]:
+    """Write out any texture the built model names that the *host* game lacks.
 
     A donor from another install brings a texture the host game has never heard
     of, and without it the model loads grey - which reads as a modelling failure
     and is really a missing file. The shipped bytes are copied verbatim where
     they can be, because a re-encode is a place for a mistake to hide: decoding
     a Quarren's RGBA texture to RGB dropped its alpha and cost it its eyes.
+
+    `host_install` is what stops this shipping too much. A built model still
+    names the host's own textures on the parts that did not change - Carth keeps
+    `P_CarthH01` on his hair and teeth - and both games ship a file by that
+    name. Copying the donor game's copy into Override puts a KOTOR 2 asset in
+    front of the KOTOR 1 one for every model that uses it, not just this build.
+    They happen to be byte-identical for Carth; that is luck, not a reason.
     """
     from pathlib import Path as _Path
 
@@ -173,10 +209,16 @@ def export_donor_textures(mdl: bytes, mdx: bytes, donor_install, out_dir) -> lis
     out_dir = _Path(out_dir)
     layout = kl.parse(mdl, mdx)
     donor_side = TextureCache(donor_install)
+    host_side = TextureCache(host_install) if host_install else None
 
     notes: list[str] = []
     for name in sorted({krender.node_texture(layout, n)
                         for n in kparts.mesh_nodes(layout)} - {""}):
+        if host_side is not None and host_side.packed(name) is not None:
+            # The host game ships this one itself, so leave its copy alone.
+            # Deliberately not `get`, which would see Override - where this
+            # tool's own previous installs live.
+            continue
         raw = raw_texture(donor_install, name)
         if raw is not None:
             data, ext = raw
