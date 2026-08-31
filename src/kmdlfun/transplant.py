@@ -204,6 +204,29 @@ def rigs_match(donor_layout, donor_node, host_layout, host_node) -> bool:
     return bool(donor_names) and donor_names <= host_names
 
 
+def model_alignment(donor_layout, donor_node, host_layout, host_node):
+    """The model-space shift that puts a donor part where the host's part sits.
+
+    Worked out once from the anchor pair - the head - and then applied to every
+    other part of the same transplant, so their relative positions survive.
+    A full-body donor keeps its head near standing height while a head-only host
+    keeps its geometry near the origin, and without this the two are about 1.5
+    units apart.
+    """
+    import numpy as np
+
+    from . import space
+
+    def centre(layout, node):
+        rest = space.rest_pose(layout)[node.index]
+        R = np.asarray(rest.rotation, dtype=np.float64)
+        T = np.asarray(rest.position, dtype=np.float64)
+        P = np.asarray(ke.extract(layout, node).positions, dtype=np.float64) @ R.T + T
+        return (P.min(axis=0) + P.max(axis=0)) / 2.0
+
+    return tuple(centre(host_layout, host_node) - centre(donor_layout, donor_node))
+
+
 def to_host_space(
     donor_layout: kl.Layout,
     donor_node,
@@ -213,6 +236,7 @@ def to_host_space(
     fit: bool = False,
     scale: float = 1.0,
     place: bool = False,
+    model_offset: tuple[float, float, float] | None = None,
 ) -> tuple[ObjMesh, Alignment]:
     """Express a donor node's geometry in the host node's own frame."""
     donor_geo = ke.extract(donor_layout, donor_node)
@@ -227,7 +251,21 @@ def to_host_space(
             for i in range(3)
         )
 
-    moved = [host_rest.to_local(to_model(donor_rest, v)) for v in donor_geo.positions]
+    # Donor node space -> donor model space -> host node space. A shared
+    # `model_offset` is applied in the middle, in *model* space, because that is
+    # the only frame several nodes have in common: each host node has its own
+    # local space, so one translation cannot be expressed in all of them.
+    #
+    # That is what lets a Quarren's four mouth tentacles land in their right
+    # places relative to its head, rather than each being centred on whichever
+    # unrelated node of Carth's is carrying it.
+    shift = model_offset or (0.0, 0.0, 0.0)
+    moved = [
+        host_rest.to_local(
+            tuple(c + shift[i] for i, c in enumerate(to_model(donor_rest, v)))
+        )
+        for v in donor_geo.positions
+    ]
 
     host_lo, host_hi = _bounds(host_geo.positions)
     donor_lo, donor_hi = _bounds(moved)
@@ -369,6 +407,7 @@ def transplant_node(
     fit: bool = False,
     scale: float = 1.0,
     place: bool = False,
+    model_offset: tuple[float, float, float] | None = None,
     max_influences: int = 4,
     reshape: bool = False,
     with_texture: bool = False,
@@ -399,7 +438,7 @@ def transplant_node(
     try:
         mesh, alignment = to_host_space(
             donor_layout, donor_node, host_layout, host_node,
-            fit=fit, scale=scale, place=place,
+            fit=fit, scale=scale, place=place, model_offset=model_offset,
         )
         result.alignment = alignment
         result.warnings.extend(alignment.notes())
