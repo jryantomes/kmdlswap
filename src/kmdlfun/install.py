@@ -26,7 +26,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 MANIFEST = ".kmdlfun_installed.json"
-INSTALLABLE = {".mdl", ".mdx", ".tga", ".tpc", ".txi"}
+# `.2da` is how the game learns a new model exists. It is also the one
+# extension here that a build *shares* with other mods, so installing one is
+# the case the foreign-file guard exists for.
+INSTALLABLE = {".mdl", ".mdx", ".tga", ".tpc", ".txi", ".2da"}
 
 
 @dataclass

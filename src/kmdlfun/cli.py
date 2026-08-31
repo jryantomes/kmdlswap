@@ -69,6 +69,11 @@ def main(argv: list[str] | None = None) -> int:
                          "first pair anchors the alignment for the rest")
     tp.add_argument("--out", required=True, help="where builds are kept")
     tp.add_argument("--name", help="name this build; defaults to host-donor")
+    tp.add_argument("--register", nargs="?", const=True, metavar="LABEL",
+                    help="also write the heads.2da and appearance.2da rows that "
+                         "make the game offer this as a character. Needs "
+                         "--save-as. Rows are appended to whatever is installed, "
+                         "so other mods' entries survive")
     tp.add_argument("--save-as", metavar="RESREF",
                     help="write the result as a NEW model with this name rather "
                          "than overwriting the host. The name inside the model "
@@ -721,6 +726,23 @@ def _transplant(args) -> int:
         for line in ktextures.export_donor_textures(
             mdl, mdx, args.donor_install, out_dir, host_install=args.install
         ):
+            print(f"  {line}")
+
+    if getattr(args, "register", None):
+        from . import twoda as k2da
+
+        if not getattr(args, "save_as", None):
+            print("kmdlfun: --register needs --save-as, or it would register the "
+                  "host's own name", file=sys.stderr)
+            return 1
+        label = args.register if isinstance(args.register, str) else written_as
+        try:
+            reg = k2da.register_head(args.install, out_dir, written_as,
+                                     label=label, like=args.host)
+        except k2da.TwoDAError as exc:
+            print(f"kmdlfun: {exc}", file=sys.stderr)
+            return 1
+        for line in reg.notes:
             print(f"  {line}")
 
     build = kbuilds.adopt(out_dir, {
