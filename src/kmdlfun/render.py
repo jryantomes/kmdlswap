@@ -366,6 +366,68 @@ def _rasterise(px, py, depth, faces, colours, img, dim,
         img[lo_y:hi_y, lo_x:hi_x][hit] = texel * lighting[i]
 
 
+def join(scenes) -> Scene:
+    """One scene from several, keeping each one's textures."""
+    scenes = [s for s in scenes if s.triangles]
+    if not scenes:
+        return Scene(np.zeros((0, 3)), np.zeros((0, 3), np.int32), np.zeros((0, 3)))
+    if len(scenes) == 1:
+        return scenes[0]
+
+    positions, faces, colours, uvs, tex, images, groups = [], [], [], [], [], [], []
+    vertex_base = 0
+    texture_base = 0
+    for s in scenes:
+        positions.append(s.positions)
+        faces.append(s.faces + vertex_base)
+        colours.append(s.face_colour)
+        uvs.append(s.uvs if s.uvs is not None else np.zeros((len(s.positions), 2)))
+        if s.face_texture is None:
+            tex.append(np.full(len(s.faces), -1, dtype=np.int32))
+        else:
+            shifted = s.face_texture.copy()
+            shifted[shifted >= 0] += texture_base
+            tex.append(shifted)
+        images.extend(s.textures)
+        texture_base += len(s.textures)
+        groups.extend(s.groups)
+        vertex_base += len(s.positions)
+
+    faces_all = np.vstack(faces)
+    return Scene(
+        positions=np.vstack(positions),
+        faces=faces_all,
+        face_colour=np.vstack(colours),
+        groups=groups,
+        triangles=len(faces_all),
+        uvs=np.vstack(uvs) if images else None,
+        face_texture=np.concatenate(tex) if images else None,
+        textures=images,
+    )
+
+
+def character(body: Layout, head: Layout | None = None, **kwargs) -> Scene:
+    """A whole character: the body, with its head model set on the head hook.
+
+    Human companions keep the head in a separate model, so rendering the body
+    alone shows a decapitated figure and rendering the head alone shows a
+    floating head. Neither tells you what an effect did. The body carries a
+    `headhook` node whose rest transform is where the head model's origin goes.
+    """
+    scene = from_layout(body, **kwargs)
+    if head is None:
+        return scene
+    try:
+        hook = space.rest_pose(body)[body.node_by_name("headhook").index]
+    except KeyError:
+        return scene              # a self-contained model has no hook and needs none
+
+    on_head = from_layout(head, **kwargs)
+    rotation = np.asarray(hook.rotation, dtype=np.float64)
+    on_head.positions = on_head.positions @ rotation.T + np.asarray(hook.position)
+    return join([scene, on_head])
+
+
 def shared_bounds(scenes) -> tuple[np.ndarray, float]:
     """One framing that fits every scene.
 

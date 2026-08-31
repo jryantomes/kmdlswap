@@ -260,3 +260,56 @@ def test_the_anchor_is_the_biggest_part_not_the_first(pair):
     pairs = [("tongue", "tongue"), ("Head", "head")]
     assert ktp.anchor_pair(pairs, host) == ("Head", "head")
     assert ktp.anchor_pair(list(reversed(pairs)), host) == ("Head", "head")
+
+
+def test_the_effects_tab_previews_a_whole_character(app):
+    """A body model alone renders headless and a head model alone renders as a
+    floating head, so neither shows what bighead did. The body's `headhook`
+    says where the head goes; together is the only view that answers it."""
+    for i in range(len(app.tabs.tabs())):
+        if app.tabs.tab(i, "text") == "Effects":
+            app.tabs.select(i)
+            break
+
+    app.effect.set("bighead")
+    app.intensity.set(1.6)
+    for key, var in app.selected.items():
+        var.set(key == "carth")
+
+    app._preview_effect()
+    pump(app, seconds=5.0)
+
+    assert len(app.viewport.scenes) == 2, app.log.get("1.0", "end")[-400:]
+    before, after = app.viewport.scenes
+    assert app.viewport.labels[1] == "Big Head"
+
+    # Both must be a whole person, not a body or a head on its own.
+    assert before.triangles > 2000, "a composed character has body and head"
+    assert "Head" in before.groups or "head" in before.groups
+    assert any(g.lower() in ("torso", "body") or "torso" in g.lower()
+               for g in before.groups), before.groups[:12]
+
+    # The effect has to actually change something, and only the head.
+    assert after.triangles == before.triangles, "scaling must not add geometry"
+    import numpy as np
+
+    moved = ~np.all(np.isclose(before.positions, after.positions), axis=1)
+    assert moved.any(), "the preview shows no difference at all"
+    assert not moved.all(), "bighead should leave the body alone"
+
+    assert "nothing written" in app.preview_status.cget("text")
+
+
+def test_the_preview_shows_the_companion_as_normally_seen(app):
+    """Carth ships an underwear body and a spare head; a preview of those
+    answers a question nobody asked."""
+    from kmdlfun import roster
+
+    models = ("p_carthba", "p_carthbb", "p_carthbbh", "p_carthh")
+    heads = {"p_carthbbh", "p_carthh"}
+    body, head = roster.default_look(models, lambda m: m in heads)
+    assert (body, head) == ("p_carthbb", "p_carthh")
+
+    # A self-contained companion has no separate head, and needs none.
+    body, head = roster.default_look(("p_hk47",), lambda m: False)
+    assert (body, head) == ("p_hk47", None)

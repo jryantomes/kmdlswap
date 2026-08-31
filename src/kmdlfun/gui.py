@@ -197,6 +197,14 @@ class App(ttk.Frame):
         ttk.Button(btns, text="None", command=lambda: self._set_all(False)).pack(
             side="left", padx=6
         )
+        ttk.Button(btns, text="Preview", command=self._preview_effect).pack(
+            side="left", padx=(12, 0)
+        )
+        ttk.Label(
+            btns,
+            text="draws the first companion picked, before and after",
+            foreground="#666",
+        ).pack(side="left", padx=(8, 0))
 
     # ---- transplant tab ----------------------------------------------------
 
@@ -220,7 +228,7 @@ class App(ttk.Frame):
         ttk.Button(page, text="Scan install", command=self._scan).grid(row=0, column=4)
 
         game = ttk.Frame(page)
-        game.grid(row=7, column=0, columnspan=5, sticky="w", pady=(8, 0))
+        game.grid(row=1, column=0, columnspan=5, sticky="w", pady=(6, 0))
         ttk.Label(game, text="Donor from").pack(side="left", padx=(0, 6))
         self.donor_game = tk.StringVar(value="K1")
         for label, value in (("this game", "K1"), ("KOTOR 2", "K2")):
@@ -233,16 +241,16 @@ class App(ttk.Frame):
             text="The host keeps its hierarchy, skeleton and animations. Only geometry moves.",
             foreground="#666", wraplength=620,
         )
-        self.donor_note.grid(row=1, column=0, columnspan=5, sticky="w", pady=(6, 0))
+        self.donor_note.grid(row=2, column=0, columnspan=5, sticky="w", pady=(4, 0))
 
         self.show_all = tk.BooleanVar(value=False)
         ttk.Checkbutton(
             page, text="Show every model, including ones that cannot pair",
             variable=self.show_all, command=self._refresh_donors,
-        ).grid(row=5, column=0, columnspan=5, sticky="w", pady=(8, 0))
+        ).grid(row=6, column=0, columnspan=5, sticky="w", pady=(8, 0))
 
         opts = ttk.Frame(page)
-        opts.grid(row=2, column=0, columnspan=5, sticky="w", pady=(10, 0))
+        opts.grid(row=3, column=0, columnspan=5, sticky="w", pady=(8, 0))
         # Reshape used to be forced on, because a head's vertex count was
         # thought to be fixed. It is not - that was a stale pointer in our own
         # writer - so the donor now comes across whole by default, keeping its
@@ -272,7 +280,7 @@ class App(ttk.Frame):
         ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
         size = ttk.Frame(page)
-        size.grid(row=3, column=0, columnspan=5, sticky="w", pady=(8, 0))
+        size.grid(row=4, column=0, columnspan=5, sticky="w", pady=(6, 0))
         ttk.Label(size, text="Scale").pack(side="left")
         self.opt_scale = tk.DoubleVar(value=1.0)
         ttk.Scale(
@@ -286,14 +294,14 @@ class App(ttk.Frame):
         )
 
         ttk.Button(page, text="Preview", command=lambda: self._start(preview=True)).grid(
-            row=4, column=0, sticky="w", pady=(10, 0)
+            row=5, column=0, sticky="w", pady=(8, 0)
         )
         ttk.Label(
             page,
             text=("Preview writes nothing - it draws the result on the Preview tab "
                   "and reports how solid the donor is. Under 76% reads as holes."),
             foreground="#666", wraplength=620,
-        ).grid(row=6, column=0, columnspan=5, sticky="w", pady=(6, 0))
+        ).grid(row=7, column=0, columnspan=5, sticky="w", pady=(4, 0))
 
     # ---- shared bottom -----------------------------------------------------
 
@@ -874,6 +882,88 @@ class App(ttk.Frame):
             self.events.put(("index", index))
         except Exception as exc:  # noqa: BLE001
             self.events.put(("error", f"{type(exc).__name__}: {exc}"))
+
+    def _preview_effect(self):
+        """Show what an effect does to a whole character, before building it.
+
+        A body model alone renders headless and a head model alone renders as a
+        floating head, so neither shows what bighead actually did. The body's
+        `headhook` says where the head model goes; putting them together is the
+        only view that answers the question.
+        """
+        if self.worker and self.worker.is_alive():
+            return
+        if not self._check_install():
+            return
+        picked = [k for k, v in self.selected.items() if v.get()]
+        if not picked:
+            messagebox.showinfo("kmdlfun", "Pick a companion to preview.")
+            return
+
+        self.viewport.clear("reading ...")
+        self.worker = threading.Thread(
+            target=self._effect_preview_work,
+            args=(self.install.get().strip(), self.effect.get(),
+                  picked[0], self.intensity.get()),
+            daemon=True,
+        )
+        self.worker.start()
+
+    def _effect_preview_work(self, install, effect_key, companion_key, intensity):
+        try:
+            from kmdlswap import layout as kl
+
+            from . import apply as kapply
+            from . import effects as keff
+            from . import render as krender
+            from . import roster
+            from . import textures as ktextures
+            from .library import ModelLibrary
+
+            effect = keff.resolve(effect_key)
+            scales = effect.scaled(intensity)
+            companion = next(c for c in roster.COMPANIONS if c.key == companion_key)
+            lib = ModelLibrary(install)
+            cache = ktextures.TextureCache(install)
+
+            # The body actually worn, and the face actually seen.
+            present = [m for m in companion.models if lib.has(m)]
+            cache_head = {m: kapply.is_head_model(kl.parse(*lib.read(m)))
+                          for m in present}
+            body_name, head_name = roster.default_look(present, cache_head.__getitem__)
+            if body_name is None:
+                self.events.put(("error", f"no body model found for {companion.name}"))
+                return
+
+            def scene(apply_effect: bool):
+                parts = []
+                for name in (body_name, head_name):
+                    if name is None:
+                        parts.append(None)
+                        continue
+                    mdl, mdx = lib.read(name)
+                    if apply_effect:
+                        mdl, mdx, _ = kapply.apply_to_model(
+                            mdl, mdx, scales, model_name=name
+                        )
+                    parts.append(kl.parse(mdl, mdx))
+                return krender.character(parts[0], parts[1], texture_lookup=cache.get)
+
+            before, after = scene(False), scene(True)
+            models = body_name + (f" + {head_name}" if head_name else "")
+            note = (f"{effect.label} at {intensity:.2f}x on {companion.name}  -  "
+                    f"{models}  -  nothing written")
+            self.events.put((
+                "scenes",
+                ([before, after], [f"{companion.name} now", effect.label], note),
+            ))
+            self.events.put(("done_text", [
+                f"previewed {effect.label} at {intensity:.2f}x on {companion.name}",
+                f"  {models}",
+            ]))
+        except Exception as exc:  # noqa: BLE001
+            self.events.put(("error", f"{type(exc).__name__}: {exc}\n"
+                                      f"{traceback.format_exc(limit=3)}"))
 
     def _start(self, preview: bool = False):
         if self.worker and self.worker.is_alive():
