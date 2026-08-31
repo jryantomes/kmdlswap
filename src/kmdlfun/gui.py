@@ -234,12 +234,14 @@ class App(ttk.Frame):
         self.host_box.grid(row=0, column=1, sticky="ew", padx=6)
         self.host_box.bind("<<ComboboxSelected>>", lambda _e: self._refresh_donors())
 
-        ttk.Label(page, text="Donor").grid(row=0, column=2, sticky="w")
-        self.donor = tk.StringVar()
-        self.donor_box = ttk.Combobox(page, textvariable=self.donor, values=[])
-        self.donor_box.grid(row=0, column=3, sticky="ew", padx=6)
-
         ttk.Button(page, text="Scan install", command=self._scan).grid(row=0, column=4)
+
+        # A name does not tell you what a face looks like. `n_shaardanh` and
+        # `n_lashoweh` are both clean fits on Carth and one of them is the one
+        # you meant, so the donor list shows the face beside the name. The
+        # variable stays the single source of truth - the tree writes into it -
+        # so everything downstream is unchanged.
+        self.donor = tk.StringVar()
 
         # Where the donor's head goes. "Matching nodes" is the original
         # behaviour - pair everything whose names agree - and is right when
@@ -278,21 +280,38 @@ class App(ttk.Frame):
         self.donor_look.trace_add("write", lambda *_: self._refresh_donors())
         self.donor_game_note = ttk.Label(game, text="", foreground="#666")
         self.donor_game_note.pack(side="left", padx=(8, 0))
+        picker = ttk.Frame(page)
+        picker.grid(row=3, column=0, columnspan=5, sticky="nsew", pady=(6, 0))
+        picker.columnconfigure(0, weight=1)
+        page.rowconfigure(3, weight=1)
+        self.donor_tree = ttk.Treeview(picker, show="tree", height=7,
+                                       selectmode="browse")
+        self.donor_tree.grid(row=0, column=0, sticky="nsew")
+        bar = ttk.Scrollbar(picker, orient="vertical",
+                            command=self.donor_tree.yview)
+        bar.grid(row=0, column=1, sticky="ns")
+        self.donor_tree.configure(yscrollcommand=bar.set)
+        self.donor_tree.bind("<<TreeviewSelect>>", self._on_donor_pick)
+        # Tk drops an image the moment nothing references it, and a Treeview
+        # does not count as a reference. Without this the rows go blank.
+        self._donor_photos: dict[str, object] = {}
+        self._thumb_job = 0
+
         self.donor_note = ttk.Label(
             page,
             text="The host keeps its hierarchy, skeleton and animations. Only geometry moves.",
             foreground="#666", wraplength=620,
         )
-        self.donor_note.grid(row=3, column=0, columnspan=5, sticky="w", pady=(4, 0))
+        self.donor_note.grid(row=4, column=0, columnspan=5, sticky="w", pady=(4, 0))
 
         self.show_all = tk.BooleanVar(value=False)
         ttk.Checkbutton(
             page, text="Show every model, including bodies and ones that cannot pair",
             variable=self.show_all, command=self._refresh_donors,
-        ).grid(row=7, column=0, columnspan=5, sticky="w", pady=(8, 0))
+        ).grid(row=9, column=0, columnspan=5, sticky="w", pady=(8, 0))
 
         opts = ttk.Frame(page)
-        opts.grid(row=4, column=0, columnspan=5, sticky="w", pady=(8, 0))
+        opts.grid(row=5, column=0, columnspan=5, sticky="w", pady=(8, 0))
         # Reshape used to be forced on, because a head's vertex count was
         # thought to be fixed. It is not - that was a stale pointer in our own
         # writer - so the donor now comes across whole by default, keeping its
@@ -322,7 +341,7 @@ class App(ttk.Frame):
         ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
         size = ttk.Frame(page)
-        size.grid(row=5, column=0, columnspan=5, sticky="w", pady=(6, 0))
+        size.grid(row=6, column=0, columnspan=5, sticky="w", pady=(6, 0))
         ttk.Label(size, text="Scale").pack(side="left")
         self.opt_scale = tk.DoubleVar(value=1.0)
         ttk.Scale(
@@ -336,14 +355,14 @@ class App(ttk.Frame):
         )
 
         ttk.Button(page, text="Preview", command=lambda: self._start(preview=True)).grid(
-            row=6, column=0, sticky="w", pady=(8, 0)
+            row=7, column=0, sticky="w", pady=(8, 0)
         )
         ttk.Label(
             page,
             text=("Preview writes nothing - it draws the result on the Preview tab "
                   "and reports how solid the donor is. Under 76% reads as holes."),
             foreground="#666", wraplength=620,
-        ).grid(row=8, column=0, columnspan=5, sticky="w", pady=(4, 0))
+        ).grid(row=10, column=0, columnspan=5, sticky="w", pady=(4, 0))
 
     # ---- shared bottom -----------------------------------------------------
 
@@ -801,6 +820,95 @@ class App(ttk.Frame):
         kinds = self._donor_kinds(path)
         return sorted(n for n, k in kinds.items() if k in DONOR_KINDS)
 
+    def donor_choices(self) -> list[str]:
+        """The labels currently offered, in order.
+
+        The widget showing them is an implementation detail - it has been a
+        combobox and is now a list of faces - so callers ask for the choices
+        rather than reaching into it.
+        """
+        return list(self.donor_labels)
+
+    def _on_donor_pick(self, _event=None):
+        chosen = self.donor_tree.selection()
+        if chosen:
+            self.donor.set(self.donor_tree.item(chosen[0], "text"))
+
+    def _fill_donor_tree(self):
+        """Put the current labels in the list, then fetch faces for them."""
+        tree = getattr(self, "donor_tree", None)
+        if tree is None:
+            return
+        tree.delete(*tree.get_children())
+        for label in self.donor_labels:
+            tree.insert("", "end", iid=label, text=label)
+
+        # Drop the images for rows that are gone. They are only kept because Tk
+        # collects an image nothing references, and without this the dict grows
+        # by a whole list every time the filter changes.
+        for gone in set(self._donor_photos) - set(self.donor_labels):
+            del self._donor_photos[gone]
+
+        # Reselect what was already chosen, so refiltering does not silently
+        # drop the user's pick.
+        current = self.donor.get()
+        if current in self.donor_labels:
+            tree.selection_set(current)
+            tree.see(current)
+
+        self._start_thumbs()
+
+    def _start_thumbs(self):
+        """Draw the faces in the background, newest request wins.
+
+        The list changes whenever the filter or the game does, so a run that is
+        no longer about the visible list has to stop rather than paint faces
+        onto the wrong rows.
+        """
+        self._thumb_job += 1
+        job = self._thumb_job
+        path = self._donor_install()
+        wanted = dict(self.donor_labels)
+        if not path or not wanted:
+            return
+
+        def work():
+            from pathlib import Path as _Path
+
+            from . import textures as ktextures
+            from . import thumbs as kthumbs
+            from .library import ModelLibrary
+
+            try:
+                lib = ModelLibrary(path)
+                look = ktextures.lookup_across([_Path(path)])
+                for label, model in wanted.items():
+                    if job != self._thumb_job:
+                        return
+                    try:
+                        mdl, mdx = lib.read(model)
+                    except Exception:  # noqa: BLE001
+                        continue
+                    found = kthumbs.render(mdl, mdx, texture_lookup=look)
+                    if found is not None:
+                        self.events.put(("thumb", (job, label, str(found))))
+            except Exception:  # noqa: BLE001
+                return          # a missing face is not worth interrupting anyone
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _show_thumb(self, job: int, label: str, path: str):
+        if job != self._thumb_job or not self.donor_tree.exists(label):
+            return
+        try:
+            photo = tk.PhotoImage(file=path)
+        except tk.TclError:
+            return
+        # Tk collects an image with no live reference, and the widget does not
+        # count as one; dropping this dict blanks every row.
+        self._donor_photos[label] = photo
+        self.donor_tree.item(label, image=photo)
+
     def _pick_pack(self):
         chosen = filedialog.askdirectory(title="Choose a head pack folder")
         if chosen:
@@ -1117,7 +1225,7 @@ class App(ttk.Frame):
             self.donor_labels = ranked or {
                 f"{n}   [{kinds.get(n, 'head')}]": n for n in models
             }
-            self.donor_box.config(values=list(self.donor_labels))
+            self._fill_donor_tree()
             self.donor_game_note.config(
                 text=f"{len(models)} models have a head to give"
                      + (", best fit first" if ranked else "")
@@ -1130,7 +1238,7 @@ class App(ttk.Frame):
             models = self._by_look(path, self._head_donors(path))
             ranked = self._ranked_labels(self.host.get().strip(), path, models)
             self.donor_labels = ranked or {f"{n}   [{kinds[n]}]": n for n in models}
-            self.donor_box.config(values=list(self.donor_labels))
+            self._fill_donor_tree()
             self.donor_game_note.config(
                 text=(f"{len(models)} of {len(kinds)} KOTOR 2 models have a head "
                       f"to give, best fit first" if ranked else
@@ -1145,7 +1253,8 @@ class App(ttk.Frame):
             return
         host = self.host.get().strip()
         if not host or host not in self.index.nodes:
-            self.donor_box.config(values=[])
+            self.donor_labels = {}
+            self._fill_donor_tree()
             return
 
         ranked = self.index.donors_for(host, usable_only=not self.show_all.get())
@@ -1163,7 +1272,7 @@ class App(ttk.Frame):
         measured = self._ranked_labels(host, self.install.get().strip(),
                                        [n for _c, n in ranked])
         self.donor_labels = measured or {c.label(n): n for c, n in ranked}
-        self.donor_box.config(values=list(self.donor_labels))
+        self._fill_donor_tree()
 
         usable = [c for c, _ in ranked if c.usable]
         if not usable and not self.show_all.get():
@@ -1779,6 +1888,8 @@ class App(ttk.Frame):
                         self._say(line)
                     self.progress.config(value=100)
                     self.build_btn.config(state="normal")
+                elif kind == "thumb":
+                    self._show_thumb(*payload)
                 elif kind == "ranked":
                     self._finish_rank(*payload)
                 elif kind == "rank_failed":
