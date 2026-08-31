@@ -60,12 +60,25 @@ def transplant_tab(a):
     raise AssertionError("no Transplant tab")
 
 
-def test_the_transplant_worker_never_reads_tk(app, tmp_path):
-    """The regression test for the crash.
+def test_one_preview_run(app, tmp_path):
+    """Everything a Preview should do, asserted from a single run.
 
-    With no main loop running, any Tk read from the worker raises "main thread
-    is not in main loop". The fixture withdraws the window and never calls
-    mainloop, so this fails if a setting is read across the boundary again.
+    Split across three tests this cost three full model-library scans for the
+    same work. The assertions are independent; the setup is not.
+
+    **Never reads Tk from the worker.** Tkinter is not thread-safe, and reading
+    a Tk variable off the main thread survives only while the main loop happens
+    to be spinning - invisible in normal use, fatal the moment it is not. That
+    is how it shipped: `_transplant_work` read seven of them. The fixture never
+    calls mainloop, so a repeat raises "main thread is not in main loop".
+
+    **Reports the donor's solidity.** The best predictor of whether a swap will
+    look right, and the one thing no viewer can show, since a two-sided preview
+    draws an inside-out mesh as perfect.
+
+    **Drives the status line.** The Preview button looked like it did nothing:
+    it was working, and its output went to a log pushed off the bottom of the
+    window when the Preview tab's viewport inflated the notebook.
     """
     transplant_tab(app)
     app.out_dir.set(str(tmp_path))
@@ -76,30 +89,17 @@ def test_the_transplant_worker_never_reads_tk(app, tmp_path):
     app.opt_texture.set(True)
     app.opt_hide.set(True)
     app.opt_reshape.set(False)
+    assert app.status.cget("text") == "Ready"
 
     app._start(preview=True)
     pump(app)
-
     log = app.log.get("1.0", "end")
+
     assert "main thread is not in main loop" not in log
     assert "ERROR" not in log, log[-400:]
     assert "1/1 would transfer" in log
-
-
-def test_the_preview_reports_donor_solidity(app, tmp_path):
-    """Solidity is the single best predictor of whether a swap will look right,
-    and nothing else in the preview can see it - a two-sided viewer shows an
-    inside-out mesh as perfect."""
-    transplant_tab(app)
-    app.out_dir.set(str(tmp_path))
-    app.host.set("p_carthh")
-    app.donor.set("n_bith")
-    app._start(preview=True)
-    pump(app)
-
-    log = app.log.get("1.0", "end")
-    assert "solid 99%" in log
-    assert "good" in log
+    assert "solid 99%" in log and "good" in log
+    assert app.status.cget("text") == "preview only: 1/1 would transfer"
 
 
 @pytest.mark.slow
@@ -159,3 +159,15 @@ def test_the_viewport_can_cull(app):
     app.preview_cull.set(True)
     app._repaint_viewport()
     assert app.viewport.cull is True
+
+
+def test_the_log_and_buttons_fit_in_the_default_window(app):
+    """The regression that hid the log.
+
+    The notebook now absorbs spare height and the log keeps a fixed size, so a
+    taller tab cannot push it out of sight again.
+    """
+    app.master.update_idletasks()
+    needed = sum(app.grid_bbox(0, r)[3] for r in range(4))
+    assert needed < 900, f"content needs {needed}px, taller than the window"
+    assert app.log.winfo_reqheight() > 80, "the log must keep a usable height"

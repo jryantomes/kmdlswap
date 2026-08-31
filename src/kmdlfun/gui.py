@@ -67,7 +67,12 @@ class App(ttk.Frame):
         master.columnconfigure(0, weight=1)
         master.rowconfigure(0, weight=1)
         self.columnconfigure(0, weight=1)
-        self.rowconfigure(2, weight=1)
+        # The notebook absorbs spare height; the log keeps a fixed, always
+        # visible size. It was the other way round, and adding a 420px viewport
+        # to the Preview tab then pushed the log and the buttons off the bottom
+        # of the window entirely - the Preview button looked like it did nothing
+        # because its output was landing somewhere unreachable.
+        self.rowconfigure(1, weight=1)
 
         self.events: queue.Queue = queue.Queue()
         self.worker: threading.Thread | None = None
@@ -112,7 +117,7 @@ class App(ttk.Frame):
 
     def _build_tabs(self):
         self.tabs = ttk.Notebook(self)
-        self.tabs.grid(row=1, column=0, sticky="ew", pady=(0, 8))
+        self.tabs.grid(row=1, column=0, sticky="nsew", pady=(0, 8))
         self._build_effect_tab()
         self._build_transplant_tab()
         self._build_preview_tab()
@@ -301,7 +306,7 @@ class App(ttk.Frame):
         ttk.Label(page, text="comma separated; overrides the texture",
                   foreground="#666").grid(row=2, column=2, sticky="w", pady=(6, 0))
 
-        self.viewport = kviewport.Viewport(page, size=420)
+        self.viewport = kviewport.Viewport(page, size=320)
         self.viewport.grid(row=3, column=0, columnspan=3, sticky="nsew", pady=(8, 0))
 
         views = ttk.Frame(page)
@@ -434,10 +439,10 @@ class App(ttk.Frame):
 
     def _build_log(self):
         box = ttk.LabelFrame(self, text="Log", padding=8)
-        box.grid(row=2, column=0, sticky="nsew")
+        box.grid(row=2, column=0, sticky="ew")
         box.columnconfigure(0, weight=1)
         box.rowconfigure(0, weight=1)
-        self.log = tk.Text(box, height=14, wrap="word", state="disabled")
+        self.log = tk.Text(box, height=8, wrap="word", state="disabled")
         self.log.grid(row=0, column=0, sticky="nsew")
         bar = ttk.Scrollbar(box, command=self.log.yview)
         bar.grid(row=0, column=1, sticky="ns")
@@ -447,18 +452,25 @@ class App(ttk.Frame):
         row = ttk.Frame(self)
         row.grid(row=3, column=0, sticky="ew", pady=(8, 0))
         row.columnconfigure(0, weight=1)
+
+        # The most recent line of the log, where the eye already is. Long jobs
+        # scroll the log away from whatever you were watching, and a progress
+        # bar on its own says how far along it is but never what it is doing.
+        self.status = ttk.Label(row, text="Ready", foreground="#444", anchor="w")
+        self.status.grid(row=0, column=0, columnspan=5, sticky="ew", pady=(0, 4))
+
         self.progress = ttk.Progressbar(row, mode="determinate")
-        self.progress.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        self.progress.grid(row=1, column=0, sticky="ew", padx=(0, 8))
         self.build_btn = ttk.Button(row, text="Build", command=self._start)
-        self.build_btn.grid(row=0, column=1)
+        self.build_btn.grid(row=1, column=1)
         ttk.Button(row, text="Open output", command=self._open_out).grid(
-            row=0, column=2, padx=(6, 0)
+            row=1, column=2, padx=(6, 0)
         )
         ttk.Button(row, text="Install to Override", command=self._install).grid(
-            row=0, column=3, padx=(6, 0)
+            row=1, column=3, padx=(6, 0)
         )
         ttk.Button(row, text="Remove", command=self._uninstall).grid(
-            row=0, column=4, padx=(6, 0)
+            row=1, column=4, padx=(6, 0)
         )
 
     # ---- behaviour ---------------------------------------------------------
@@ -614,11 +626,19 @@ class App(ttk.Frame):
         self.effect_caution.config(text=e.caution)
         self.intensity_label.config(text=f"{self.intensity.get():.2f}x")
 
+    def _set_status(self, text: str):
+        line = next((s.strip() for s in reversed(text.splitlines()) if s.strip()), "")
+        if line:
+            self.status.config(text=line[:150])
+
     def _say(self, text: str):
         self.log.configure(state="normal")
         self.log.insert("end", text + "\n")
         self.log.see("end")
         self.log.configure(state="disabled")
+        # Progress messages route through here too, so the status line
+        # follows the work without needing its own plumbing.
+        self._set_status(text)
 
     def _check_install(self) -> bool:
         if not (Path(self.install.get().strip()) / "chitin.key").is_file():
@@ -906,7 +926,8 @@ class App(ttk.Frame):
 def run() -> int:
     root = tk.Tk()
     root.title("kmdlfun - KOTOR model tools")
-    root.geometry("720x820")
+    root.geometry("760x900")
+    root.minsize(700, 640)
     try:
         ttk.Style().theme_use("vista")
     except tk.TclError:
