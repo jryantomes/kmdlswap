@@ -787,7 +787,8 @@ def _rank(args) -> int:
     import json
 
     from . import compat
-    from .library import DONOR_KINDS, ModelLibrary, classify
+    from .library import (DONOR_KINDS, ModelLibrary, character_models,
+                          classify)
 
     host_lib = ModelLibrary(args.install)
     donor_lib_path = args.donor_install or args.install
@@ -799,8 +800,7 @@ def _rank(args) -> int:
 
     donors = args.donors
     if not donors:
-        names = sorted(n for n in donor_lib.index
-                       if n.startswith(("p_", "n_", "c_")) and donor_lib.has(n))
+        names = character_models(donor_lib_path, donor_lib)
         print(f"sorting {len(names)} models by what a head can come from...")
         kinds = classify(donor_lib, names)
         donors = [n for n, k in kinds.items() if k in DONOR_KINDS]

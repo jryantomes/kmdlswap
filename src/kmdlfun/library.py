@@ -127,6 +127,55 @@ def _companions_with_head_models(library: "ModelLibrary", companions) -> set[str
     return owners
 
 
+# Character models are named `p_`, `n_` or `c_` - but not all of them. The
+# thirty player-creation heads are `pmhc01`, `pfha03` and so on, and the
+# commoner heads are `comm_a_f`; none of them match, so none of them were ever
+# offered as donors. That silently hid the most obvious heads in the game -
+# twenty-one female and twenty-one male, all of them ordinary human faces.
+PREFIXES = ("p_", "n_", "c_")
+
+
+def head_models(install) -> set[str]:
+    """Every model `heads.2da` names, lowercased.
+
+    The game's own list of what counts as a head, which beats guessing at name
+    patterns: it also turns up `ad_saul`, `czerka_com_h` and `darthband_h`,
+    none of which follow any convention worth encoding.
+    """
+    try:
+        from pykotor.extract.installation import Installation
+        from pykotor.resource.formats.twoda import read_2da
+        from pykotor.resource.type import ResourceType
+
+        found = Installation(str(install)).resource("heads", ResourceType.TwoDA)
+        if found is None:
+            return set()
+        table = read_2da(found.data)
+        out = set()
+        for i in range(table.get_height()):
+            value = table.get_cell(i, "head").strip()
+            if value:
+                out.add(value.lower())
+        return out
+    except Exception:  # noqa: BLE001
+        return set()
+
+
+def character_models(install, library=None) -> list[str]:
+    """Every model worth offering as a host or donor.
+
+    The prefixed character models, plus every head the game itself names. Names
+    the table lists but the install does not have are dropped - `heads.2da`
+    points at `p_bastillah`, with two Ls, which is not a file.
+    """
+    lib = library if library is not None else ModelLibrary(install)
+    named = head_models(install)
+    return sorted(
+        n for n in lib.index
+        if lib.has(n) and (n.startswith(PREFIXES) or n in named)
+    )
+
+
 def classify(install, names=None, *, progress=None) -> dict[str, str]:
     """Sort an install's models by what a head swap can take from them.
 
