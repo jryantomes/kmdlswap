@@ -176,3 +176,68 @@ def test_the_split_is_useful_rather_than_mostly_unknown(looked):
     placed = [v for v in looked.values() if v != "unknown"]
     assert len(placed) > len(looked) * 0.5, who.summarise(looked)
     assert who.summarise(looked).count(",") >= 2
+
+
+# --- KOTOR 2 -----------------------------------------------------------------
+
+
+def test_the_second_games_heads_are_read_from_its_own_tables(k2_path):
+    """`heads.2da` and the rest are read from whichever install is asked
+    about, so a K2 donor list is built from K2's data rather than K1's."""
+    from kmdlfun.library import PREFIXES, ModelLibrary, character_models
+
+    lib = ModelLibrary(str(k2_path))
+    offered = character_models(str(k2_path), lib)
+    by_prefix = [n for n in offered if n.startswith(PREFIXES)]
+
+    assert len(offered) > len(by_prefix) + 40, "K2 gained nothing from heads.2da"
+    assert "comm_a_f" in offered
+    # TSL ships elderly commoner heads that K1 has no equivalent of.
+    assert any(n.startswith("old_") for n in offered), "K2-only heads are missing"
+    # Its table names K1 characters whose models are not in this install.
+    assert all(lib.has(n) for n in offered)
+
+
+def test_the_tsl_cast_is_curated_like_the_first_games(k2_path):
+    """Their bodies end in `BB`, so the body test says nothing, and their heads
+    end in `h` like everyone else's. Without writing them down the entire
+    second-game cast came out unknown."""
+    lib = ModelLibrary(str(k2_path))
+    expected = {
+        "p_attonh": "male", "p_baodurh": "male", "p_discipleh": "male",
+        "p_hanharr": "male", "p_mandalorebb": "male",
+        "p_mirah": "female", "p_handmaidenh": "female", "p_visash": "female",
+        "p_kreiah": "female", "p_atrisbb": "female",
+        "p_g0t0": "droid", "p_hk47": "droid", "p_t3m4": "droid",
+    }
+    present = {n: v for n, v in expected.items() if lib.has(n)}
+    if not present:
+        pytest.skip("no TSL cast models in this install")
+
+    looked = who.looks(str(k2_path), list(present), library=lib)
+    wrong = {n: (v, looked[n]) for n, v in present.items() if looked[n] != v}
+    assert not wrong, wrong
+
+
+def test_kreias_several_models_all_resolve(k2_path):
+    """She has six, and prefix curation is what covers them all."""
+    lib = ModelLibrary(str(k2_path))
+    kreia = [n for n in lib.index if n.startswith("p_kreia") and lib.has(n)]
+    if not kreia:
+        pytest.skip("no Kreia models in this install")
+
+    looked = who.looks(str(k2_path), kreia, library=lib)
+    assert set(looked.values()) == {"female"}, looked
+
+
+def test_the_droid_test_still_works_on_the_second_game(k2_path):
+    """It reads the model, not a table, so it needs nothing game-specific."""
+    from kmdlswap import layout as kl
+
+    lib = ModelLibrary(str(k2_path))
+    for name in ("p_hk47", "p_t3m4", "c_drdwar"):
+        if lib.has(name):
+            assert who.is_droid(kl.parse(*lib.read(name))), name
+    for name in ("p_attonh", "p_mirah"):
+        if lib.has(name):
+            assert not who.is_droid(kl.parse(*lib.read(name))), name

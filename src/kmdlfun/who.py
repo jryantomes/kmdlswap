@@ -11,11 +11,13 @@ mouth and brows. Across all 77 KOTOR 1 models with a head node, "rigid head and
 no facial bones" selects exactly the ten droids, with no misses and no false
 positives. Nothing is guessed from a name.
 
-**2. The companions are curated, because the game's own data is wrong about
-them.** `portraits.2da` marks `po_pjolee` as sex 1, and Jolee Bindo is male;
+**2. The named cast of both games is curated, because no table answers for
+them and one actively lies.** `portraits.2da` marks `po_pjolee` as sex 1, and Jolee Bindo is male;
 `po_pcarth` has no appearance number at all, so Carth resolves to nothing.
 Both rows have `forpc=0`. There are nine companions and everyone knows who they
-are, so they are written down rather than inferred.
+are, so they are written down rather than inferred. KOTOR 2's cast needs the
+same treatment for a plainer reason: their bodies end in `BB`, so the body test
+below says nothing about them at all.
 
 **3. `portraits.2da`, but only where `forpc=1`.** Those thirty rows are the
 player-creation heads and every one of them is right: `pfh*` is sex 1, `pmh*`
@@ -79,17 +81,45 @@ def is_droid(layout) -> bool:
     )
 
 
-def _from_roster() -> dict[str, str]:
-    """The companions, written down. See the module docstring for why."""
+# KOTOR 2's cast, by model-name prefix, for the same reason the KOTOR 1
+# companions are written down: no table answers for them. Their bodies are
+# `P_HandmaidenBB` and `P_KreiaBB`, ending in B, so the body test says nothing,
+# and their heads end in `h` like everyone else's. Prefixes rather than exact
+# names because most of them have several models - Kreia alone has six.
+TSL_CAST = (
+    ("p_atton", MALE),
+    ("p_baodur", MALE),
+    ("baodur_", MALE),
+    ("p_disciple", MALE),
+    ("p_hanharr", MALE),
+    ("p_mandalore", MALE),
+    ("n_darthsion", MALE),
+    ("n_darthnihilus", MALE),
+    ("p_atris", FEMALE),
+    ("p_handmaiden", FEMALE),
+    ("p_kreia", FEMALE),
+    ("p_mira", FEMALE),
+    ("p_visas", FEMALE),
+    ("p_g0t0", DROID),
+)
+
+
+def _curated(name: str) -> str | None:
+    """The named cast of both games, written down. See the module docstring.
+
+    KOTOR 1's companions come from the roster, which already lists their
+    models; KOTOR 2's are here, since that roster is the K1 one and drives the
+    Effects tab.
+    """
     from . import roster
 
-    out = {}
     for c in roster.COMPANIONS:
-        if not c.look:
-            continue
-        for model in c.models:
-            out[model.lower()] = c.look
-    return out
+        if c.look and name in {m.lower() for m in c.models}:
+            return c.look
+    for prefix, look in TSL_CAST:
+        if name.startswith(prefix):
+            return look
+    return None
 
 
 def _from_portraits(install) -> dict[str, str]:
@@ -237,7 +267,6 @@ def looks(install, names=None, *, library=None, progress=None) -> dict[str, str]
     lib = library or ModelLibrary(install)
     wanted = list(names if names is not None else lib.index)
 
-    curated = _from_roster()
     portraits = _from_portraits(install)
     bodies = _from_body(install)
 
@@ -260,7 +289,7 @@ def looks(install, names=None, *, library=None, progress=None) -> dict[str, str]
         # but they are male heads the game reused - and their own name, or
         # `portraits.2da`, says so plainly.
         body = bodies.get(key)
-        out[name] = (curated.get(key)
+        out[name] = (_curated(key)
                      or portraits.get(key)
                      or (body if body != EITHER else None)
                      or _from_name(key)
