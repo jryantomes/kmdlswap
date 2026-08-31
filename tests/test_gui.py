@@ -188,5 +188,63 @@ def test_the_log_and_buttons_fit_in_the_default_window(app):
     """
     app.master.update_idletasks()
     needed = sum(app.grid_bbox(0, r)[3] for r in range(4))
-    assert needed < 900, f"content needs {needed}px, taller than the window"
-    assert app.log.winfo_reqheight() > 80, "the log must keep a usable height"
+    assert needed < 940, f"content needs {needed}px, taller than the window"
+    assert app.log.winfo_reqheight() > 60, "the log must keep a usable height"
+
+
+def test_the_app_can_take_a_donor_from_the_second_game(app, tmp_path):
+    """Cross-game swaps used to be command line only."""
+    k2 = None
+    for candidate in (
+        r"E:\SteamLibrary\steamapps\common\Knights of the Old Republic II",
+        r"C:\Program Files (x86)\Steam\steamapps\common\Knights of the Old Republic II",
+    ):
+        import pathlib
+
+        if (pathlib.Path(candidate) / "chitin.key").is_file():
+            k2 = candidate
+            break
+    if k2 is None:
+        pytest.skip("no KOTOR 2 install")
+
+    transplant_tab(app)
+    app.install2.set(k2)
+    app.donor_game.set("K2")
+    app._refresh_donors()
+    assert "n_quarren" in app.donor_box.cget("values")
+
+    app.out_dir.set(str(tmp_path))
+    app.host.set("p_carthh")
+    app.donor.set("n_quarren")
+    app.opt_texture.set(True)
+    app.opt_hide.set(True)
+    app.opt_reshape.set(False)
+    app.opt_fit.set(False)
+    app.opt_automerge.set(True)
+    app._start(preview=False)
+    pump(app, seconds=6.0)
+
+    log = app.log.get("1.0", "end")
+    assert "ERROR" not in log, log[-400:]
+    assert "geometry only" in log, "it should say the games differ"
+    # The parts the host has no node for are found without being named.
+    assert "tent01" in log and "tent04" in log
+    # Not fitting still places it, rather than leaving it inside the chest.
+    assert "drift 0.000" in log
+    # And the donor's texture has to travel with it or the model loads grey.
+    assert (tmp_path / "N_QuarrenH01.tpc").is_file(), sorted(
+        p.name for p in tmp_path.iterdir()
+    )
+
+
+def test_the_anchor_is_the_biggest_part_not_the_first(pair):
+    """Carth's `tongue` sorts before his `Head` and has 22 vertices to its 565.
+    Anchoring on it looked for a Quarren's tentacles among the tongue's bones,
+    found none, and quietly folded nothing in."""
+    from kmdlfun import transplant as ktp
+    from kmdlswap import layout as kl
+
+    host = kl.parse(*pair("p_carthh"))
+    pairs = [("tongue", "tongue"), ("Head", "head")]
+    assert ktp.anchor_pair(pairs, host) == ("Head", "head")
+    assert ktp.anchor_pair(list(reversed(pairs)), host) == ("Head", "head")

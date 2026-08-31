@@ -204,6 +204,60 @@ def rigs_match(donor_layout, donor_node, host_layout, host_node) -> bool:
     return bool(donor_names) and donor_names <= host_names
 
 
+def anchor_pair(pairs, host_layout):
+    """Which pair the alignment and the folding-in should hang off.
+
+    The biggest host part by vertex count, not whichever the node tree happened
+    to list first. Carth's `tongue` sorts before his `Head` and has 22 vertices
+    to its 565; anchoring there looked for a Quarren's mouth tentacles among the
+    tongue's bones, found none, and quietly folded nothing in.
+    """
+    def size(pair):
+        try:
+            return host_layout.node_by_name(pair[0]).vertex_count
+        except KeyError:
+            return 0
+
+    return max(pairs, key=size) if pairs else None
+
+
+def auto_merge_candidates(donor_layout, donor_node, host_layout, host_node) -> list[str]:
+    """Donor parts the host has no node for, that its skeleton can still drive.
+
+    Naming `tent01` through `tent04` on the command line requires knowing that a
+    Quarren's mouth is four separate meshes, which is exactly the kind of thing
+    a tool should work out rather than ask. The rule is mechanical:
+
+    * the part is actually drawn - skeleton stubs and hidden meshes are not
+      geometry anyone wants;
+    * no host node shares its name, so a normal pairing would not carry it;
+    * it hangs from a bone the host also has, which is what makes it safe to
+      merge and what keeps a body part out of a head swap.
+
+    On `n_quarren` that selects exactly the four tentacles: the torso, arms and
+    cape are drawn and unmatched too, but they hang from body bones a head model
+    has no equivalent of, so they are left where they are.
+    """
+    host_names = {n.name.lower() for n in kparts.mesh_nodes(host_layout,
+                                                            visible_only=False)}
+    host_bones = {
+        host_layout.nodes[i].name.lower()
+        for i, slot in enumerate(host_node.bonemap) if slot >= 0
+    }
+
+    out = []
+    for node in kparts.mesh_nodes(donor_layout):
+        if node.index == donor_node.index or node.name.lower() in host_names:
+            continue
+        parent = (donor_layout.nodes[node.parent].name.lower()
+                  if node.parent is not None else "")
+        if parent in host_bones:
+            out.append(node.name)
+    # Sorted, so the same donor always produces the same bytes. The node tree's
+    # own order is arbitrary and would silently change vertex numbering.
+    return sorted(out)
+
+
 def merge_into(donor_layout, donor_node, extra_names, host_layout, host_node):
     """Fold extra donor nodes into one mesh, each bound to the bone it hung from.
 
