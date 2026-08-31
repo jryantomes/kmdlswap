@@ -889,3 +889,71 @@ def test_zoom_is_reachable_without_a_mouse_wheel(app):
     app._apply_zoom()
     assert app.viewport.zoom == pytest.approx(2.5)
     assert "2.5" in app.zoom_label.cget("text")
+
+
+def test_a_headless_creature_can_still_donate_a_part(app, tmp_path):
+    """Two models that share no node names and have neither a head.
+
+    A dewback and a bantha pair on nothing, so no automatic rule reaches them.
+    Naming both sides is the escape hatch, and until now only the host's side
+    could be named.
+    """
+    from kmdlfun.gui import AUTO_NODE
+
+    transplant_tab(app)
+    app.out_dir.set(str(tmp_path))
+    app.host.set("c_dewback")
+    app._refresh_donors()
+    assert not app.donor_choices(), "nothing should pair with it whole-model"
+
+    node = next(n for n in app.target_box.cget("values") if n.lower() == "uprbody")
+    app.target_node.set(node)
+    app._refresh_donors()
+
+    offered = app.donor_choices()
+    assert len(offered) > 100, "naming a node should offer anything with geometry"
+    bantha = next(d for d in offered if d.startswith("c_bantha"))
+    app.donor.set(bantha)
+    app._refresh_donor_nodes()
+
+    nodes = list(app.donor_node_box.cget("values"))
+    assert nodes[0] == AUTO_NODE
+    assert "btBody_front" in nodes, nodes[:6]
+
+    # Automatic cannot guess here, and has to say so usefully.
+    app.donor_node.set(AUTO_NODE)
+    app.opt_hide.set(False)
+    app._start(preview=True)
+    pump(app, seconds=10.0)
+    log = app.log.get("1.0", "end")
+    assert "no head" in log and "'from' list" in log, log[-300:]
+
+    # Named, it goes through.
+    app.donor_node.set("btBody_front")
+    app._start(preview=True)
+    pump(app, seconds=15.0)
+    log = app.log.get("1.0", "end")
+    assert "c_dewback:UprBody from c_bantha:btBody_front" in log, log[-400:]
+    assert "1/1 would transfer" in log
+    assert len(app.viewport.scenes) == 2
+
+
+def test_naming_the_donor_node_overrides_the_automatic_choice(app, tmp_path):
+    """It has to win even when an automatic answer exists, or it is not a
+    choice - a head swap that wanted the donor's hair could not ask for it."""
+    transplant_tab(app)
+    app.out_dir.set(str(tmp_path))
+    app.host.set("p_carthh")
+    app._refresh_donors()
+    head = next(n for n in app.target_box.cget("values") if n.lower() == "head")
+    app.target_node.set(head)
+    app._refresh_donors()
+    app.donor.set(next(d for d in app.donor_choices() if d.startswith("n_dustilh")))
+    app._refresh_donor_nodes()
+
+    app.donor_node.set("tongue")
+    app._start(preview=True)
+    pump(app, seconds=15.0)
+
+    log = app.log.get("1.0", "end")
+    assert "p_carthh:Head from n_dustilh:tongue" in log, log[-400:]

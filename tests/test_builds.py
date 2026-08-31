@@ -231,3 +231,23 @@ def test_a_head_knows_which_body_it_is_worn_with(install_path):
             assert body is None or lib.has(body), (head, body)
 
     assert body_for_head(str(install_path), "no_such_head", lib) is None
+
+
+def test_geometry_with_no_head_is_told_apart_from_no_geometry(install_path):
+    """`other` used to mean both, and a list offering *parts* needs them apart.
+
+    A kath hound has plenty to give and no head; `n_darthrevanh` draws nothing
+    at all. Twenty-one KOTOR 1 models are the first kind and one is the second.
+    """
+    from kmdlfun.library import ModelLibrary, classify
+
+    lib = ModelLibrary(str(install_path))
+    wanted = [n for n in ("c_kath", "c_hutt", "c_bantha", "n_darthrevanh")
+              if lib.has(n)]
+    kinds = classify(lib, wanted)
+
+    for headless in ("c_kath", "c_hutt"):
+        if headless in kinds:
+            assert kinds[headless] == "other", f"{headless} has geometry to give"
+    if "n_darthrevanh" in kinds:
+        assert kinds["n_darthrevanh"] == "empty", "it draws nothing at all"

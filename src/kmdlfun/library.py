@@ -241,7 +241,11 @@ def kind_of(layout) -> str:
 
     meshes = kparts.mesh_nodes(layout)
     if not meshes:
-        return "other"
+        # Nothing drawn at all, which is a different thing from having no head.
+        # Only one model in KOTOR 1 is like this - `n_darthrevanh` - and
+        # lumping it in with the kath hounds meant a list that offered parts
+        # could not tell "headless" from "empty".
+        return "empty"
     if not any(n.name.lower() == "head" for n in meshes):
         return "body" if kparts.survey(layout)["torso"] else "other"
     return "head" if kapply.is_head_model(layout) else "creature"
@@ -265,7 +269,9 @@ def classify(install, names=None, *, progress=None) -> dict[str, str]:
     * **creature** - a whole body carrying its head as a node. Borrowable all
       the same, and where the interesting aliens live: `n_quarren`, `p_hk47`.
     * **body** - no head node, so it has nothing to donate here.
-    * **other** - parses, but has no mesh worth offering.
+    * **other** - geometry but no head: a kath hound, a hutt, a gammorean.
+      Nothing a head swap wants, but a named-node swap can take a part from it.
+    * **empty** - draws nothing at all. One model in KOTOR 1 qualifies.
     """
     from kmdlswap import layout as kl
 

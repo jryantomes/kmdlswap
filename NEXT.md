@@ -52,10 +52,6 @@ tangent looks identical in every viewer and wrong in game.
 
 - **In-game verification.** See above. A problem found there outranks
   everything below it.
-- **Headless creatures.** `c_kath`, `c_hutt`, `c_bantha`, `c_dewback` and about
-  four others have no `head` node and entirely bespoke part names. Node-targeted
-  mode assumes the *donor* has a head, so they fail. Needs a second dropdown to
-  name the donor's node; the CLI already does this with `--pair`.
 - **Jade Empire.** Closest of the other engines by a distance: its wrapper is
   KOTOR's with eight bytes inserted, fully understood, and our parser gets
   through the wrapper *and* the model header before failing in the node walk.
