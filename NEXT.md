@@ -39,8 +39,14 @@ Five tabs, all sharing the folder settings, log and build button.
 build before this overwrote a vanilla resref, so installing one replaced that
 character for the whole game and two builds could not coexist. Naming a build
 `p_myhead` rewrites the name inside the model to match the file, which is what
-the engine reads. The 2DA rows that would make the game *offer* a new head are
-not written - that is the next step, not this one.
+the engine reads. `--register` then writes the `heads.2da` and `appearance.2da`
+rows that make the game offer it, appended to whatever is installed so other
+mods survive.
+
+What is still missing for a *distributable* mod is patching rather than
+replacing: these tables are this install's, so handing them to someone else
+overwrites their mods. A HoloPatcher/TSLPatcher `changes.ini` is the answer and
+is not written yet.
 
 Command line covers the same ground, plus `kmdlfun rank`, `import`, `render`
 and `builds`.

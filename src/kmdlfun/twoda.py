@@ -1,0 +1,187 @@
+"""Telling the game a new character exists.
+
+A renamed model in Override is a file nothing references. `appearance.2da` is
+what turns it into someone the game can spawn, and for a head so is
+`heads.2da`.
+
+The pattern here is copied from a mod on this machine that works - the HK
+recruit mod - because a working example beats a guess about a format nobody
+documents. Two things it does that this follows:
+
+**Append, never edit.** Comparing that mod's tables against the shipped ones
+gives 510 rows where the game ships 509, and *zero* changed cells in the rows
+that already existed. Every existing appearance keeps its meaning, so nothing
+that referenced row 42 yesterday points somewhere else today.
+
+**Copy a row that already works.** An appearance row has fifty-odd columns -
+walk speed, drive animations, blood colour, hit radius, per-slot body models -
+and a new character wants almost all of them the same as somebody. The mod's
+new row is HK-47's with the label, model and texture changed. Filling fifty
+columns from first principles is how a character ends up sliding along the
+ground.
+
+**Read what is installed, not what shipped.** The tables are loaded through
+Override first, so a new row lands on top of whatever mods are already there
+rather than reverting them. The consequence is that what this writes is
+specific to this install and not something to hand to a stranger - a real
+distributable would patch rather than replace, which is a different job.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+
+HEADS = "heads"
+APPEARANCE = "appearance"
+
+
+class TwoDAError(RuntimeError):
+    pass
+
+
+@dataclass
+class Registration:
+    """What was written, and what the game will call it."""
+
+    files: list[Path] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+    head_row: int | None = None
+    appearance_row: int | None = None
+    label: str = ""
+
+
+def _load(install, name: str):
+    """The table as the game would read it: Override first, then the packs."""
+    from pykotor.extract.installation import Installation
+    from pykotor.resource.formats.twoda import read_2da
+    from pykotor.resource.type import ResourceType
+
+    found = Installation(str(install)).resource(name, ResourceType.TwoDA)
+    if found is None:
+        raise TwoDAError(f"{name}.2da not found in that install")
+    return read_2da(found.data)
+
+
+def _save(table, path: Path) -> None:
+    from pykotor.resource.formats.twoda import bytes_2da
+
+    path.write_bytes(bytes_2da(table))
+
+
+def find_appearance(table, model: str) -> int | None:
+    """The row whose body model is `model`, to copy defaults from."""
+    wanted = model.lower()
+    for i in range(table.get_height()):
+        if table.get_cell(i, "race").strip().lower() == wanted:
+            return i
+    return None
+
+
+def find_head_row(table, head: str) -> int | None:
+    wanted = head.lower()
+    for i in range(table.get_height()):
+        if table.get_cell(i, "head").strip().lower() == wanted:
+            return i
+    return None
+
+
+def register_head(install, out_dir, head_resref: str, *, label: str,
+                  like: str = "p_carthh") -> Registration:
+    """Add a head model to `heads.2da`, and an appearance that wears it.
+
+    `like` is an existing *head* whose appearance supplies the fifty columns
+    this one does not care about - body models, walk speed, blood colour.
+    """
+    out_dir = Path(out_dir)
+    reg = Registration(label=label)
+
+    heads = _load(install, HEADS)
+    if find_head_row(heads, head_resref) is not None:
+        raise TwoDAError(f"{head_resref} is already in heads.2da")
+    row = heads.add_row(str(heads.get_height()), {"head": head_resref})
+    reg.head_row = row
+    reg.notes.append(f"heads.2da: {head_resref} added as row {row}")
+
+    appearance = _load(install, APPEARANCE)
+    template = _appearance_using_head(appearance, heads, like)
+    if template is None:
+        raise TwoDAError(
+            f"no appearance wears {like!r}, so there is nothing to copy defaults from"
+        )
+    new_row = _append_like(appearance, template, {
+        "label": label,
+        "normalhead": str(row),
+    })
+    # A backup head is what the game falls back to; pointing it at the new one
+    # keeps a damaged state from reverting to whoever was copied.
+    if "backuphead" in appearance.get_headers():
+        appearance.set_cell(new_row, "backuphead", str(row))
+    reg.appearance_row = new_row
+    reg.notes.append(
+        f"appearance.2da: row {new_row} {label!r}, copied from row {template} "
+        f"and pointed at head {row}"
+    )
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for name, table in ((HEADS, heads), (APPEARANCE, appearance)):
+        path = out_dir / f"{name}.2da"
+        _save(table, path)
+        reg.files.append(path)
+    return reg
+
+
+def register_creature(install, out_dir, model_resref: str, *, label: str,
+                      texture: str | None = None,
+                      like: str = "p_hk47") -> Registration:
+    """Add a self-contained model - one that carries its own head - as an
+    appearance of its own. This is the shape the HK recruit mod uses."""
+    out_dir = Path(out_dir)
+    reg = Registration(label=label)
+
+    appearance = _load(install, APPEARANCE)
+    template = find_appearance(appearance, like)
+    if template is None:
+        raise TwoDAError(f"no appearance uses {like!r} as its model")
+
+    changes = {"label": label, "race": model_resref}
+    if texture:
+        changes["modela"] = texture
+    new_row = _append_like(appearance, template, changes)
+    reg.appearance_row = new_row
+    reg.notes.append(
+        f"appearance.2da: row {new_row} {label!r}, model {model_resref}"
+        + (f", texture {texture}" if texture else "")
+        + f", copied from row {template}"
+    )
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"{APPEARANCE}.2da"
+    _save(appearance, path)
+    reg.files.append(path)
+    return reg
+
+
+def _append_like(table, template: int, changes: dict[str, str]) -> int:
+    """A new row carrying every column of `template`, then the changes.
+
+    Explicit rather than a library copy because the point is that *all* fifty
+    columns come across: walk speed, drive animations, blood colour, hit
+    radius. A new character filled in from first principles is how one ends up
+    sliding along the ground.
+    """
+    cells = {c: table.get_cell(template, c) for c in table.get_headers()}
+    cells.update(changes)
+    return table.add_row(str(table.get_height()), cells)
+
+
+def _appearance_using_head(appearance, heads, head_resref: str):
+    """An appearance row that wears the named head model."""
+    row = find_head_row(heads, head_resref)
+    if row is None:
+        return None
+    wanted = str(row)
+    for i in range(appearance.get_height()):
+        if appearance.get_cell(i, "normalhead").strip() == wanted:
+            return i
+    return None
