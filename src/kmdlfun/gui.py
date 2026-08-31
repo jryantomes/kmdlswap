@@ -582,8 +582,31 @@ class App(ttk.Frame):
         self.viewport = kviewport.Viewport(page, size=320)
         self.viewport.grid(row=3, column=0, columnspan=3, sticky="nsew", pady=(8, 0))
 
+        frame_row = ttk.Frame(page)
+        frame_row.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(6, 0))
+        ttk.Label(frame_row, text="Frame").pack(side="left", padx=(0, 6))
+        # Defaults to the head, because that is what a head swap changed and
+        # what a preview is being consulted about. The whole figure is one
+        # click away when the question is proportion instead.
+        self.preview_frame = tk.StringVar(value="head")
+        for label, value in (("head", "head"), ("whole model", "whole")):
+            ttk.Radiobutton(frame_row, text=label, value=value,
+                            variable=self.preview_frame,
+                            command=self._apply_framing).pack(side="left", padx=(0, 8))
+
+        ttk.Label(frame_row, text="Zoom").pack(side="left", padx=(14, 4))
+        self.preview_zoom = tk.DoubleVar(value=1.0)
+        ttk.Scale(frame_row, from_=0.35, to=6.0, variable=self.preview_zoom,
+                  orient="horizontal", length=150,
+                  command=lambda _=None: self._apply_zoom()).pack(side="left")
+        self.zoom_label = ttk.Label(frame_row, text="1.0x", width=6)
+        self.zoom_label.pack(side="left", padx=(4, 0))
+        ttk.Label(frame_row, text="the wheel zooms too; drag to turn, "
+                                  "double-click to reset",
+                  foreground="#666").pack(side="left", padx=(10, 0))
+
         views = ttk.Frame(page)
-        views.grid(row=4, column=0, columnspan=3, sticky="w", pady=(6, 0))
+        views.grid(row=5, column=0, columnspan=3, sticky="w", pady=(6, 0))
         for label, yaw, pitch in (
             ("Front", 0, 0), ("Side", 90, 0), ("Back", 180, 0), ("Above", 0, 55),
         ):
@@ -599,7 +622,7 @@ class App(ttk.Frame):
         )
 
         self.preview_status = ttk.Label(page, text="", foreground="#666", wraplength=600)
-        self.preview_status.grid(row=5, column=0, columnspan=3, sticky="w", pady=(6, 0))
+        self.preview_status.grid(row=6, column=0, columnspan=3, sticky="w", pady=(6, 0))
         ttk.Label(
             page,
             text=("Drag to turn, wheel to zoom, double-click to reset. No animation, "
@@ -607,6 +630,24 @@ class App(ttk.Frame):
                   "not proof."),
             foreground="#a35", wraplength=600,
         ).grid(row=6, column=0, columnspan=3, sticky="w", pady=(4, 0))
+
+    def _apply_framing(self):
+        """Point the camera at the head, or at the whole figure."""
+        want = getattr(self, "preview_frame", None)
+        focus = getattr(self, "_focus_bounds", None)
+        whole = getattr(self, "_whole_bounds", None)
+        if want is None:
+            return
+        if want.get() == "head" and focus is not None:
+            self.viewport.bounds = focus
+        elif whole is not None:
+            self.viewport.bounds = whole
+        self.viewport.repaint()
+
+    def _apply_zoom(self):
+        self.viewport.zoom = float(self.preview_zoom.get())
+        self.zoom_label.config(text=f"{self.viewport.zoom:.1f}x")
+        self.viewport.repaint()
 
     def _repaint_viewport(self):
         self.viewport.cull = self.preview_cull.get()
@@ -1908,9 +1949,28 @@ class App(ttk.Frame):
         worn = f" on {body_name}" if body_layout is not None else ""
         note = (f"{before.triangles} vs {after.triangles} triangles   -   "
                 f"nothing written; this is what Build would produce")
+
+        # Framing on the swapped part as well as the whole figure. A head on a
+        # standing body is a few dozen pixels, which is not enough to judge the
+        # thing the swap actually changed.
+        focus = None
+        try:
+            if body_layout is not None:
+                heads = [krender.place_head(body_layout, lay, texture_lookup=look)
+                         for lay in (host_layout, built_layout)]
+            else:
+                heads = [krender.from_layout(lay, texture_lookup=look)
+                         for lay in (host_layout, built_layout)]
+            heads = [h for h in heads if h is not None and len(h.faces)]
+            if heads:
+                focus = krender.shared_bounds(heads)
+        except Exception:  # noqa: BLE001
+            focus = None
+
         self.events.put((
             "scenes",
-            ([before, after], [f"{host}{worn} (now)", f"{host} <- {donor}{worn}"], note),
+            ([before, after], [f"{host}{worn} (now)", f"{host} <- {donor}{worn}"],
+             note, focus),
         ))
 
     @staticmethod
@@ -1953,8 +2013,11 @@ class App(ttk.Frame):
                     if label != "done":
                         self._say(f"  [{i + 1}/{total}] {label}")
                 elif kind == "scenes":
-                    scenes, labels, note = payload
+                    scenes, labels, note, *rest = payload
                     self.viewport.set_scenes(scenes, labels)
+                    self._focus_bounds = rest[0] if rest else None
+                    self._whole_bounds = self.viewport.bounds
+                    self._apply_framing()
                     self.preview_status.config(text=note)
                     # The viewport lives on the Preview tab, so put it in front
                     # rather than drawing where nobody is looking.
