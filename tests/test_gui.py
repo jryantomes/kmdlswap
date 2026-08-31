@@ -727,3 +727,79 @@ def test_a_cross_game_build_ships_only_what_the_host_lacks(app, tmp_path, k2_pat
     assert not any(n.startswith("p_carthh01") for n in shipped), (
         f"shipped a KOTOR 2 copy of a KOTOR 1 texture: {shipped}"
     )
+
+
+def test_the_host_list_says_what_each_model_is(app):
+    """A head model and a creature take a swap very differently and their names
+    do not say which is which - `p_hk47` carries its head inside its body,
+    `p_carthh` is a head on its own. Knowing that after choosing is too late.
+    """
+    transplant_tab(app)
+    app._scan()
+    pump(app, seconds=30.0)
+
+    values = list(app.host_box.cget("values"))
+    assert values, "no hosts listed"
+    labelled = {v.split()[0]: v for v in values}
+
+    assert "[head]" in labelled["p_carthh"]
+    assert "[creature]" in labelled["p_hk47"], labelled["p_hk47"]
+    assert "[body]" in labelled["p_carthbb"], labelled["p_carthbb"]
+
+    kinds = {v.split("[")[-1].rstrip("]") for v in values if "[" in v}
+    assert {"head", "creature", "body"} <= kinds, kinds
+
+
+def test_a_labelled_host_still_resolves_to_a_model(app):
+    """Everything downstream wants the bare name, and a bare name typed in by
+    hand has to keep working too."""
+    transplant_tab(app)
+    app._scan()
+    pump(app, seconds=30.0)
+
+    label = next(v for v in app.host_box.cget("values") if v.startswith("p_carthh "))
+    app.host.set(label)
+    assert app._selected_host() == "p_carthh"
+
+    app.host.set("p_hk47")
+    assert app._selected_host() == "p_hk47", "an unlabelled name must still work"
+
+    app.host.set("")
+    assert app._selected_host() == ""
+
+
+def test_the_scan_classifies_on_its_way_past(app):
+    """It parses every model to build the index, so classifying separately
+    would read the whole install a second time - about ten seconds of it."""
+    transplant_tab(app)
+    app._scan()
+    pump(app, seconds=30.0)
+
+    install = app.install.get().strip()
+    assert getattr(app, "_kind_cache", {}).get(install), (
+        "the scan should have left its classification behind"
+    )
+
+    started = time.time()
+    app.host.set("p_carthh")
+    app._refresh_donors()
+    assert time.time() - started < 5.0, "the donor list re-read the install"
+    assert app.donor_choices()
+
+
+def test_the_games_are_named(app):
+    """"this game" tells you nothing when two are configured."""
+    from tkinter import ttk
+
+    transplant_tab(app)
+    labels = []
+
+    def walk(widget):
+        for child in widget.winfo_children():
+            if isinstance(child, ttk.Radiobutton):
+                labels.append(str(child.cget("text")))
+            walk(child)
+
+    walk(app)
+    assert "KOTOR" in labels and "KOTOR II" in labels, labels
+    assert "this game" not in labels
