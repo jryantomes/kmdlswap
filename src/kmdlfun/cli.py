@@ -69,6 +69,11 @@ def main(argv: list[str] | None = None) -> int:
                          "first pair anchors the alignment for the rest")
     tp.add_argument("--out", required=True, help="where builds are kept")
     tp.add_argument("--name", help="name this build; defaults to host-donor")
+    tp.add_argument("--save-as", metavar="RESREF",
+                    help="write the result as a NEW model with this name rather "
+                         "than overwriting the host. The name inside the model "
+                         "is changed to match, so it sits beside the originals "
+                         "instead of replacing one")
     tp.add_argument("--fit", action="store_true", help="scale the donor part to the host part's size")
     tp.add_argument("--place", action="store_true",
                     help="move the donor onto the host part without resizing it, "
@@ -690,11 +695,21 @@ def _transplant(args) -> int:
 
     root = Path(args.out)
     root.mkdir(parents=True, exist_ok=True)
-    name = args.name or kbuilds.unique_name(root, f"{args.host}-{args.donor}")
+    written_as = args.host
+    if getattr(args, "save_as", None):
+        from kmdlswap import rename as krename
+
+        krename.check_name(args.save_as)
+        mdl, mdx = krename.rename(mdl, mdx, args.save_as)
+        written_as = args.save_as
+        print(f"  saved as {written_as}: a new model, not a replacement for "
+              f"{args.host}")
+
+    name = args.name or kbuilds.unique_name(root, f"{written_as}-{args.donor}")
     out_dir = root / kbuilds.slug(name)
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / f"{args.host}.mdl").write_bytes(mdl)
-    (out_dir / f"{args.host}.mdx").write_bytes(mdx)
+    (out_dir / f"{written_as}.mdl").write_bytes(mdl)
+    (out_dir / f"{written_as}.mdx").write_bytes(mdx)
 
     if args.donor_install and args.with_texture:
         # The donor's texture lives in the donor's game. Without it the model
