@@ -471,6 +471,11 @@ class App(ttk.Frame):
         self.viewport.cull = self.preview_cull.get()
         self.viewport.repaint()
 
+    def _donor_install_for_preview(self) -> str:
+        """The second game, if one is configured - a preview should not go grey
+        just because the texture came from there."""
+        return self.install2.get().strip()
+
     def _show_preview(self):
         if self.worker and self.worker.is_alive():
             return
@@ -507,9 +512,15 @@ class App(ttk.Frame):
                 from . import textures as ktextures
 
                 # The build's own texture sits in the output folder, and is what
-                # the game will use once both are in Override.
-                cache = ktextures.TextureCache(install, extra=[out_dir])
-                lookup = cache.get
+                # the game will use once both are in Override. A cross-game build
+                # names one that lives only in the other install, so that is
+                # searched too rather than drawn grey.
+                lookup = ktextures.lookup_across(
+                    [install, self._donor_install_for_preview()],
+                    extra=[out_dir, *sorted(p for p in Path(out_dir).glob("*")
+                                            if p.is_dir())],
+                )
+                cache = lookup.caches[0]
 
             scenes, labels, notes = [], [], []
             layout = kl.parse(*ModelLibrary(install).read(name))
@@ -1141,7 +1152,8 @@ class App(ttk.Frame):
                 # it rather than only describe it. Nothing is written.
                 lines.append(f"preview only: {ok}/{len(pairs)} would transfer")
                 try:
-                    self._post_scenes(cfg.install, host, donor, mdl, mdx, lib)
+                    self._post_scenes(cfg.install, host, donor, mdl, mdx, lib,
+                                      donor_install=cfg.donor_install)
                 except Exception as exc:  # noqa: BLE001
                     lines.append(f"(could not draw it: {type(exc).__name__}: {exc})")
                 self.events.put(("done_text", lines))
@@ -1186,7 +1198,7 @@ class App(ttk.Frame):
             self.events.put(("error", f"{type(exc).__name__}: {exc}\n"
                                       f"{traceback.format_exc(limit=3)}"))
 
-    def _post_scenes(self, install, host, donor, mdl, mdx, lib):
+    def _post_scenes(self, install, host, donor, mdl, mdx, lib, donor_install=""):
         """Draw the host as it is beside the host as it would be.
 
         Framed by one shared ruler, because two renders at two scales make a
@@ -1197,9 +1209,9 @@ class App(ttk.Frame):
         from . import render as krender
         from . import textures as ktextures
 
-        cache = ktextures.TextureCache(install)
-        before = krender.from_layout(kl.parse(*lib.read(host)), texture_lookup=cache.get)
-        after = krender.from_layout(kl.parse(mdl, mdx), texture_lookup=cache.get)
+        look = ktextures.lookup_across([install, donor_install])
+        before = krender.from_layout(kl.parse(*lib.read(host)), texture_lookup=look)
+        after = krender.from_layout(kl.parse(mdl, mdx), texture_lookup=look)
         note = (f"{before.triangles} vs {after.triangles} triangles   -   "
                 f"nothing written; this is what Build would produce")
         self.events.put((

@@ -319,3 +319,61 @@ def test_the_preview_shows_the_companion_as_normally_seen(app):
     # A self-contained companion has no separate head, and needs none.
     body, head = roster.default_look(("p_hk47",), lambda m: False)
     assert (body, head) == ("p_hk47", None)
+
+
+def test_a_cross_game_preview_finds_the_donors_texture(app):
+    """A K2 donor names a texture the host game has never heard of.
+
+    Looking it up in the host install alone draws it grey - which is what a
+    missing texture looks like, and the wrong thing to show someone deciding
+    whether a head is worth building. Nothing is written at preview time, so
+    there is no file to fall back on either; it has to come from the other game.
+    """
+    import pathlib
+
+    k2 = next(
+        (c for c in (
+            r"E:\SteamLibrary\steamapps\common\Knights of the Old Republic II",
+            r"C:\Program Files (x86)\Steam\steamapps\common\Knights of the Old Republic II",
+        ) if (pathlib.Path(c) / "chitin.key").is_file()),
+        None,
+    )
+    if k2 is None:
+        pytest.skip("no KOTOR 2 install")
+
+    transplant_tab(app)
+    app.install2.set(k2)
+    app.donor_game.set("K2")
+    app._refresh_donors()
+    quarren = [v for v in app.donor_box.cget("values") if v.startswith("n_quarren")][0]
+
+    app.host.set("p_carthh")
+    app.donor.set(quarren)
+    app.opt_texture.set(True)
+    app.opt_hide.set(True)
+    app.opt_reshape.set(False)
+    app.opt_fit.set(False)
+    app._start(preview=True)
+    pump(app, seconds=6.0)
+
+    assert len(app.viewport.scenes) == 2, app.log.get("1.0", "end")[-400:]
+    result = app.viewport.scenes[1]
+    assert result.textured, "the K2 donor's texture did not resolve"
+    assert len(result.textures) == 1
+    # and it is a real image, not a placeholder
+    assert result.textures[0].shape[:2] == (512, 512)
+    assert len({tuple(px) for px in result.textures[0].reshape(-1, 3)[::997]}) > 20
+
+
+def test_the_lookup_prefers_the_host_game(install_path):
+    """Order matters: a name the host game does have must come from the host,
+    or a swap would silently pick up the other game's version of it."""
+    import numpy as np
+
+    from kmdlfun import textures as ktextures
+
+    look = ktextures.lookup_across([str(install_path), str(install_path)])
+    direct = ktextures.TextureCache(str(install_path)).get("P_CarthH01")
+    assert direct is not None
+    assert np.array_equal(look("P_CarthH01"), direct)
+    assert look("no_such_texture_at_all") is None

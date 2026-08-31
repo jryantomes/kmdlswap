@@ -198,3 +198,31 @@ def export_donor_textures(mdl: bytes, mdx: bytes, donor_install, out_dir) -> lis
         Image.fromarray(image, mode="RGB").save(path)
         notes.append(f"exported {path.name} ({image.shape[1]}x{image.shape[0]})")
     return notes
+
+
+def lookup_across(installs, extra: list[Path] | None = None):
+    """A texture lookup that tries several games, in order.
+
+    A cross-game build names a texture the host game has never heard of, so a
+    preview built from the host's install alone draws it grey - which is
+    exactly what a missing texture looks like, and exactly the wrong thing to
+    show someone deciding whether a head is worth building.
+
+    Order matters and matches the engine's: whatever is loose comes first
+    (`extra`, then each install's Override), then the packs, host before donor.
+    Caches are built once and shared, so turning a model in the viewport does
+    not re-read the game.
+    """
+    caches = [TextureCache(p, extra=extra) for p in installs if p]
+    if not caches:
+        caches = [TextureCache(None, extra=extra)]
+
+    def get(name: str):
+        for cache in caches:
+            found = cache.get(name)
+            if found is not None:
+                return found
+        return None
+
+    get.caches = caches           # so a caller can report what went wrong
+    return get
