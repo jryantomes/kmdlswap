@@ -727,223 +727,47 @@ def _transplant(args) -> int:
 
 
 def _head(args) -> int:
-    """Check a custom head pack, and optionally build it into a model."""
-    from pathlib import Path
+    """Check a custom head pack, and optionally build it into a model.
 
-    from kmdlswap import obj as kobj
-
-    from . import headpack, headspec
+    The work itself lives in `headbuild`, so the desktop app runs exactly this
+    and the two cannot drift apart.
+    """
+    from . import headbuild, headpack
 
     if args.template:
         path = headpack.write_template(args.pack)
         print(f"wrote {path}; fill it in and run again without --template")
         return 0
 
-    pack = headpack.load(args.pack)
-    print(f"{pack.name}   ({pack.root})")
-    for problem in pack.problems:
-        print(f"  [FAIL] pack: {problem}")
-    if pack.mesh_path is None:
-        return 1
-    print(f"  mesh    {pack.mesh_path.name}")
-    print(f"  texture {pack.texture_path.name if pack.texture_path else '(none - keeps the host texture)'}")
-    print()
-
-    try:
-        mesh = kobj.read_obj(pack.mesh_path)
-    except kobj.ObjError as exc:
-        print(f"  [FAIL] mesh: {exc}", file=sys.stderr)
-        return 1
-
-    if args.crop:
-        from . import repair as krepair
-
-        axis = 1 if pack.up == "y" else 2
-        mesh, cut = krepair.crop_below(mesh, args.crop, axis=axis)
-        print(f"  cropped: {cut} face(s) below {args.crop:.0%} of the height removed"
-              if cut else "  cropped: nothing was below the cut")
-
-    if args.decimate:
-        from . import decimate as kdecimate
-
-        result = kdecimate.simplify(mesh, args.decimate)
-        if result.after < result.before:
-            mesh = result.mesh
-            print(f"  decimated: {result.summary()}")
-        else:
-            print(f"  decimate: already {result.before} triangles, left alone")
-
-    if args.repair:
-        from . import repair as krepair
-
-        mesh, flipped = krepair.unify_winding(mesh)
-        print(f"  winding: {flipped} face(s) rewound to agree with their neighbours"
-              if flipped else "  winding: already consistent")
-        print(f"           {krepair.facing_report(mesh)}")
-
-    verdict = headspec.check_mesh(mesh)
-    for line in verdict.lines():
+    result = headbuild.run(
+        args.pack,
+        install=args.install,
+        host=args.host,
+        node=args.node,
+        crop=args.crop,
+        decimate=args.decimate,
+        repair=args.repair,
+        fit=args.fit,
+        reshape=args.reshape,
+        hide=args.hide,
+        build=bool(args.out),
+    )
+    for line in result.lines:
         print("  " + line)
-
-    if pack.texture_path:
-        tex = headspec.check_texture(pack.texture_path)
-        for line in tex.lines():
-            print("  " + line)
-        verdict.findings.extend(tex.findings)
-
-    layout = node = None
-    if args.install and args.host:
-        from kmdlswap import layout as kl
-
-        from .library import ModelLibrary
-
-        lib = ModelLibrary(args.install)
-        if not lib.has(args.host):
-            print(f"kmdlfun: no model {args.host!r} in that install", file=sys.stderr)
-            return 1
-        layout = kl.parse(*lib.read(args.host))
-        wanted = args.node or pack.target
-        try:
-            node = layout.node_by_name(wanted)
-        except KeyError as exc:
-            print(f"kmdlfun: {exc}", file=sys.stderr)
-            return 1
-        if args.fit:
-            mesh = _fit_mesh(mesh, pack, layout, node)
-
-        target = headspec.check_against_target(mesh, layout, node)
-        for line in target.lines():
-            print("  " + line)
-        verdict.findings.extend(target.findings)
-
-        placement = headspec.check_placement(mesh, layout, node)
-        for line in placement.lines():
-            print("  " + line)
-        verdict.findings.extend(placement.findings)
-
     print()
-    if verdict.failures:
-        print(f"REJECTED: {len(verdict.failures)} blocking problem(s), "
-              f"{len(verdict.warnings)} warning(s)")
-        if not args.decimate and any(f.check == "density" for f in verdict.failures):
-            print("Too dense is the one failure the tool can fix itself: "
-                  "add --decimate")
+    print(result.verdict)
+    if result.error:
+        print(f"kmdlfun: {result.error}", file=sys.stderr)
         return 1
-    print(f"ACCEPTED with {len(verdict.warnings)} warning(s)")
-
+    if result.failures:
+        return 1
     if not args.out:
         return 0
-    if layout is None or node is None:
-        print("kmdlfun: --out needs --install and --host too", file=sys.stderr)
-        return 1
 
-    from kmdlswap import edit as ke
-    from kmdlswap import validate as kv
-    from kmdlswap import layout as kl2
-
-    from . import reshape as kreshape
-    from kmdlswap.swap import build_replacement
-
-    host_positions = ke.extract(layout, node).positions
-
-    if args.reshape:
-        # Opt-in now. This used to be forced for every skinned head, because a
-        # changing vertex count appeared to break facial animation; that was a
-        # stale pointer in our own writer, since fixed and confirmed in game
-        # (reports/SKIN_ROOT_POINTER_FINDINGS.md). It survives because keeping
-        # the host's UVs and weights is sometimes what you actually want.
-        host_geo = ke.extract(layout, node)
-        moved = kreshape.snap_to_surface(host_geo.positions, mesh.positions, mesh.faces)
-        shaped = kobj.ObjMesh(name=node.name)
-        shaped.positions = moved
-        shaped.faces = [f.vertices for f in host_geo.faces]
-        shaped.materials = [f.material for f in host_geo.faces]
-        if "uv1" in host_geo.columns:
-            shaped.uvs = [tuple(u) for u in host_geo.columns["uv1"]]
-        shaped.normals = kreshape.recompute_vertex_normals(moved, shaped.faces)
-        geo, report = build_replacement(
-            layout, node, shaped, influences=host_geo.influences or None
-        )
-        print("reshaped onto the host's topology")
-    else:
-        geo, report = build_replacement(layout, node, mesh)
-        if node.is_skin:
-            print(f"weights transferred from the host's {len(host_positions)} "
-                  f"vertices onto the pack's {mesh.vertex_count}")
-
-    mdl, mdx = ke.replace_geometry(
-        layout, node, geo, texture=pack.texture_resref
-    )
-
-    if args.hide is not None:
-        from . import parts as kparts
-        from . import visibility as kvis
-
-        after = kl2.parse(mdl, mdx)
-        if args.hide:
-            wanted = list(args.hide)
-        else:
-            # Everything visible except the node we just replaced. These are
-            # shaped for the face that is gone, so they float.
-            wanted = [n.name for n in kparts.mesh_nodes(after)
-                      if n.name.lower() != node.name.lower()]
-        mdl, hidden = kvis.hide_nodes(after, mdl, wanted)
-        if hidden:
-            print(f"hidden (host parts that no longer fit): {', '.join(hidden)}")
-    if not kv.check(kl2.parse(mdl, mdx)).ok:
-        print("kmdlfun: result failed validation; nothing written", file=sys.stderr)
-        return 1
-
-    out = Path(args.out)
-    out.mkdir(parents=True, exist_ok=True)
-    (out / f"{args.host}.mdl").write_bytes(mdl)
-    (out / f"{args.host}.mdx").write_bytes(mdx)
-    if pack.texture_path:
-        import shutil
-
-        shutil.copy2(pack.texture_path, out / pack.texture_path.name)
-    for line in report.lines():
-        print("  " + line)
-    print(f"wrote {out / args.host}.mdl, .mdx"
-          + (f" and {pack.texture_path.name}" if pack.texture_path else ""))
+    written = headbuild.write(result, args.out, args.host)
+    print("wrote " + ", ".join(str(p) for p in written))
     print("Copy them into Override. A successful build is not proof.")
     return 0
-
-
-def _fit_mesh(mesh, pack, layout, node):
-    """Orient, scale and place a foreign mesh onto a node.
-
-    Nothing outside KOTOR knows what scale or origin a head node uses, so a raw
-    export always needs this. The pack's hints say which way it was authored;
-    the node's own geometry says where it has to end up.
-    """
-    from kmdlswap import edit as ke
-
-    from . import headgen
-
-    host = ke.extract(layout, node)
-    hlo = [min(p[i] for p in host.positions) for i in range(3)]
-    hhi = [max(p[i] for p in host.positions) for i in range(3)]
-    size = [hhi[i] - hlo[i] for i in range(3)]
-    centre = [(hhi[i] + hlo[i]) / 2 for i in range(3)]
-
-    positions = headgen.orient(mesh.positions, facing=pack.facing, up=pack.up)
-    if pack.scale != 1.0:
-        size = [s * pack.scale for s in size]
-    positions = headgen.fit_to(positions, size, centre, anchor=pack.anchor)
-
-    before = mesh.positions
-    mesh.positions = positions
-    mesh.normals = headgen.vertex_normals(positions, mesh.faces) if mesh.normals else []
-    b_lo = [min(p[i] for p in before) for i in range(3)]
-    b_hi = [max(p[i] for p in before) for i in range(3)]
-    a_lo = [min(p[i] for p in positions) for i in range(3)]
-    a_hi = [max(p[i] for p in positions) for i in range(3)]
-    fmt = lambda s: "x".join(f"{c:.3f}" for c in s)  # noqa: E731
-    print(f"  fitted: {fmt([b_hi[i]-b_lo[i] for i in range(3)])} -> "
-          f"{fmt([a_hi[i]-a_lo[i] for i in range(3)])}"
-          f"   facing {pack.facing}, up {pack.up}, anchor {pack.anchor}")
-    return mesh
 
 
 def _rank(args) -> int:

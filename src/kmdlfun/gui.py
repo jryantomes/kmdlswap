@@ -3,10 +3,16 @@
 Tkinter ships with Python, so the app adds no dependency. It drives the same
 library the CLI does - nothing here reimplements the geometry work.
 
-Two tabs, because there are two genuinely different jobs: applying an effect to
-whole companions, and moving one model's parts into another. They share the
-folder settings, the log and the build button, since those are the same in both
-cases.
+A tab per job, because they are genuinely different jobs: applying an effect to
+whole companions, moving one model's geometry into another, and putting a mesh
+from outside the game into a single node. They share the folder settings, the
+log and the build button, since those are the same in every case.
+
+The third exists because two of them were unreachable from here. Head packs
+were command line only, and a unified body like HK-47 - whose head is one node
+among forty-odd droid-named meshes - fails the whole-model compatibility test
+that fills the donor list, so it offered nothing at all. Naming a single host
+node answers the question that actually matters there.
 
 Work runs on a worker thread so the window stays responsive; Tk is not
 thread-safe, so the worker only posts messages to a queue the UI drains on a
@@ -28,6 +34,8 @@ from . import effects as keffects
 from . import roster
 from . import viewport as kviewport
 from .library import build
+
+WHOLE_MODEL = "matching nodes (whole model)"
 
 DEFAULT_INSTALLS = [
     r"E:\SteamLibrary\steamapps\common\swkotor",
@@ -53,6 +61,10 @@ class TransplantSettings:
     reshape: bool
     with_texture: bool
     hide: bool
+    # One host node to fill, or "" to pair every node whose name matches. A
+    # unified body needs the former: HK-47 shares exactly one node name with any
+    # head model, so whole-model pairing offers nothing.
+    target_node: str = ""
 
 
 def guess_install() -> str:
@@ -147,6 +159,7 @@ class App(ttk.Frame):
         self.tabs.grid(row=1, column=0, sticky="nsew", pady=(0, 8))
         self._build_effect_tab()
         self._build_transplant_tab()
+        self._build_head_tab()
         self._build_preview_tab()
         self._build_builds_tab()
 
@@ -227,8 +240,24 @@ class App(ttk.Frame):
 
         ttk.Button(page, text="Scan install", command=self._scan).grid(row=0, column=4)
 
+        # Where the donor's head goes. "Matching nodes" is the original
+        # behaviour - pair everything whose names agree - and is right when
+        # host and donor are the same kind of model. It finds nothing on a
+        # unified body like HK-47, whose 45 droid-named meshes share exactly one
+        # name with any head model, so a single node can be named instead.
+        target = ttk.Frame(page)
+        target.grid(row=1, column=0, columnspan=5, sticky="w", pady=(6, 0))
+        ttk.Label(target, text="Into").pack(side="left", padx=(0, 6))
+        self.target_node = tk.StringVar(value=WHOLE_MODEL)
+        self.target_box = ttk.Combobox(target, textvariable=self.target_node,
+                                       values=[WHOLE_MODEL], width=28, state="readonly")
+        self.target_box.pack(side="left")
+        self.target_box.bind("<<ComboboxSelected>>", lambda _e: self._refresh_donors())
+        self.target_note = ttk.Label(target, text="", foreground="#666")
+        self.target_note.pack(side="left", padx=(8, 0))
+
         game = ttk.Frame(page)
-        game.grid(row=1, column=0, columnspan=5, sticky="w", pady=(6, 0))
+        game.grid(row=2, column=0, columnspan=5, sticky="w", pady=(6, 0))
         ttk.Label(game, text="Donor from").pack(side="left", padx=(0, 6))
         self.donor_game = tk.StringVar(value="K1")
         for label, value in (("this game", "K1"), ("KOTOR 2", "K2")):
@@ -247,16 +276,16 @@ class App(ttk.Frame):
             text="The host keeps its hierarchy, skeleton and animations. Only geometry moves.",
             foreground="#666", wraplength=620,
         )
-        self.donor_note.grid(row=2, column=0, columnspan=5, sticky="w", pady=(4, 0))
+        self.donor_note.grid(row=3, column=0, columnspan=5, sticky="w", pady=(4, 0))
 
         self.show_all = tk.BooleanVar(value=False)
         ttk.Checkbutton(
             page, text="Show every model, including bodies and ones that cannot pair",
             variable=self.show_all, command=self._refresh_donors,
-        ).grid(row=6, column=0, columnspan=5, sticky="w", pady=(8, 0))
+        ).grid(row=7, column=0, columnspan=5, sticky="w", pady=(8, 0))
 
         opts = ttk.Frame(page)
-        opts.grid(row=3, column=0, columnspan=5, sticky="w", pady=(8, 0))
+        opts.grid(row=4, column=0, columnspan=5, sticky="w", pady=(8, 0))
         # Reshape used to be forced on, because a head's vertex count was
         # thought to be fixed. It is not - that was a stale pointer in our own
         # writer - so the donor now comes across whole by default, keeping its
@@ -286,7 +315,7 @@ class App(ttk.Frame):
         ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
         size = ttk.Frame(page)
-        size.grid(row=4, column=0, columnspan=5, sticky="w", pady=(6, 0))
+        size.grid(row=5, column=0, columnspan=5, sticky="w", pady=(6, 0))
         ttk.Label(size, text="Scale").pack(side="left")
         self.opt_scale = tk.DoubleVar(value=1.0)
         ttk.Scale(
@@ -300,16 +329,95 @@ class App(ttk.Frame):
         )
 
         ttk.Button(page, text="Preview", command=lambda: self._start(preview=True)).grid(
-            row=5, column=0, sticky="w", pady=(8, 0)
+            row=6, column=0, sticky="w", pady=(8, 0)
         )
         ttk.Label(
             page,
             text=("Preview writes nothing - it draws the result on the Preview tab "
                   "and reports how solid the donor is. Under 76% reads as holes."),
             foreground="#666", wraplength=620,
-        ).grid(row=7, column=0, columnspan=5, sticky="w", pady=(4, 0))
+        ).grid(row=8, column=0, columnspan=5, sticky="w", pady=(4, 0))
 
     # ---- shared bottom -----------------------------------------------------
+
+    # ---- custom head tab ---------------------------------------------------
+
+    def _build_head_tab(self):
+        """Geometry from outside KOTOR, into one node.
+
+        This was command-line only, which meant the app could not do the thing
+        the project was originally built to do - put a sculpted or scanned head
+        on a model. It is also the only route onto a unified body like HK-47
+        whose head node takes a mesh directly.
+        """
+        page = ttk.Frame(self.tabs, padding=8)
+        self.tabs.add(page, text="Custom head")
+        page.columnconfigure(1, weight=1)
+
+        ttk.Label(page, text="Head pack").grid(row=0, column=0, sticky="w")
+        self.pack_dir = tk.StringVar()
+        ttk.Entry(page, textvariable=self.pack_dir).grid(
+            row=0, column=1, columnspan=2, sticky="ew", padx=6)
+        ttk.Button(page, text="Browse", command=self._pick_pack).grid(row=0, column=3)
+
+        ttk.Label(page, text="Onto").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        self.head_host = tk.StringVar()
+        self.head_host_box = ttk.Combobox(page, textvariable=self.head_host, values=[])
+        self.head_host_box.grid(row=1, column=1, sticky="ew", padx=6, pady=(6, 0))
+        self.head_host_box.bind("<<ComboboxSelected>>",
+                                lambda _e: self._refresh_head_nodes())
+        self.head_node = tk.StringVar()
+        self.head_node_box = ttk.Combobox(page, textvariable=self.head_node,
+                                          values=[], width=22)
+        self.head_node_box.grid(row=1, column=2, sticky="ew", padx=6, pady=(6, 0))
+        self.head_node_note = ttk.Label(page, text="", foreground="#666")
+        self.head_node_note.grid(row=2, column=0, columnspan=4, sticky="w", pady=(4, 0))
+
+        opts = ttk.Frame(page)
+        opts.grid(row=3, column=0, columnspan=4, sticky="w", pady=(8, 0))
+        self.head_decimate = tk.BooleanVar(value=True)
+        self.head_fit = tk.BooleanVar(value=True)
+        self.head_repair = tk.BooleanVar(value=True)
+        self.head_hide = tk.BooleanVar(value=True)
+        self.head_reshape = tk.BooleanVar(value=False)
+        ttk.Checkbutton(opts, text="Decimate to", variable=self.head_decimate).grid(
+            row=0, column=0, sticky="w")
+        self.head_budget = tk.IntVar(value=690)
+        ttk.Spinbox(opts, from_=200, to=4000, increment=10, width=6,
+                    textvariable=self.head_budget).grid(row=0, column=1, sticky="w")
+        ttk.Label(opts, text="triangles", foreground="#666").grid(
+            row=0, column=2, sticky="w", padx=(4, 14))
+        ttk.Checkbutton(opts, text="Fit to the node", variable=self.head_fit).grid(
+            row=0, column=3, sticky="w", padx=(0, 14))
+        ttk.Checkbutton(opts, text="Repair winding", variable=self.head_repair).grid(
+            row=1, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        ttk.Checkbutton(opts, text="Hide the host's own hair, eyes and teeth",
+                        variable=self.head_hide).grid(
+            row=1, column=3, sticky="w", pady=(4, 0))
+        ttk.Checkbutton(opts, text="Reshape: keep the host's topology and UVs",
+                        variable=self.head_reshape).grid(
+            row=2, column=0, columnspan=4, sticky="w", pady=(4, 0))
+
+        crop = ttk.Frame(page)
+        crop.grid(row=4, column=0, columnspan=4, sticky="w", pady=(6, 0))
+        self.head_crop_on = tk.BooleanVar(value=False)
+        ttk.Checkbutton(crop, text="Crop below", variable=self.head_crop_on).pack(
+            side="left")
+        self.head_crop = tk.DoubleVar(value=0.25)
+        ttk.Spinbox(crop, from_=0.0, to=0.9, increment=0.05, width=6,
+                    textvariable=self.head_crop).pack(side="left", padx=4)
+        ttk.Label(crop, text="of the height - for a bust rather than a head",
+                  foreground="#666").pack(side="left")
+
+        ttk.Button(page, text="Check only", command=self._head_check).grid(
+            row=5, column=0, sticky="w", pady=(10, 0))
+        ttk.Label(
+            page,
+            text=("Checking writes nothing. A pack is rejected before anything is "
+                  "built, and solidity below 77% is the one that matters - it "
+                  "renders full of holes in game while looking fine in a viewer."),
+            foreground="#666", wraplength=620,
+        ).grid(row=6, column=0, columnspan=4, sticky="w", pady=(4, 0))
 
     # ---- builds tab --------------------------------------------------------
 
@@ -688,6 +796,168 @@ class App(ttk.Frame):
         kinds = self._donor_kinds(path)
         return sorted(n for n, k in kinds.items() if k in DONOR_KINDS)
 
+    def _pick_pack(self):
+        chosen = filedialog.askdirectory(title="Choose a head pack folder")
+        if chosen:
+            self.pack_dir.set(chosen)
+
+    def _refresh_head_nodes(self):
+        """Which node the mesh goes into, defaulting to the head."""
+        host = self.head_host.get().strip()
+        nodes = self._host_mesh_nodes(host) if host else []
+        self.head_node_box.config(values=nodes)
+        if self.head_node.get() not in nodes:
+            head = next((n for n in nodes if n.lower() == "head"), None)
+            self.head_node.set(head or (nodes[0] if nodes else ""))
+        if not nodes:
+            self.head_node_note.config(text="")
+            return
+        # Whether the target is skinned decides how much the pack has to get
+        # right, so it is worth saying before anything is built.
+        skinned = self._node_is_skinned(host, self.head_node.get())
+        if skinned is None:
+            self.head_node_note.config(text="")
+        elif skinned:
+            self.head_node_note.config(
+                text=f"{host}:{self.head_node.get()} is skinned - weights are "
+                     f"transferred from the host's surface onto the new mesh")
+        else:
+            self.head_node_note.config(
+                text=f"{host}:{self.head_node.get()} is not skinned, so the pack's "
+                     f"own topology and UVs are used as they are - the easy case")
+
+    def _node_is_skinned(self, host: str, node: str):
+        if not host or not node:
+            return None
+        from kmdlswap import layout as kl
+
+        from .library import ModelLibrary
+
+        try:
+            layout = kl.parse(*ModelLibrary(self.install.get().strip()).read(host))
+            return bool(layout.node_by_name(node).is_skin)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _head_check(self):
+        self._head_start(build=False)
+
+    def _head_start(self, build: bool):
+        if self.worker and self.worker.is_alive():
+            return
+        pack = self.pack_dir.get().strip()
+        if not pack:
+            self._say("choose a head pack folder first")
+            return
+        host = self.head_host.get().strip()
+        if build and not host:
+            self._say("choose a model to build the head onto")
+            return
+
+        # Read on the main thread and handed over as plain values.
+        cfg = dict(
+            install=self.install.get().strip() or None,
+            host=host or None,
+            node=self.head_node.get().strip() or None,
+            crop=(self.head_crop.get() if self.head_crop_on.get() else None),
+            decimate=(self.head_budget.get() if self.head_decimate.get() else None),
+            repair=self.head_repair.get(),
+            fit=self.head_fit.get(),
+            reshape=self.head_reshape.get(),
+            hide=([] if self.head_hide.get() else None),
+            build=build,
+        )
+        self.build_btn.config(state="disabled")
+        self._say(f"\n=== {'building' if build else 'checking'} head pack "
+                  f"{Path(pack).name}"
+                  + (f" onto {host}:{cfg['node']}" if host else "") + " ===")
+        self.worker = threading.Thread(
+            target=self._head_work,
+            args=(pack, cfg, self.out_dir.get(), build),
+            daemon=True,
+        )
+        self.worker.start()
+
+    def _head_work(self, pack, cfg, out_dir, build):
+        try:
+            from . import builds as kbuilds
+            from . import headbuild
+
+            result = headbuild.run(pack, **cfg)
+            lines = list(result.lines)
+            lines.append(result.verdict)
+            if result.error:
+                lines.append(f"ERROR: {result.error}")
+            elif build and result.built:
+                name = kbuilds.unique_name(
+                    out_dir, f"{cfg['host']}-{Path(pack).name}")
+                folder = Path(out_dir) / name
+                folder.mkdir(parents=True, exist_ok=True)
+                headbuild.write(result, folder, cfg["host"])
+                kbuilds.adopt(folder, {
+                    "kind": "head pack",
+                    "host": {"model": cfg["host"], "node": result.node_name},
+                    "pack": {"folder": str(pack), "name": getattr(result.pack, "name", "")},
+                })
+                lines.append(f"build {name!r} kept in {folder}")
+                lines.append("Install it from the Builds tab. A build is not proof.")
+            self.events.put(("done_text", lines))
+        except Exception as exc:  # noqa: BLE001
+            self.events.put(("error", f"{type(exc).__name__}: {exc}\n"
+                                      f"{traceback.format_exc(limit=3)}"))
+
+    def _host_mesh_nodes(self, host: str) -> list[str]:
+        """The host's visible mesh nodes, cached; one model is cheap to read."""
+        cache = getattr(self, "_node_cache", {})
+        key = (self.install.get().strip(), host)
+        if key not in cache:
+            from kmdlswap import layout as kl
+
+            from . import parts as kparts
+            from .library import ModelLibrary
+
+            try:
+                lib = ModelLibrary(key[0])
+                layout = kl.parse(*lib.read(host))
+                cache[key] = [n.name for n in kparts.mesh_nodes(layout)]
+            except Exception:  # noqa: BLE001
+                cache[key] = []
+            self._node_cache = cache
+        return cache[key]
+
+    def _refresh_target_nodes(self):
+        """Offer this host's nodes, and say when naming one is the only way in.
+
+        A unified body - HK-47, T3-M4 - carries its head as one node among
+        forty-odd droid-named meshes. Whole-model pairing needs half the names
+        to agree and so finds nothing, which reads as "this host cannot take a
+        head" when in fact its head node is the easiest kind of target there is:
+        rigid, unskinned, its own topology used as it stands.
+        """
+        host = self.host.get().strip()
+        nodes = self._host_mesh_nodes(host) if host else []
+        self.target_box.config(values=[WHOLE_MODEL] + nodes)
+        if self.target_node.get() not in ([WHOLE_MODEL] + nodes):
+            self.target_node.set(WHOLE_MODEL)
+
+        if not host or not nodes:
+            self.target_note.config(text="")
+            return
+        if self.target_node.get() != WHOLE_MODEL:
+            self.target_note.config(
+                text=f"one node of {len(nodes)}; the rest of {host} is left alone")
+            return
+        # Nothing pairs whole-model? Then say what will work instead.
+        pairs_nothing = (self.index is not None and host in self.index.nodes
+                         and not self.index.donors_for(host, usable_only=True))
+        head = next((n for n in nodes if n.lower() == "head"), None)
+        if pairs_nothing and head:
+            self.target_note.config(
+                text=f"{host} pairs with nothing whole-model - choose '{head}' "
+                     f"to put a head on it")
+        else:
+            self.target_note.config(text="")
+
     def _donor_install(self) -> str:
         """Where donors are coming from, which game depends on the radio."""
         if self.donor_game.get() == "K2":
@@ -787,6 +1057,27 @@ class App(ttk.Frame):
 
     def _refresh_donors(self):
         """Offer only donors that can actually pair with the chosen host."""
+        self._refresh_target_nodes()
+
+        # Filling one named node is a different question from swapping two
+        # whole models, so it gets a different test. Coverage is meaningless
+        # here - the donor only has to have a head worth taking - and applying
+        # it anyway is what left HK-47 with an empty donor list.
+        if self.target_node.get() != WHOLE_MODEL:
+            path = self._donor_install()
+            models = self._head_donors(path)
+            host = self.host.get().strip()
+            ranked = self._ranked_labels(host, path, models)
+            kinds = self._donor_kinds(path)
+            self.donor_labels = ranked or {
+                f"{n}   [{kinds.get(n, 'head')}]": n for n in models
+            }
+            self.donor_box.config(values=list(self.donor_labels))
+            self.donor_game_note.config(
+                text=f"{len(models)} models have a head to give"
+                     + (", best fit first" if ranked else ""))
+            return
+
         if self.donor_game.get() == "K2":
             path = self.install2.get().strip()
             kinds = self._donor_kinds(path)
@@ -977,10 +1268,16 @@ class App(ttk.Frame):
             return
         self._say("\nscanning install for character models ...")
         self.build_btn.config(state="disabled")
-        self.worker = threading.Thread(target=self._scan_work, daemon=True)
+        # Read here, on the main thread, and handed over as a plain string.
+        # Reading it inside the worker survived only while the main loop
+        # happened to be spinning; the moment it was not, the scan died with
+        # "main thread is not in main loop" and the donor list stayed empty.
+        self.worker = threading.Thread(
+            target=self._scan_work, args=(self.install.get().strip(),), daemon=True
+        )
         self.worker.start()
 
-    def _scan_work(self):
+    def _scan_work(self, install: str):
         """Build the compatibility index.
 
         A swap only fills nodes the host already has, so the donor list has to be
@@ -996,7 +1293,7 @@ class App(ttk.Frame):
 
             from . import catalogue as kc
 
-            inst = Installation(self.install.get().strip())
+            inst = Installation(install)
             found: dict[str, dict] = {}
             for r in inst.chitin_resources():
                 if r.restype() in (ResourceType.MDL, ResourceType.MDX):
@@ -1113,6 +1410,11 @@ class App(ttk.Frame):
         self.build_btn.config(state="disabled")
         self.progress.config(value=0, maximum=100)
 
+        if tab == "Custom head":
+            self.build_btn.config(state="normal")   # _head_start disables it itself
+            self._head_start(build=True)
+            return
+
         if tab == "Effects":
             keys = [k for k, v in self.selected.items() if v.get()]
             if not keys:
@@ -1130,7 +1432,11 @@ class App(ttk.Frame):
                 messagebox.showinfo("kmdlfun", "Pick a host and a donor.")
                 self.build_btn.config(state="normal")
                 return
-            if self.index is not None and host in self.index.nodes:
+            target = ("" if self.target_node.get() == WHOLE_MODEL
+                      else self.target_node.get())
+            # Whole-model compatibility has nothing to say about filling one
+            # named node, so it is only consulted when that is the actual job.
+            if not target and self.index is not None and host in self.index.nodes:
                 c = self.index.compare(host, donor)
                 if not c.usable:
                     self._say("\n" + c.why_not(host, donor))
@@ -1151,7 +1457,12 @@ class App(ttk.Frame):
                 scale=self.opt_scale.get(),
                 reshape=self.opt_reshape.get(),
                 with_texture=self.opt_texture.get(),
-                hide=self.opt_hide.get(),
+                # Hiding "parts the donor lacks" means every host mesh that did
+                # not pair. Whole-model that is a handful of stray accessories;
+                # filling one node of a unified body it is the entire body, so
+                # HK-47 would come out as a floating head.
+                hide=self.opt_hide.get() and not target,
+                target_node=target,
             )
             self.worker = threading.Thread(
                 target=self._transplant_work,
@@ -1200,6 +1511,23 @@ class App(ttk.Frame):
             else:
                 lines_prefix = None
             pairs = ktp.match_nodes(host_layout, donor_layout)
+            if cfg.target_node:
+                # One named node. Pair it with the donor node of the same name
+                # if there is one, and otherwise with the donor's head - which
+                # is the whole point on a host whose names are its own.
+                from . import compat as kcompat
+
+                same = [p for p in pairs if p[0] == cfg.target_node]
+                if same:
+                    pairs = same
+                else:
+                    donor_head = kcompat.head_node(donor_layout)
+                    if donor_head is None:
+                        self.events.put(("error",
+                                         f"{donor} has no head node to put into "
+                                         f"{host}:{cfg.target_node}"))
+                        return
+                    pairs = [(cfg.target_node, donor_head.name)]
             if not pairs:
                 self.events.put(("error",
                                  f"{host} and {donor} share no mesh node names, "
@@ -1207,7 +1535,11 @@ class App(ttk.Frame):
                 return
 
             lines = [lines_prefix] if lines_prefix else []
-            lines.append(f"{len(pairs)} matching node(s)")
+            if cfg.target_node:
+                lines.append(f"filling {host}:{pairs[0][0]} from {donor}:{pairs[0][1]}"
+                             f" - the rest of {host} is untouched")
+            else:
+                lines.append(f"{len(pairs)} matching node(s)")
 
             anchor = ktp.anchor_pair(pairs, host_layout)
             auto = []
@@ -1221,7 +1553,9 @@ class App(ttk.Frame):
                     lines.append(f"folding in {len(auto)} part(s) the host has no "
                                  f"node for: {', '.join(auto)}")
             taken = {h for h, _ in pairs}
-            left = [n.name for n in kparts.mesh_nodes(host_layout) if n.name not in taken]
+            left = ([] if cfg.target_node else
+                    [n.name for n in kparts.mesh_nodes(host_layout)
+                     if n.name not in taken])
             if left:
                 lines.append(f"donor has no: {', '.join(left)}"
                              + ("  (will hide)" if cfg.hide else ""))
@@ -1381,6 +1715,7 @@ class App(ttk.Frame):
                     self.models = payload.names
                     self.host_box.config(values=self.models)
                     self.preview_box.config(values=self.models)
+                    self.head_host_box.config(values=self.models)
                     self._say(f"indexed {len(self.models)} character models")
                     self._refresh_donors()
                     self.build_btn.config(state="normal")
