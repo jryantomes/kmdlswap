@@ -46,6 +46,10 @@ def main(argv: list[str] | None = None) -> int:
     tp.add_argument("--install", required=True)
     tp.add_argument("--host", required=True, help="model that keeps its hierarchy and animations")
     tp.add_argument("--donor", required=True, help="model to take geometry from")
+    tp.add_argument("--donor-install",
+                    help="a second game to take the donor from - a KOTOR 2 head "
+                         "into a KOTOR 1 host, say. Only the donor's geometry "
+                         "crosses over; the host is written in its own format")
     tp.add_argument("--node", nargs="*", help="host node(s); default every matching node")
     tp.add_argument("--out", required=True)
     tp.add_argument("--fit", action="store_true", help="scale the donor part to the host part's size")
@@ -178,6 +182,39 @@ def _load_layout(name: str, install: str | None):
     from .library import ModelLibrary
 
     return kl.parse(*ModelLibrary(install).read(name))
+
+
+def _export_donor_textures(args, mdl: bytes, mdx: bytes, out) -> list[str]:
+    """Save any texture the built model names that the host game lacks."""
+    from kmdlswap import layout as kl
+
+    from . import parts as kparts
+    from . import render as krender
+    from . import textures as ktextures
+
+    host_side = ktextures.TextureCache(args.install)
+    donor_side = ktextures.TextureCache(args.donor_install)
+    layout = kl.parse(mdl, mdx)
+
+    notes: list[str] = []
+    for name in sorted({krender.node_texture(layout, n)
+                        for n in kparts.mesh_nodes(layout)} - {""}):
+        if host_side.get(name) is not None:
+            continue                       # the host game already has it
+        image = donor_side.get(name)
+        if image is None:
+            notes.append(f"texture {name!r} is in neither game; it will render grey")
+            continue
+        try:
+            from PIL import Image
+        except ImportError:
+            notes.append(f"texture {name!r} needs Pillow to export")
+            continue
+        path = out / f"{name}.tga"
+        Image.fromarray(image, mode="RGB").save(path)
+        notes.append(f"exported {path.name} ({image.shape[1]}x{image.shape[0]}) "
+                     f"- it lives only in the donor's game")
+    return notes
 
 
 def _import(args) -> int:
@@ -436,14 +473,24 @@ def _transplant(args) -> int:
     from .library import ModelLibrary
 
     lib = ModelLibrary(args.install)
-    for name in (args.host, args.donor):
-        if not lib.has(name):
-            print(f"kmdlfun: no model {name!r} in that install", file=sys.stderr)
-            return 1
+    donor_lib = ModelLibrary(args.donor_install) if args.donor_install else lib
+    if not lib.has(args.host):
+        print(f"kmdlfun: no model {args.host!r} in the host install", file=sys.stderr)
+        return 1
+    if not donor_lib.has(args.donor):
+        where = "the donor install" if args.donor_install else "that install"
+        print(f"kmdlfun: no model {args.donor!r} in {where}", file=sys.stderr)
+        return 1
 
     mdl, mdx = lib.read(args.host)
-    donor_layout = kl.parse(*lib.read(args.donor))
+    donor_layout = kl.parse(*donor_lib.read(args.donor))
     host_layout = kl.parse(mdl, mdx)
+    if donor_layout.game != host_layout.game:
+        # Only geometry crosses. The host keeps its own hierarchy, skeleton and
+        # animations, and is written back in its own format, so the games'
+        # header differences never leave the reader.
+        print(f"  donor is a {donor_layout.game} model, host is "
+              f"{host_layout.game}: geometry only")
 
     if args.node:
         donors = {n.name.lower(): n.name for n in ktp.kparts.mesh_nodes(donor_layout)}
@@ -530,6 +577,15 @@ def _transplant(args) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / f"{args.host}.mdl").write_bytes(mdl)
     (out_dir / f"{args.host}.mdx").write_bytes(mdx)
+
+    if args.donor_install and args.with_texture:
+        # The donor's texture lives in the donor's game. Without it the model
+        # loads and renders untextured grey, which looks like a modelling
+        # failure and is really a missing file - so write it out rather than
+        # leaving behind a build that cannot work.
+        for line in _export_donor_textures(args, mdl, mdx, out_dir):
+            print(f"  {line}")
+
     print()
     print(f"{len(done)}/{len(pairs)} node(s) transferred")
     print(f"wrote {out_dir / args.host}.mdl and .mdx")
