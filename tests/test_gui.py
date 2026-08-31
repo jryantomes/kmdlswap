@@ -211,11 +211,17 @@ def test_the_app_can_take_a_donor_from_the_second_game(app, tmp_path):
     app.install2.set(k2)
     app.donor_game.set("K2")
     app._refresh_donors()
-    assert "n_quarren" in app.donor_box.cget("values")
+    # Entries carry what they are, so a body is not offered as a head donor.
+    values = list(app.donor_box.cget("values"))
+    quarren = [v for v in values if v.startswith("n_quarren")]
+    assert quarren, values[:6]
+    assert "[creature]" in quarren[0], quarren[0]
+    assert not [v for v in values if v.startswith("p_carthbb")], "a body was offered"
 
     app.out_dir.set(str(tmp_path))
     app.host.set("p_carthh")
-    app.donor.set("n_quarren")
+    app.donor.set(quarren[0])
+    assert app._selected_donor() == "n_quarren", "the label must resolve to the model"
     app.opt_texture.set(True)
     app.opt_hide.set(True)
     app.opt_reshape.set(False)
