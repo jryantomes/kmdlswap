@@ -51,6 +51,11 @@ def main(argv: list[str] | None = None) -> int:
                          "into a KOTOR 1 host, say. Only the donor's geometry "
                          "crosses over; the host is written in its own format")
     tp.add_argument("--node", nargs="*", help="host node(s); default every matching node")
+    tp.add_argument("--merge", action="append", default=[], metavar="NODE",
+                    help="fold this donor node into the mesh being replaced, "
+                         "bound to the bone it hung from. For parts a host has "
+                         "no equivalent of: a Quarren's mouth tentacles hang "
+                         "from its lip bones, and no node of Carth's does")
     tp.add_argument("--pair", action="append", default=[], metavar="HOST=DONOR",
                     help="put a named donor node into a named host node, even "
                          "when the names differ. A host cannot gain nodes, but "
@@ -578,7 +583,7 @@ def _transplant(args) -> int:
         mdl2, mdx2, r = ktp.transplant_node(
             mdl, mdx, donor_layout, args.donor, host_node, donor_node,
             fit=args.fit, scale=args.scale, place=args.place,
-            model_offset=model_offset,
+            model_offset=model_offset, merge=args.merge or None,
             max_influences=args.max_influences, reshape=args.reshape,
             with_texture=args.with_texture,
         )
