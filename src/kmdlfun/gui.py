@@ -36,6 +36,7 @@ from . import viewport as kviewport
 from .library import build
 
 WHOLE_MODEL = "matching nodes (whole model)"
+ANYONE = "anyone"
 
 DEFAULT_INSTALLS = [
     r"E:\SteamLibrary\steamapps\common\swkotor",
@@ -269,6 +270,12 @@ class App(ttk.Frame):
         self.rank_btn = ttk.Button(game, text="Rank for this host",
                                    command=self._rank_donors)
         self.rank_btn.pack(side="left", padx=(6, 0))
+        ttk.Label(game, text="Show").pack(side="left", padx=(12, 4))
+        self.donor_look = tk.StringVar(value=ANYONE)
+        ttk.Combobox(game, textvariable=self.donor_look, width=10, state="readonly",
+                     values=[ANYONE, "male", "female", "droid", "unknown"],
+                     ).pack(side="left")
+        self.donor_look.trace_add("write", lambda *_: self._refresh_donors())
         self.donor_game_note = ttk.Label(game, text="", foreground="#666")
         self.donor_game_note.pack(side="left", padx=(8, 0))
         self.donor_note = ttk.Label(
@@ -958,6 +965,42 @@ class App(ttk.Frame):
         else:
             self.target_note.config(text="")
 
+    def _donor_looks(self, path: str) -> dict[str, str]:
+        """Male, female or droid for every model in an install, worked out once.
+
+        Costs about the same as the kind classification next to it, and for the
+        same reason: the droid test is structural, so the models have to be
+        read rather than guessed at from their names.
+        """
+        if not path:
+            return {}
+        cache = getattr(self, "_look_cache", {})
+        if path not in cache:
+            from . import who
+
+            try:
+                cache[path] = who.looks(path, self._head_donors(path))
+            except Exception as exc:  # noqa: BLE001
+                self._say(f"could not sort donors by who they are: {exc}")
+                cache[path] = {}
+            self._look_cache = cache
+        return cache[path]
+
+    def _look_note(self, path: str) -> str:
+        """Say when a filter is hiding things, so a short list is not a puzzle."""
+        wanted = self.donor_look.get()
+        if wanted == ANYONE:
+            return ""
+        total = len(self._head_donors(path))
+        return f"; showing {wanted} only, of {total}"
+
+    def _by_look(self, path: str, models: list[str]) -> list[str]:
+        wanted = self.donor_look.get()
+        if wanted == ANYONE:
+            return models
+        looks = self._donor_looks(path)
+        return [m for m in models if looks.get(m, "unknown") == wanted]
+
     def _donor_install(self) -> str:
         """Where donors are coming from, which game depends on the radio."""
         if self.donor_game.get() == "K2":
@@ -1065,7 +1108,7 @@ class App(ttk.Frame):
         # it anyway is what left HK-47 with an empty donor list.
         if self.target_node.get() != WHOLE_MODEL:
             path = self._donor_install()
-            models = self._head_donors(path)
+            models = self._by_look(path, self._head_donors(path))
             host = self.host.get().strip()
             ranked = self._ranked_labels(host, path, models)
             kinds = self._donor_kinds(path)
@@ -1075,13 +1118,14 @@ class App(ttk.Frame):
             self.donor_box.config(values=list(self.donor_labels))
             self.donor_game_note.config(
                 text=f"{len(models)} models have a head to give"
-                     + (", best fit first" if ranked else ""))
+                     + (", best fit first" if ranked else "")
+                     + self._look_note(path))
             return
 
         if self.donor_game.get() == "K2":
             path = self.install2.get().strip()
             kinds = self._donor_kinds(path)
-            models = self._head_donors(path)
+            models = self._by_look(path, self._head_donors(path))
             ranked = self._ranked_labels(self.host.get().strip(), path, models)
             self.donor_labels = ranked or {f"{n}   [{kinds[n]}]": n for n in models}
             self.donor_box.config(values=list(self.donor_labels))
@@ -1111,6 +1155,9 @@ class App(ttk.Frame):
 
             ranked = [(c, n) for c, n in ranked
                       if kinds.get(n, "head") in DONOR_KINDS]
+            keep = set(self._by_look(self.install.get().strip(),
+                                     [n for _c, n in ranked]))
+            ranked = [(c, n) for c, n in ranked if n in keep]
         measured = self._ranked_labels(host, self.install.get().strip(),
                                        [n for _c, n in ranked])
         self.donor_labels = measured or {c.label(n): n for c, n in ranked}

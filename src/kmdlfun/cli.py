@@ -167,6 +167,10 @@ def main(argv: list[str] | None = None) -> int:
     rk.add_argument("--donor-install", help="where donors come from (default: --install)")
     rk.add_argument("--donors", nargs="*",
                     help="donor names; default is every model a head can come from")
+    rk.add_argument("--who", choices=["male", "female", "droid", "unknown"],
+                    help="only donors of this kind. Droid is decided structurally "
+                         "- a rigid head with no facial bones - and the rest from "
+                         "the game's own tables where they can be trusted")
     rk.add_argument("--top", type=int, default=25, help="how many to show (0 for all)")
     rk.add_argument("--notes", action="store_true",
                     help="say what the number does not, for each donor")
@@ -783,6 +787,7 @@ def _rank(args) -> int:
     from .library import DONOR_KINDS, ModelLibrary, classify
 
     host_lib = ModelLibrary(args.install)
+    donor_lib_path = args.donor_install or args.install
     donor_lib = ModelLibrary(args.donor_install) if args.donor_install else host_lib
 
     if not host_lib.has(args.host):
@@ -796,6 +801,16 @@ def _rank(args) -> int:
         print(f"sorting {len(names)} models by what a head can come from...")
         kinds = classify(donor_lib, names)
         donors = [n for n, k in kinds.items() if k in DONOR_KINDS]
+
+    if args.who:
+        from . import who as kwho
+
+        looked = kwho.looks(donor_lib_path, donors, library=donor_lib)
+        donors = [d for d in donors if looked.get(d) == args.who]
+        print(f"{len(donors)} are {args.who}")
+        if not donors:
+            print(f"no {args.who} donors in that install")
+            return 1
 
     print(f"measuring {len(donors)} donors against {args.host}...")
     fits = compat.rank(*host_lib.read(args.host), donor_lib, donors,
