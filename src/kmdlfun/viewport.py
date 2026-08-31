@@ -39,6 +39,7 @@ class Viewport(ttk.Frame):
         self.yaw = 0.0
         self.pitch = 0.0
         self.zoom = 1.0
+        self.cull = False
 
         self._photo = None       # Tk drops an image that nothing references
         self._drag = None
@@ -68,6 +69,10 @@ class Viewport(ttk.Frame):
         self.bounds = None
         self._message = message
         self._paint_message()
+
+    def repaint(self) -> None:
+        """Redraw at full quality without moving the camera."""
+        self._request(draft=False)
 
     def reset(self) -> None:
         self.yaw = self.pitch = 0.0
@@ -136,6 +141,7 @@ class Viewport(ttk.Frame):
         pixels = krender.strip(
             self.scenes, yaw=self.yaw, pitch=self.pitch, zoom=self.zoom,
             size=size, bounds=self.bounds, supersample=1 if draft else 2,
+            cull=self.cull,
         )
         image = Image.fromarray(pixels, mode="RGB")
         if size != box:                      # draft was rendered small; scale up
