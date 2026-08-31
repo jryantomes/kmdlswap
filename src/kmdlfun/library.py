@@ -176,6 +176,59 @@ def character_models(install, library=None) -> list[str]:
     )
 
 
+def body_for_head(install, head: str, library=None) -> str | None:
+    """The body model a head is normally worn with, or None.
+
+    A head model on its own renders as a floating head, which makes size and
+    placement almost impossible to judge - the two things a head swap most
+    often gets wrong. `appearance.2da` already pairs each head with a body, so
+    the preview can show the head where it will actually sit.
+
+    A head worn by several bodies takes the most common one. That is a display
+    choice with no consequence: `n_darthrevanh` is worn by male and female
+    Revan and either shows the head on a person.
+    """
+    from collections import Counter
+
+    try:
+        from pykotor.extract.installation import Installation
+        from pykotor.resource.formats.twoda import read_2da
+        from pykotor.resource.type import ResourceType
+
+        inst = Installation(str(install))
+
+        def table(name):
+            found = inst.resource(name, ResourceType.TwoDA)
+            return read_2da(found.data) if found else None
+
+        app, heads = table("appearance"), table("heads")
+        if not (app and heads):
+            return None
+
+        head_of = {}
+        for i in range(heads.get_height()):
+            value = heads.get_cell(i, "head").strip()
+            if value:
+                head_of[i] = value.lower()
+
+        wanted = head.lower()
+        bodies: Counter = Counter()
+        for i in range(app.get_height()):
+            nh = app.get_cell(i, "normalhead").strip()
+            if nh.isdigit() and head_of.get(int(nh)) == wanted:
+                body = app.get_cell(i, "race").strip().lower()
+                if body:
+                    bodies[body] += 1
+
+        lib = library if library is not None else ModelLibrary(install)
+        for name, _ in bodies.most_common():
+            if lib.has(name):
+                return name
+        return None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def classify(install, names=None, *, progress=None) -> dict[str, str]:
     """Sort an install's models by what a head swap can take from them.
 

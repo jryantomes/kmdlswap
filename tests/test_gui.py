@@ -109,7 +109,12 @@ def test_one_preview_run(app, tmp_path):
     # report to the log and stop, so the only way to see a swap was to build it
     # first - which is not a preview.
     assert len(app.viewport.scenes) == 2, "should show the host before and after"
-    assert app.viewport.labels == ["p_carthh (now)", "p_carthh <- n_bith"]
+    # A head model is drawn on its body: alone it is a head floating in space,
+    # and size and placement are what a head swap most often gets wrong.
+    assert app.viewport.labels == [
+        "p_carthh on p_carthbb (now)",
+        "p_carthh <- n_bith on p_carthbb",
+    ]
     assert app.tabs.tab(app.tabs.select(), "text") == "Preview", (
         "the viewport lives on the Preview tab, so it has to come forward"
     )
@@ -358,12 +363,23 @@ def test_a_cross_game_preview_finds_the_donors_texture(app):
     pump(app, seconds=6.0)
 
     assert len(app.viewport.scenes) == 2, app.log.get("1.0", "end")[-400:]
-    result = app.viewport.scenes[1]
+    before, result = app.viewport.scenes
     assert result.textured, "the K2 donor's texture did not resolve"
-    assert len(result.textures) == 1
+
+    # Both scenes carry the host's body texture, since a head is drawn on its
+    # body. What proves the lookup crossed games is a texture in the result
+    # that the untouched host does not have.
+    def fingerprints(scene):
+        return {hash(img.tobytes()) for img in scene.textures}
+
+    brought = fingerprints(result) - fingerprints(before)
+    assert brought, "the result uses no texture the host did not already have"
+
+    donor_tex = next(img for img in result.textures
+                     if hash(img.tobytes()) in brought)
     # and it is a real image, not a placeholder
-    assert result.textures[0].shape[:2] == (512, 512)
-    assert len({tuple(px) for px in result.textures[0].reshape(-1, 3)[::997]}) > 20
+    assert donor_tex.shape[:2] == (512, 512)
+    assert len({tuple(px) for px in donor_tex.reshape(-1, 3)[::997]}) > 20
 
 
 def test_the_lookup_prefers_the_host_game(install_path):
@@ -652,3 +668,25 @@ def test_refiltering_does_not_leave_faces_behind(app):
     app._refresh_donors()
     stale = set(app._donor_photos) - set(app.donor_choices())
     assert not stale, f"{len(stale)} images kept for rows that are gone"
+
+
+def test_a_self_contained_host_is_previewed_on_its_own(app, tmp_path):
+    """HK-47 has no separate body - it *is* the body - so there is nothing to
+    put it on, and the preview must not go looking."""
+    transplant_tab(app)
+    app.out_dir.set(str(tmp_path))
+    app.host.set("p_hk47")
+    app._refresh_donors()
+    head = next(n for n in app.target_box.cget("values") if n.lower() == "head")
+    app.target_node.set(head)
+    app._refresh_donors()
+    app.donor.set(next(v for v in app.donor_choices() if v.startswith("p_carthh")))
+
+    app._start(preview=True)
+    pump(app, seconds=15.0)
+
+    log = app.log.get("1.0", "end")
+    assert "could not draw" not in log, log[-300:]
+    assert app.viewport.labels == ["p_hk47 (now)", "p_hk47 <- p_carthh"], (
+        "a self-contained model should be drawn as itself, with no ' on ...'"
+    )

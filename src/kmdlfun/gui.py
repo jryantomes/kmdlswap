@@ -1806,20 +1806,46 @@ class App(ttk.Frame):
 
         Framed by one shared ruler, because two renders at two scales make a
         part that changed size look unchanged.
+
+        A head model is drawn **on its body**. Alone it is a head floating in
+        space, and size and placement - the two things a head swap most often
+        gets wrong - are close to unjudgeable without a neck and shoulders to
+        judge against. `appearance.2da` says which body a head is worn with; a
+        self-contained model like HK-47 has no separate body and needs none.
         """
         from kmdlswap import layout as kl
 
+        from . import apply as kapply
         from . import render as krender
         from . import textures as ktextures
+        from .library import body_for_head
 
         look = ktextures.lookup_across([install, donor_install])
-        before = krender.from_layout(kl.parse(*lib.read(host)), texture_lookup=look)
-        after = krender.from_layout(kl.parse(mdl, mdx), texture_lookup=look)
+        host_layout = kl.parse(*lib.read(host))
+        built_layout = kl.parse(mdl, mdx)
+
+        body_layout = None
+        body_name = None
+        if kapply.is_head_model(host_layout):
+            body_name = body_for_head(install, host, lib)
+            if body_name:
+                try:
+                    body_layout = kl.parse(*lib.read(body_name))
+                except Exception:  # noqa: BLE001
+                    body_layout = None
+
+        def draw(layout):
+            if body_layout is None:
+                return krender.from_layout(layout, texture_lookup=look)
+            return krender.character(body_layout, layout, texture_lookup=look)
+
+        before, after = draw(host_layout), draw(built_layout)
+        worn = f" on {body_name}" if body_layout is not None else ""
         note = (f"{before.triangles} vs {after.triangles} triangles   -   "
                 f"nothing written; this is what Build would produce")
         self.events.put((
             "scenes",
-            ([before, after], [f"{host} (now)", f"{host} <- {donor}"], note),
+            ([before, after], [f"{host}{worn} (now)", f"{host} <- {donor}{worn}"], note),
         ))
 
     @staticmethod
