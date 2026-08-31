@@ -148,3 +148,58 @@ K1 wants **five** dark-side texture stages where K2 ships **three**, so a ported
 *player* head needs two intermediate skins blended by hand. Irrelevant to a
 companion swap, which uses one texture, but it would bite immediately on a
 playable head.
+
+
+## The grey eyes: a dropped alpha channel — confirmed 2026-08-31
+
+A ported Quarren head animated correctly but had flat grey patches where its
+eyes should be, with the rest of the face looking right. Grey is what the engine
+shows when a face samples the atlas background, so the model and the image
+disagreed somewhere.
+
+**It was our texture conversion, and the proof is clean:** the MDL and MDX are
+byte-identical between the broken build and the working one. The only difference
+is the texture file.
+
+| | |
+|---|---|
+| K2 ships | `N_QuarrenH01.tpc`, 512x512, **encoding 4 = RGBA**, 10 mipmaps |
+| we wrote | `N_QuarrenH01.tga`, 512x512, **24bpp RGB**, no mipmaps, alpha dropped |
+
+Decoding the TPC to RGB and re-encoding it discarded the alpha channel, and on
+this head the eyes depend on it.
+
+### Two theories eliminated first, and why that was worth doing
+
+Both were plausible and both were wrong, and checking them was cheap next to a
+trip into the game:
+
+- **Row order.** Pillow's TGA output is self-consistent - rows bottom-up with a
+  matching bottom-left origin flag - and, measured, it is byte-for-byte the same
+  structure as `tripohead.tga`, a file confirmed working in game. Orientation was
+  never involved.
+- **A missing eye mesh.** `f_llweye_g` and `f_rlweye_g` are 24-vertex meshes
+  sitting exactly at eye height, which looked promising. Byte 313 is the render
+  flag in both games - only ever 0 or 1 across 60,021 K1 and 50,569 K2 mesh
+  nodes - so those really are undrawn skeleton stubs, and the head declares one
+  texture with an empty lightmap slot and carries only vertex, normal and uv1.
+  Nothing was missing.
+
+### What changed
+
+When the donor comes from another install its texture is now **copied across as
+the shipped bytes**, extension and all - no decode, no re-encode. Whatever the
+engine did with them in one game it does in the other. Verified in game: eyes,
+tentacles and skin all correct.
+
+And where a conversion is unavoidable - a `.glb` carries PNG or JPEG, so a head
+pack must be written out - alpha is preserved rather than flattened, and
+`headspec` reports whether a pack's texture carries one.
+
+### The lesson
+
+The safest conversion is the one that does not happen. A re-encode looked
+correct by every check available - identical pixels, self-consistent file
+structure, same layout as a known-good file - and was still lossy in a way that
+none of those checks could see, because they all compared the parts that
+survived.

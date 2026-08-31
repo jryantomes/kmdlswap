@@ -483,3 +483,49 @@ def test_merge_remaps_the_base_mesh_weights_too(k2, pair):
         )
     # And the skull must still be the dominant bone, not a nose.
     assert max(after, key=after.get) == "head_g"
+
+
+def test_a_texture_with_alpha_keeps_it_through_import(tmp_path):
+    """Dropping alpha is what cost a ported Quarren its eyes.
+
+    Its texture is RGBA; converting to RGB threw the channel away and the eyes
+    rendered flat grey while the rest of the face looked right. The model files
+    were byte-identical either way - the texture was the whole difference.
+    """
+    from PIL import Image
+
+    from kmdlfun.cli import _has_alpha
+
+    opaque = Image.new("RGBA", (4, 4), (10, 20, 30, 255))
+    assert not _has_alpha(opaque), "an all-opaque alpha channel carries nothing"
+
+    partial = Image.new("RGBA", (4, 4), (10, 20, 30, 255))
+    partial.putpixel((1, 1), (10, 20, 30, 0))
+    assert _has_alpha(partial)
+
+    # and it survives a round trip through the format we write
+    path = tmp_path / "t.tga"
+    partial.save(path)
+    with Image.open(path) as back:
+        assert back.convert("RGBA").getchannel("A").getextrema()[0] == 0
+
+
+def test_a_donor_texture_is_copied_not_re_encoded(k2_path):
+    """The safest conversion is the one that does not happen.
+
+    A K2 texture the host game lacks is copied across as the shipped bytes,
+    extension and all, rather than decoded and re-encoded. That is what fixed
+    the Quarren's eyes: the re-encode dropped an alpha channel.
+    """
+    import numpy as np
+
+    from kmdlfun import textures
+
+    raw = textures.raw_texture(k2_path, "N_QuarrenH01")
+    assert raw is not None
+    data, ext = raw
+    assert ext == "tpc"
+    assert len(data) > 1000
+    # The copy must decode to exactly what the game's own lookup gives.
+    assert np.array_equal(textures._decode_tpc(data),
+                          textures.TextureCache(k2_path).get("N_QuarrenH01"))
