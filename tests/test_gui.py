@@ -213,7 +213,7 @@ def test_the_app_can_take_a_donor_from_the_second_game(app, tmp_path):
     app.donor_game.set("K2")
     app._refresh_donors()
     # Entries carry what they are, so a body is not offered as a head donor.
-    values = list(app.donor_box.cget("values"))
+    values = app.donor_choices()
     quarren = [v for v in values if v.startswith("n_quarren")]
     assert quarren, values[:6]
     assert "[creature]" in quarren[0], quarren[0]
@@ -346,7 +346,7 @@ def test_a_cross_game_preview_finds_the_donors_texture(app):
     app.install2.set(k2)
     app.donor_game.set("K2")
     app._refresh_donors()
-    quarren = [v for v in app.donor_box.cget("values") if v.startswith("n_quarren")][0]
+    quarren = [v for v in app.donor_choices() if v.startswith("n_quarren")][0]
 
     app.host.set("p_carthh")
     app.donor.set(quarren)
@@ -439,6 +439,13 @@ def test_ranking_without_a_host_says_so_rather_than_failing(app):
     )
 
 
+def pick_head_node(a):
+    """Aim at the host's own head node, which needs no install scan."""
+    a._refresh_donors()
+    head = next(n for n in a.target_box.cget("values") if n.lower() == "head")
+    a.target_node.set(head)
+    a._refresh_donors()
+
 def head_tab(a):
     for i in range(len(a.tabs.tabs())):
         if a.tabs.tab(i, "text") == "Custom head":
@@ -462,14 +469,14 @@ def test_a_unified_body_can_be_given_a_head_by_naming_the_node(app, tmp_path):
     app._refresh_donors()
 
     assert app.target_node.get() == WHOLE_MODEL
-    assert not list(app.donor_box.cget("values")), (
+    assert not app.donor_choices(), (
         "whole-model pairing should still find nothing - that rule is correct"
     )
     assert "head" in list(app.target_box.cget("values"))
 
     app.target_node.set("head")
     app._refresh_donors()
-    offered = list(app.donor_box.cget("values"))
+    offered = app.donor_choices()
     assert len(offered) > 20, "naming the node should offer every head donor"
     assert "one node of" in app.target_note.cget("text")
 
@@ -579,3 +586,69 @@ def test_the_donor_list_can_be_filtered_by_who(app):
     app.donor_look.set(ANYONE)
     app._refresh_donors()
     assert set(app.donor_labels.values()) == set(everyone)
+
+
+def test_the_donor_list_shows_faces(app):
+    """A name does not tell you what a face looks like, and the list is a few
+    hundred names. The faces arrive on a worker, so the rows have to survive
+    being filled before the images exist - and Tk drops an image the moment
+    nothing references it, which the widget does not count as.
+    """
+    transplant_tab(app)
+    app.host.set("p_carthh")
+    app.donor_look.set("female")
+    pick_head_node(app)
+
+    labels = app.donor_choices()
+    assert labels, "no donors to draw"
+    assert all(app.donor_tree.exists(x) for x in labels), (
+        "every choice should be a row, image or not"
+    )
+
+    deadline = time.time() + 60
+    while time.time() < deadline and len(app._donor_photos) < min(len(labels), 5):
+        app.master.update()
+        time.sleep(0.05)
+
+    assert app._donor_photos, "no faces were drawn"
+    drawn = [x for x in labels
+             if app.donor_tree.exists(x) and app.donor_tree.item(x, "image")]
+    assert drawn, "faces were drawn but never reached the rows"
+
+
+def test_picking_a_face_selects_that_model(app):
+    """The tree writes into the variable the build path reads, so choosing by
+    face and choosing by name end up in the same place."""
+    transplant_tab(app)
+    app.host.set("p_carthh")
+    app.donor_look.set("female")
+    pick_head_node(app)
+
+    labels = app.donor_choices()
+    wanted = next(x for x in labels if x.startswith("p_bastilah"))
+    app.donor_tree.selection_set(wanted)
+    app._on_donor_pick()
+
+    assert app.donor.get() == wanted
+    assert app._selected_donor() == "p_bastilah"
+
+
+def test_refiltering_does_not_leave_faces_behind(app):
+    """Kept images are the only thing stopping Tk collecting them, so the dict
+    has to be pruned or it grows by a whole list on every filter change."""
+    from kmdlfun.gui import ANYONE
+
+    transplant_tab(app)
+    app.host.set("p_carthh")
+    app.donor_look.set("female")
+    pick_head_node(app)
+    deadline = time.time() + 40
+    while time.time() < deadline and len(app._donor_photos) < 3:
+        app.master.update()
+        time.sleep(0.05)
+    assert app._donor_photos
+
+    app.donor_look.set(ANYONE)
+    app._refresh_donors()
+    stale = set(app._donor_photos) - set(app.donor_choices())
+    assert not stale, f"{len(stale)} images kept for rows that are gone"
