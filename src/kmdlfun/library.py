@@ -125,3 +125,55 @@ def _companions_with_head_models(library: "ModelLibrary", companions) -> set[str
                 owners.add(c.key)
                 break
     return owners
+
+
+def classify(install, names=None, *, progress=None) -> dict[str, str]:
+    """Sort an install's models by what a head swap can take from them.
+
+    Head swapping is the job, and a donor list of 289 models is mostly bodies,
+    torsos, robes and props. Reading each model to find out costs a couple of
+    seconds once, which is cheaper than scrolling past three hundred names to
+    find the ones that work.
+
+    The question is not "is this a head model" but "can I take a head off it",
+    and those differ. `apply.is_head_model` means "has no torso and no limbs",
+    which is right for deciding how to scale a model and wrong here - a kath
+    hound has neither and is not somewhere to get a face.
+
+    * **head** - a model that *is* a head, with a `head` node and no body.
+      What a human companion wears: `p_carthh`.
+    * **creature** - a whole body carrying its head as a node. Borrowable all
+      the same, and where the interesting aliens live: `n_quarren`, `p_hk47`.
+    * **body** - no head node, so it has nothing to donate here.
+    * **other** - parses, but has no mesh worth offering.
+    """
+    from kmdlswap import layout as kl
+
+    from . import apply as kapply
+    from . import parts as kparts
+
+    lib = install if isinstance(install, ModelLibrary) else ModelLibrary(install)
+    wanted = list(names if names is not None else lib.index)
+    out: dict[str, str] = {}
+    for i, name in enumerate(wanted):
+        if progress is not None:
+            progress(i, len(wanted), name)
+        try:
+            layout = kl.parse(*lib.read(name))
+        except Exception:  # noqa: BLE001
+            out[name] = "other"
+            continue
+
+        meshes = kparts.mesh_nodes(layout)
+        if not meshes:
+            out[name] = "other"
+        elif not any(n.name.lower() == "head" for n in meshes):
+            out[name] = "body" if kparts.survey(layout)["torso"] else "other"
+        elif kapply.is_head_model(layout):
+            out[name] = "head"
+        else:
+            out[name] = "creature"
+    return out
+
+
+DONOR_KINDS = ("head", "creature")

@@ -245,7 +245,7 @@ class App(ttk.Frame):
 
         self.show_all = tk.BooleanVar(value=False)
         ttk.Checkbutton(
-            page, text="Show every model, including ones that cannot pair",
+            page, text="Show every model, including bodies and ones that cannot pair",
             variable=self.show_all, command=self._refresh_donors,
         ).grid(row=6, column=0, columnspan=5, sticky="w", pady=(8, 0))
 
@@ -641,36 +641,47 @@ class App(ttk.Frame):
         else:
             subprocess.run(["xdg-open", str(d)], check=False)
 
-    def _k2_models(self) -> list[str]:
-        """Character models in the second install, indexed once."""
-        path = self.install2.get().strip()
+    def _donor_kinds(self, path: str) -> dict[str, str]:
+        """What each model in an install can donate, worked out once.
+
+        A couple of seconds of reading, against scrolling three hundred names
+        to find the ones that are heads. Cached per install path.
+        """
         if not path:
-            return []
-        if getattr(self, "_k2_cache", (None, None))[0] != path:
-            from .library import ModelLibrary
+            return {}
+        cache = getattr(self, "_kind_cache", {})
+        if path not in cache:
+            from .library import ModelLibrary, classify
 
             try:
                 lib = ModelLibrary(path)
+                names = sorted(n for n in lib.index
+                               if n.startswith(("p_", "n_", "c_")))
+                cache[path] = classify(lib, names)
             except Exception as exc:  # noqa: BLE001
-                self._say(f"could not read the KOTOR 2 install: {exc}")
-                self._k2_cache = (path, [])
-            else:
-                self._k2_cache = (path, sorted(
-                    n for n in lib.index if n.startswith(("p_", "n_", "c_"))
-                ))
-        return self._k2_cache[1]
+                self._say(f"could not read that install: {exc}")
+                cache[path] = {}
+            self._kind_cache = cache
+        return cache[path]
+
+    def _head_donors(self, path: str) -> list[str]:
+        """Models a head can be taken from, best kind first."""
+        from .library import DONOR_KINDS
+
+        kinds = self._donor_kinds(path)
+        return sorted(n for n, k in kinds.items() if k in DONOR_KINDS)
 
     def _refresh_donors(self):
         """Offer only donors that can actually pair with the chosen host."""
         if self.donor_game.get() == "K2":
-            # No compatibility index for the second game - that would mean
-            # scanning it as well. Preview reports what actually pairs, which is
-            # the same answer a little later.
-            models = self._k2_models()
-            self.donor_labels = {n: n for n in models}
-            self.donor_box.config(values=models)
+            path = self.install2.get().strip()
+            kinds = self._donor_kinds(path)
+            models = self._head_donors(path)
+            self.donor_labels = {f"{n}   [{kinds[n]}]": n for n in models}
+            self.donor_box.config(values=list(self.donor_labels))
             self.donor_game_note.config(
-                text=(f"{len(models)} KOTOR 2 models; only geometry crosses over"
+                text=(f"{len(models)} of {len(kinds)} KOTOR 2 models have a head "
+                      f"to give; only geometry crosses over"
                       if models else "set the KOTOR 2 folder above")
             )
             return
@@ -684,6 +695,14 @@ class App(ttk.Frame):
             return
 
         ranked = self.index.donors_for(host, usable_only=not self.show_all.get())
+        if not self.show_all.get():
+            # Head swapping is the job, so a body has nothing to offer even when
+            # its node names happen to line up.
+            kinds = self._donor_kinds(self.install.get().strip())
+            from .library import DONOR_KINDS
+
+            ranked = [(c, n) for c, n in ranked
+                      if kinds.get(n, "head") in DONOR_KINDS]
         self.donor_labels = {c.label(n): n for c, n in ranked}
         self.donor_box.config(values=list(self.donor_labels))
 

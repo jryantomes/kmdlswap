@@ -112,3 +112,47 @@ def test_a_build_folder_is_what_install_takes(tmp_path):
     assert {p.name for p in plan.new} == {"p_carthh.mdl", "p_carthh.mdx"}, (
         "the manifest must not be installed alongside the models"
     )
+
+
+# --- telling heads from bodies ----------------------------------------------
+
+
+def test_models_are_sorted_by_what_a_head_swap_can_take(pair, install_path):
+    """The question is "can I take a head off it", not "is it a head model".
+
+    Those differ: `apply.is_head_model` means "no torso and no limbs", which is
+    right for deciding how to scale something and wrong here - a kath hound has
+    neither and is not somewhere to get a face.
+    """
+    from kmdlfun.library import DONOR_KINDS, ModelLibrary, classify
+
+    lib = ModelLibrary(str(install_path))
+    wanted = ["p_carthh", "p_carthbb", "p_hk47", "n_bith", "c_kath"]
+    kinds = classify(lib, [n for n in wanted if lib.has(n)])
+
+    assert kinds["p_carthh"] == "head", "a model that is a head"
+    assert kinds["p_carthbb"] == "body", "a body has no head to give"
+    assert kinds["p_hk47"] == "creature", "self-contained, head inside"
+    assert kinds["n_bith"] == "creature"
+    if "c_kath" in kinds:
+        assert kinds["c_kath"] == "other", "a kath hound has no head node"
+
+    offerable = {n for n, k in kinds.items() if k in DONOR_KINDS}
+    assert "p_carthh" in offerable and "p_hk47" in offerable
+    assert "p_carthbb" not in offerable
+
+
+def test_classification_cuts_the_list_down(install_path):
+    """The point of it: a donor list of every model is mostly things that
+    cannot go on a neck."""
+    from kmdlfun.library import DONOR_KINDS, ModelLibrary, classify
+
+    lib = ModelLibrary(str(install_path))
+    names = sorted(n for n in lib.index if n.startswith(("p_", "n_", "c_")))
+    kinds = classify(lib, names)
+    offerable = [n for n, k in kinds.items() if k in DONOR_KINDS]
+
+    assert len(offerable) < len(names) * 0.7, (
+        f"{len(offerable)} of {len(names)} - the filter is barely filtering"
+    )
+    assert len(offerable) > 20, "but it must not throw away most of the good ones"
