@@ -141,6 +141,69 @@ def transfer_strain(host_geo, donor_positions) -> tuple[float, float]:
     return float(dist.mean()), float((dist > FAR_FRACTION).mean())
 
 
+def remap_influences(donor_layout, donor_node, host_layout, host_node, influences):
+    """Re-express the donor's own skin weights in the host's bone slots.
+
+    Far better than re-deriving them, when it is available. Transfer asks "what
+    is the nearest point on the *host's* surface", which is meaningless wherever
+    the two shapes disagree - a Quarren's head lobes have no counterpart on a
+    human head, so they inherit from whatever happened to be closest and then
+    swing with a bone that has nothing to do with them. The donor was rigged for
+    its own shape by someone who could see it; those weights are simply right.
+
+    Bone *slots* are per-model indices into that model's qbones/tbones, so they
+    cannot be copied across. Bone *names* can: KOTOR 1 and KOTOR 2 share the
+    same facial rig, and all 16 of Carth's bones appear by name on a KOTOR 2
+    Quarren.
+
+    Returns (influences, report) and never invents anything - if a donor bone
+    has no counterpart in the host, its weight is dropped and the vertex
+    renormalised, and the report says which.
+    """
+    donor_slot_to_name = {
+        slot: donor_layout.nodes[i].name
+        for i, slot in enumerate(donor_node.bonemap)
+        if slot >= 0
+    }
+    host_name_to_slot = {
+        host_layout.nodes[i].name.lower(): slot
+        for i, slot in enumerate(host_node.bonemap)
+        if slot >= 0
+    }
+
+    missing: set[str] = set()
+    out: list[list[kmdx.Influence]] = []
+    for infl in influences:
+        pool: dict[int, float] = {}
+        for one in infl:
+            name = donor_slot_to_name.get(one.bone_slot)
+            slot = host_name_to_slot.get((name or "").lower())
+            if slot is None:
+                missing.add(name or f"slot{one.bone_slot}")
+                continue
+            pool[slot] = pool.get(slot, 0.0) + one.weight
+        total = sum(pool.values())
+        if total <= 0.0:
+            out.append([])
+            continue
+        out.append([kmdx.Influence(s, w / total) for s, w in
+                    sorted(pool.items(), key=lambda kv: (-kv[1], kv[0]))])
+    return out, sorted(missing)
+
+
+def rigs_match(donor_layout, donor_node, host_layout, host_node) -> bool:
+    """Does every bone the donor's weights use exist by name on the host?"""
+    donor_names = {
+        donor_layout.nodes[i].name.lower()
+        for i, slot in enumerate(donor_node.bonemap) if slot >= 0
+    }
+    host_names = {
+        host_layout.nodes[i].name.lower()
+        for i, slot in enumerate(host_node.bonemap) if slot >= 0
+    }
+    return bool(donor_names) and donor_names <= host_names
+
+
 def to_host_space(
     donor_layout: kl.Layout,
     donor_node,
@@ -149,6 +212,7 @@ def to_host_space(
     *,
     fit: bool = False,
     scale: float = 1.0,
+    place: bool = False,
 ) -> tuple[ObjMesh, Alignment]:
     """Express a donor node's geometry in the host node's own frame."""
     donor_geo = ke.extract(donor_layout, donor_node)
@@ -176,6 +240,19 @@ def to_host_space(
         donor_size=donor_size,
         offset=tuple(donor_mid[i] - host_mid[i] for i in range(3)),
     )
+
+    if place and not fit:
+        # Move it, do not resize it. Fitting exists because a raw donor often
+        # lands nowhere near the part it replaces, but the two jobs are
+        # separate: a Quarren's head really is wider than a human's, and
+        # shrinking it until the lobes fit inside Carth's box makes a Quarren
+        # that is not Quarren-sized. Now that the donor's own weights can come
+        # across, an oversized head deforms correctly - which is exactly why
+        # bighead mode works.
+        moved = [
+            tuple(host_mid[i] + (v[i] - donor_mid[i]) * scale for i in range(3))
+            for v in moved
+        ]
 
     if fit:
         # Uniform, so the donor is not distorted: match the tightest axis and
@@ -291,6 +368,7 @@ def transplant_node(
     *,
     fit: bool = False,
     scale: float = 1.0,
+    place: bool = False,
     max_influences: int = 4,
     reshape: bool = False,
     with_texture: bool = False,
@@ -320,7 +398,8 @@ def transplant_node(
 
     try:
         mesh, alignment = to_host_space(
-            donor_layout, donor_node, host_layout, host_node, fit=fit, scale=scale
+            donor_layout, donor_node, host_layout, host_node,
+            fit=fit, scale=scale, place=place,
         )
         result.alignment = alignment
         result.warnings.extend(alignment.notes())
@@ -376,7 +455,24 @@ def transplant_node(
                     f"took the donor's geometry, UVs and texture {new_texture!r} whole"
                 )
 
-        if not reshape and host_node.is_skin:
+        if (not reshape and host_node.is_skin and donor_node.is_skin
+                and rigs_match(donor_layout, donor_node, host_layout, host_node)):
+            donor_geo = ke.extract(donor_layout, donor_node)
+            if len(donor_geo.influences) == len(mesh.positions):
+                host_influences, absent = remap_influences(
+                    donor_layout, donor_node, host_layout, host_node,
+                    donor_geo.influences,
+                )
+                result.warnings.append(
+                    f"kept the donor's own skin weights, remapped into the host's "
+                    f"bone slots by name ({len({i.bone_slot for f in host_influences for i in f})} bones)"
+                )
+                if absent:
+                    result.warnings.append(
+                        f"the host has no bone named: {', '.join(absent)}"
+                    )
+
+        if not reshape and host_node.is_skin and host_influences is None:
             mean, far = transfer_strain(ke.extract(host_layout, host_node),
                                         mesh.positions)
             if far > FAR_WARN:
