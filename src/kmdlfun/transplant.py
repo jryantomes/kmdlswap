@@ -243,8 +243,19 @@ def merge_into(donor_layout, donor_node, extra_names, host_layout, host_node):
     positions = [tuple(p) for p in geo.positions]
     faces = [f.vertices for f in geo.faces]
     uvs = [tuple(u) for u in geo.columns.get("uv1", [])]
-    influences = list(geo.influences)
     notes: list[str] = []
+
+    # The base mesh's weights have to be remapped as well, not just the parts
+    # being folded in. Bone *slots* are per-model indices and the two models
+    # order them completely differently - Carth's slot 1 is f_lns_g while the
+    # Quarren's is head_g - so passing the donor's numbers straight through
+    # drove Carth's nose bone with the Quarren's whole skull. In game the back
+    # of the head moved with the mouth.
+    influences, absent = remap_influences(
+        donor_layout, donor_node, host_layout, host_node, geo.influences
+    )
+    if absent:
+        notes.append(f"the host has no bone named: {', '.join(absent)}")
 
     for name in extra_names:
         try:

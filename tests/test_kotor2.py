@@ -435,3 +435,51 @@ def test_drift_reports_where_the_part_ends_up(k2, pair):
                                host, host.node_by_name("Head"))
     assert aligned.drift < 1e-6, f"placed part should report no drift, got {aligned.drift}"
     assert raw.drift > 1.0, "an unplaced donor really is far away"
+
+
+def test_merge_remaps_the_base_mesh_weights_too(k2, pair):
+    """The bug this exists to prevent, and the symptom it produced.
+
+    `merge_into` folded extra parts in with host bone slots but passed the base
+    mesh's weights through untouched. Bone slots are per-model indices ordered
+    completely differently - Carth's slot 1 is `f_lns_g` while the Quarren's is
+    `head_g` - so the Quarren's entire skull drove Carth's nose bone. In game
+    the back of the head moved with the mouth.
+
+    The invariant: weight mass per bone *name* must survive the transplant. The
+    same mesh is going in, so the same bones should be doing the same work.
+    """
+    import collections
+
+    from kmdlfun import transplant as ktp
+
+    host = kl.parse(*pair("p_carthh"))
+    hn = host.node_by_name("Head")
+    donor = kl.parse(*k2.read("n_quarren"))
+    dn = donor.node_by_name("head")
+
+    def mass_by_name(layout, node, influences):
+        slot_to_name = {s: layout.nodes[i].name.lower()
+                        for i, s in enumerate(node.bonemap) if s >= 0}
+        out = collections.Counter()
+        for infl in influences:
+            for one in infl:
+                out[slot_to_name.get(one.bone_slot, f"slot{one.bone_slot}")] += one.weight
+        total = sum(out.values()) or 1.0
+        return {k: v / total for k, v in out.items()}
+
+    before = mass_by_name(donor, dn, ke.extract(donor, dn).influences)
+    _, _, _, merged, _ = ktp.merge_into(donor, dn, [], host, hn)
+    after = mass_by_name(host, hn, merged)
+
+    assert set(before) == set(after), (
+        f"bones changed: only in donor {set(before) - set(after)}, "
+        f"only in built {set(after) - set(before)}"
+    )
+    for name in before:
+        assert after[name] == pytest.approx(before[name], abs=0.01), (
+            f"{name} carried {before[name]:.1%} on the donor and {after[name]:.1%} "
+            f"after - the slots were not remapped"
+        )
+    # And the skull must still be the dominant bone, not a nose.
+    assert max(after, key=after.get) == "head_g"
