@@ -35,6 +35,10 @@ from . import roster
 from . import viewport as kviewport
 from .library import build
 
+# The window the app opens at. Named because a test checks the content fits
+# inside it, and a magic number in two places drifts apart.
+WINDOW_W, WINDOW_H = 860, 980
+
 WHOLE_MODEL = "matching nodes (whole model)"
 ANYONE = "anyone"
 
@@ -284,15 +288,27 @@ class App(ttk.Frame):
         picker = ttk.Frame(page)
         picker.grid(row=3, column=0, columnspan=5, sticky="nsew", pady=(6, 0))
         picker.columnconfigure(0, weight=1)
-        page.rowconfigure(3, weight=1)
-        self.donor_tree = ttk.Treeview(picker, show="tree", height=7,
-                                       selectmode="browse")
-        self.donor_tree.grid(row=0, column=0, sticky="nsew")
-        bar = ttk.Scrollbar(picker, orient="vertical",
-                            command=self.donor_tree.yview)
-        bar.grid(row=0, column=1, sticky="ns")
-        self.donor_tree.configure(yscrollcommand=bar.set)
-        self.donor_tree.bind("<<TreeviewSelect>>", self._on_donor_pick)
+        # A floor, not just a weight. The tab has a lot of controls competing
+        # for the notebook's height, and without a minimum the gallery settled
+        # at 142 pixels - one row of faces, which is the list problem again in
+        # a different shape.
+        # A floor so there is always at least a row of faces, and weight so it
+        # takes everything spare - the tab's other controls need about 700
+        # pixels, so browsing comfortably means a taller window, and maximising
+        # gives three or four rows.
+        page.rowconfigure(3, weight=1, minsize=160)
+        # A grid, not a list. A list of 96-pixel rows shows four donors at a
+        # time out of a hundred and forty-four; the same space holds about
+        # twenty faces side by side, and picking a face is something the eye
+        # does at a glance.
+        from . import gallery as kgallery
+        from . import thumbs as kthumbs
+
+        self.donor_tree = kgallery.Gallery(
+            picker, cell=kthumbs.SIZE, on_pick=self._on_donor_pick,
+        )
+        self.donor_tree.grid(row=0, column=0, columnspan=2, sticky="nsew")
+        picker.rowconfigure(0, weight=1)
         # Tk drops an image the moment nothing references it, and a Treeview
         # does not count as a reference. Without this the rows go blank.
         self._donor_photos: dict[str, object] = {}
@@ -579,7 +595,10 @@ class App(ttk.Frame):
         ttk.Label(page, text="comma separated; overrides the texture",
                   foreground="#666").grid(row=2, column=2, sticky="w", pady=(6, 0))
 
-        self.viewport = kviewport.Viewport(page, size=320)
+        # A requested minimum, not the size it runs at: the row has weight, so
+        # the viewport takes all the spare height. Asking for less leaves room
+        # for the framing and zoom controls below it in the default window.
+        self.viewport = kviewport.Viewport(page, size=280)
         self.viewport.grid(row=3, column=0, columnspan=3, sticky="nsew", pady=(8, 0))
 
         frame_row = ttk.Frame(page)
@@ -885,23 +904,20 @@ class App(ttk.Frame):
         """
         return list(self.donor_labels)
 
-    def _on_donor_pick(self, _event=None):
-        chosen = self.donor_tree.selection()
-        if chosen:
-            self.donor.set(self.donor_tree.item(chosen[0], "text"))
+    def _on_donor_pick(self, label=None):
+        if label:
+            self.donor.set(label)
 
     def _fill_donor_tree(self):
         """Put the current labels in the list, then fetch faces for them."""
         tree = getattr(self, "donor_tree", None)
         if tree is None:
             return
-        tree.delete(*tree.get_children())
-        for label in self.donor_labels:
-            tree.insert("", "end", iid=label, text=label)
+        tree.show(self.donor_labels)
 
-        # Drop the images for rows that are gone. They are only kept because Tk
-        # collects an image nothing references, and without this the dict grows
-        # by a whole list every time the filter changes.
+        # Drop the images for entries that are gone. They are only kept because
+        # Tk collects an image nothing references, and without this the dict
+        # grows by a whole list every time the filter changes.
         for gone in set(self._donor_photos) - set(self.donor_labels):
             del self._donor_photos[gone]
 
@@ -909,8 +925,7 @@ class App(ttk.Frame):
         # drop the user's pick.
         current = self.donor.get()
         if current in self.donor_labels:
-            tree.selection_set(current)
-            tree.see(current)
+            tree.select(current)
 
         self._start_thumbs()
 
@@ -954,16 +969,16 @@ class App(ttk.Frame):
         threading.Thread(target=work, daemon=True).start()
 
     def _show_thumb(self, job: int, label: str, path: str):
-        if job != self._thumb_job or not self.donor_tree.exists(label):
+        if job != self._thumb_job or label not in self.donor_labels:
             return
         try:
             photo = tk.PhotoImage(file=path)
         except tk.TclError:
             return
         # Tk collects an image with no live reference, and the widget does not
-        # count as one; dropping this dict blanks every row.
+        # count as one; dropping this dict blanks every face.
         self._donor_photos[label] = photo
-        self.donor_tree.item(label, image=photo)
+        self.donor_tree.set_image(label, photo)
 
     def _pick_pack(self):
         chosen = filedialog.askdirectory(title="Choose a head pack folder")
@@ -2085,7 +2100,7 @@ class App(ttk.Frame):
 def run() -> int:
     root = tk.Tk()
     root.title("kmdlfun - KOTOR model tools")
-    root.geometry("780x940")
+    root.geometry(f"{WINDOW_W}x{WINDOW_H}")
     root.minsize(720, 600)
     try:
         ttk.Style().theme_use("vista")

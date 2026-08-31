@@ -234,9 +234,13 @@ def test_the_log_and_buttons_fit_in_the_default_window(app):
     The notebook now absorbs spare height and the log keeps a fixed size, so a
     taller tab cannot push it out of sight again.
     """
+    from kmdlfun.gui import WINDOW_H
+
     app.master.update_idletasks()
     needed = sum(app.grid_bbox(0, r)[3] for r in range(4))
-    assert needed < 940, f"content needs {needed}px, taller than the window"
+    assert needed < WINDOW_H, (
+        f"content needs {needed}px, taller than the {WINDOW_H}px window"
+    )
     assert app.log.winfo_reqheight() > 60, "the log must keep a usable height"
 
 
@@ -658,8 +662,8 @@ def test_the_donor_list_shows_faces(app):
 
     labels = app.donor_choices()
     assert labels, "no donors to draw"
-    assert all(app.donor_tree.exists(x) for x in labels), (
-        "every choice should be a row, image or not"
+    assert app.donor_tree.labels == labels, (
+        "every choice should be a cell, image or not"
     )
 
     deadline = time.time() + 60
@@ -668,9 +672,8 @@ def test_the_donor_list_shows_faces(app):
         time.sleep(0.05)
 
     assert app._donor_photos, "no faces were drawn"
-    drawn = [x for x in labels
-             if app.donor_tree.exists(x) and app.donor_tree.item(x, "image")]
-    assert drawn, "faces were drawn but never reached the rows"
+    drawn = [x for x in labels if app.donor_tree._images.get(x) is not None]
+    assert drawn, "faces were drawn but never reached the gallery"
 
 
 def test_picking_a_face_selects_that_model(app):
@@ -683,8 +686,8 @@ def test_picking_a_face_selects_that_model(app):
 
     labels = app.donor_choices()
     wanted = next(x for x in labels if x.startswith("p_bastilah"))
-    app.donor_tree.selection_set(wanted)
-    app._on_donor_pick()
+    app.donor_tree.select(wanted)
+    app._on_donor_pick(wanted)
 
     assert app.donor.get() == wanted
     assert app._selected_donor() == "p_bastilah"

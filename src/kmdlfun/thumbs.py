@@ -8,6 +8,9 @@ Rendering is the same software rasteriser the Preview tab uses, so a thumbnail
 is drawn by tested code with the corrected camera - the catalogue that existed
 before this was every character photographed from behind.
 
+The size is part of the cache key, so changing it redraws rather than showing
+a stale face at the wrong scale.
+
 **Cached on disk, keyed by the model's own bytes.** One face takes about a
 third of a second, which is nothing on its own and forty-five seconds across a
 full list, so they are kept. The key is a hash of the MDL and MDX rather than
@@ -21,7 +24,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-SIZE = 64
+SIZE = 96
 CACHE_VERSION = "v1"
 
 
