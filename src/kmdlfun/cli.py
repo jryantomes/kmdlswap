@@ -218,6 +218,17 @@ def _export_donor_textures(args, mdl: bytes, mdx: bytes, out) -> list[str]:
     notes: list[str] = []
     for name in sorted({krender.node_texture(layout, n)
                         for n in kparts.mesh_nodes(layout)} - {""}):
+        # Prefer the shipped bytes. Only fall back to decoding and re-encoding
+        # if they cannot be had.
+        raw = ktextures.raw_texture(args.donor_install, name)
+        if raw is not None:
+            data, ext = raw
+            path = out / f"{name}.{ext}"
+            path.write_bytes(data)
+            notes.append(f"copied {path.name} ({len(data)} bytes) from the donor's "
+                         f"game, unconverted")
+            continue
+
         image = donor_side.get(name)
         if image is None:
             continue                       # the host game supplies this one

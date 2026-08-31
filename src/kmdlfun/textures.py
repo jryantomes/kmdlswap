@@ -120,3 +120,35 @@ def _decode_image(path: Path) -> np.ndarray:
 
     with Image.open(path) as im:
         return np.asarray(im.convert("RGB"), dtype=np.uint8)
+
+
+def raw_texture(install: str | Path, resref: str) -> tuple[bytes, str] | None:
+    """The texture's original bytes and extension, straight out of the game.
+
+    Re-encoding a TPC as a TGA is a conversion, and a conversion is a place for
+    a mistake to hide - a wrong row order or a lost channel looks like a
+    modelling fault, not a file fault. Copying the shipped bytes removes the
+    question: whatever the engine did with them in one game, it does in the
+    other. Only used when the donor comes from a different install, where the
+    host game genuinely lacks the file.
+    """
+    from pykotor.extract.installation import Installation
+
+    inst = Installation(str(install))
+    try:
+        found = inst.texture_resource_result(resref)
+    except Exception:  # noqa: BLE001
+        return None
+    if not found:
+        return None
+    result = found[0] if isinstance(found, tuple) else found
+    data = getattr(result, "data", None)
+    if data is None:
+        return None
+    if callable(data):
+        data = data()
+    if not data:
+        return None
+    restype = getattr(result, "restype", None)
+    ext = getattr(restype, "extension", None) or "tpc"
+    return bytes(data), str(ext).lstrip(".")
