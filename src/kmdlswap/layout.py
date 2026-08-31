@@ -29,7 +29,11 @@ from .nodes import (
     REFERENCE_HEADER_SIZE,
     SABER_HEADER_SIZE,
     SKIN_HEADER_SIZE,
+    FUNCTION_POINTERS,
+    MDL_VERTICES_AT,
+    MDX_BLOCK_AT,
     TRIMESH_HEADER_SIZE_K1,
+    TRIMESH_HEADER_SIZE_K2,
     NodeFlag,
     flag_names,
 )
@@ -134,6 +138,7 @@ class Layout:
     mdl: bytes
     mdx: bytes
     model_name: str = ""
+    game: str = "K1"          # "K1" or "K2", read from the function pointers
     supermodel: str = ""
     root_node_offset: int = 0
     node_count: int = 0
@@ -227,7 +232,18 @@ class _Parser:
         base = MDL_BASE
         self.span(base, MODEL_HEADER_SIZE, "model_header")
         r = self.r.seek(base)
-        r.skip(8)  # layout tokens - function pointers, preserved verbatim
+        # The two function pointers the compiler baked in. They are preserved
+        # verbatim like any other unknown, but they also say which game built
+        # this file - and K2's trimesh subheader is 8 bytes longer, so the
+        # answer has to be known before any node is read.
+        pointers = (r.u32(), r.u32())
+        game = FUNCTION_POINTERS.get(pointers)
+        if game is None:
+            raise ParseError(
+                f"unrecognised function pointers {pointers}; this is neither a "
+                f"KOTOR 1 nor a KOTOR 2 model as this parser knows them"
+            )
+        self.L.game = game
         self.L.model_name = r.cstr(32)
         self.L.root_node_offset = r.u32()
         self.L.node_count = r.u32()
@@ -350,8 +366,10 @@ class _Parser:
         saber_at: int | None = None
         if type_id & NodeFlag.MESH:
             info.trimesh_at = sub
-            self.span(sub, TRIMESH_HEADER_SIZE_K1, "trimesh_header", idx)
-            sub += TRIMESH_HEADER_SIZE_K1
+            size = (TRIMESH_HEADER_SIZE_K2 if self.L.game == "K2"
+                    else TRIMESH_HEADER_SIZE_K1)
+            self.span(sub, size, "trimesh_header", idx)
+            sub += size
         if type_id & NodeFlag.SKIN:
             info.skin_at = sub
             self.span(sub, SKIN_HEADER_SIZE, "skin_header", idx)
@@ -447,8 +465,11 @@ class _Parser:
         r.seek(t + 304)
         info.vertex_count = r.u16()
 
-        r.seek(t + 324)
+        mdx_at = MDX_BLOCK_AT[self.L.game]
+        verts_at = MDL_VERTICES_AT[self.L.game]
+        r.seek(t + mdx_at)
         info.mdx_data_offset = r.u32()
+        r.seek(t + verts_at)
         vertices_offset = r.u32()
 
         if faces_offset not in NULL_OFFSETS and faces_count:
@@ -483,7 +504,7 @@ class _Parser:
             self.span(MDL_BASE + counters_offset, counters_count * 4, "counters", idx)
 
         if vertices_offset not in NULL_OFFSETS and info.vertex_count:
-            self.off(t + 328, vertices_offset, "mdl_vertex_array", idx)
+            self.off(t + verts_at, vertices_offset, "mdl_vertex_array", idx)
             self.span(MDL_BASE + vertices_offset, info.vertex_count * 12,
                       "mdl_vertex_array", idx)
 
@@ -674,7 +695,8 @@ class _Parser:
             nominal = n.vertex_count * n.mdx_stride
             limit = meshes[i + 1].mdx_data_offset if i + 1 < len(meshes) else len(self.mdx)
             size = limit - start if limit >= start + nominal else nominal
-            self.off(n.trimesh_at + 324, start, "mdx_block", n.index, space="MDX")
+            self.off(n.trimesh_at + MDX_BLOCK_AT[self.L.game], start, "mdx_block",
+                     n.index, space="MDX")
             self.mdx_span(start, size, "mdx_block", n.index)
 
 

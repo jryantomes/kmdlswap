@@ -57,6 +57,30 @@ EMITTER_HEADER_SIZE: Final = 224
 REFERENCE_HEADER_SIZE: Final = 36
 TRIMESH_HEADER_SIZE_K1: Final = 332
 TRIMESH_HEADER_SIZE_K2: Final = 340
+
+# The two "function pointer" words at the start of the model header, which the
+# compiler baked in and which identify the game. Measured across both installs:
+# every one of K1's 2,832 models carries the first pair and every one of K2's
+# 3,237 carries the second, with no exceptions and no other values.
+#
+# This is the whole difference that matters for reading: K2's trimesh subheader
+# is 8 bytes longer, and assuming K1's makes every later read land 8 bytes
+# early - which shows up as offsets in the hundreds of millions, because what is
+# being read as a pointer is really a float.
+# Where the two tail pointers of the trimesh header live, per game.
+#
+# Compared field by field against `n_bith`, which both games ship: the header is
+# identical up to and including the vertex count at +304 - face array, indices
+# arrays, texture names, MDX stride and bitmap all sit at the same offsets - and
+# K2 then carries 8 extra bytes before the MDX and vertex-array pointers. That
+# is the whole of the difference that matters for reading geometry.
+MDX_BLOCK_AT: Final = {"K1": 324, "K2": 332}
+MDL_VERTICES_AT: Final = {"K1": 328, "K2": 336}
+
+FUNCTION_POINTERS: Final = {
+    (4273776, 4216096): "K1",
+    (4285200, 4216320): "K2",
+}
 SKIN_HEADER_SIZE: Final = 100
 DANGLY_HEADER_SIZE: Final = 28
 AABB_HEADER_SIZE: Final = 4
