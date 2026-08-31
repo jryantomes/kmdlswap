@@ -84,14 +84,33 @@ tool, because until this session they were not offered.
       these looks wrong, something systematic is wrong.
 - [ ] A `comm_*` head, which are lower-detail and may sit differently.
 
-## 6. KOTOR 2 donors
+## 6. Body swaps
+
+New, and never seen running. A body host now offers body donors, and arms
+transfer where only the torso used to.
+
+```bash
+kmdlfun transplant --install "<K1>" --host p_carthbb --donor p_bastilabb --out out_fun/
+```
+
+- [ ] **Bastila's outfit on Carth.** Torso and both arms should move. In the
+      preview the arms sit on the shoulders; the thing to check in game is that
+      they still do once the character *animates*, since nothing offline poses
+      the model.
+- [ ] Watch for **left and right**. Aliasing pairs `LArm` with `ArmL`, and the
+      failure mode if that ever goes wrong is a mirrored arm - elbows bending
+      the wrong way - which reads as a broken rig rather than a naming bug.
+- [ ] The torso solidity warning is real: Bastila's outfit reports 70%, below
+      the 77% floor, so expect some see-through around the thin flaps.
+
+## 7. KOTOR 2 donors
 
 Partly proven - the Quarren works - but only that one.
 
 - [ ] A K2 head with its own weights (`n_duros`, `n_wookiem`) onto a K1 host.
 - [ ] A K2 head needing `--fit` (`c_ithorian`, 1.7x).
 
-## 7. Older work still unverified
+## 8. Older work still unverified
 
 From `NEXT.md`, predating this session:
 
@@ -109,7 +128,7 @@ From `NEXT.md`, predating this session:
 Faster to check and worth doing first, since a broken list makes the in-game
 tests harder to set up.
 
-## 8. The donor list of faces
+## 9. The donor list of faces
 
 Brand new. Open the Transplant tab and pick a host.
 

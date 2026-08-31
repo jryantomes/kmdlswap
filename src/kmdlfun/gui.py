@@ -820,6 +820,20 @@ class App(ttk.Frame):
         kinds = self._donor_kinds(path)
         return sorted(n for n, k in kinds.items() if k in DONOR_KINDS)
 
+    def _donors_for_host(self, path: str, host: str) -> list[str]:
+        """What can be taken *from*, given what is being built *onto*.
+
+        A body host wants bodies. Offering it heads was not a filter working
+        too hard - it was the whole list being about heads, which is what the
+        tool did until now.
+        """
+        from .library import DONOR_KINDS
+
+        kinds = self._donor_kinds(path)
+        if kinds.get(host) == "body":
+            return sorted(n for n, k in kinds.items() if k == "body" and n != host)
+        return sorted(n for n, k in kinds.items() if k in DONOR_KINDS)
+
     def donor_choices(self) -> list[str]:
         """The labels currently offered, in order.
 
@@ -1218,8 +1232,8 @@ class App(ttk.Frame):
         # it anyway is what left HK-47 with an empty donor list.
         if self.target_node.get() != WHOLE_MODEL:
             path = self._donor_install()
-            models = self._by_look(path, self._head_donors(path))
             host = self.host.get().strip()
+            models = self._by_look(path, self._donors_for_host(path, host))
             ranked = self._ranked_labels(host, path, models)
             kinds = self._donor_kinds(path)
             self.donor_labels = ranked or {
@@ -1264,8 +1278,10 @@ class App(ttk.Frame):
             kinds = self._donor_kinds(self.install.get().strip())
             from .library import DONOR_KINDS
 
+            allowed = ({"body"} if kinds.get(host) == "body"
+                       else set(DONOR_KINDS))
             ranked = [(c, n) for c, n in ranked
-                      if kinds.get(n, "head") in DONOR_KINDS]
+                      if kinds.get(n, "head") in allowed]
             keep = set(self._by_look(self.install.get().strip(),
                                      [n for _c, n in ranked]))
             ranked = [(c, n) for c, n in ranked if n in keep]
@@ -1721,17 +1737,45 @@ class App(ttk.Frame):
                 lines.append(f"donor has no: {', '.join(left)}"
                              + ("  (will hide)" if cfg.hide else ""))
 
+            # Several parts of one donor have to keep their positions
+            # *relative to each other*. Re-centring each on its own host
+            # counterpart destroys that: Bastila's arm sits 0.15 closer to her
+            # spine than Carth's does, so moving it onto his arm's centre
+            # shoves it off the shoulder of the torso it arrived with. One
+            # offset, taken from the biggest shared part, is applied to all of
+            # them - which is exactly what `model_alignment` was written for
+            # and was until now only used for the parts folded in.
+            shared_offset = None
+            if len(pairs) > 1 and anchor:
+                shared_offset = ktp.model_alignment(
+                    donor_layout, donor_layout.node_by_name(anchor[1]),
+                    host_layout, host_layout.node_by_name(anchor[0]),
+                )
+                lines.append(
+                    f"{len(pairs) - 1} part(s) follow {anchor[0]} rather than "
+                    f"being placed on their own"
+                )
+
             reshape = cfg.reshape
             ok = 0
             for i, (host_node, donor_node) in enumerate(pairs):
                 self.events.put(("progress", (i, len(pairs), f"{host_node} <- {donor_node}")))
+                # The anchor is placed, exactly as before: that is what puts
+                # a donor head onto the host at all, and it is the path with
+                # in-game evidence behind it. Every *other* part rides on the
+                # anchor's offset instead of being re-centred on its own
+                # counterpart, which is what was pulling arms off shoulders.
+                is_anchor = (host_node, donor_node) == anchor
+                offset = None if is_anchor else shared_offset
                 new_mdl, new_mdx, r = ktp.transplant_node(
                     mdl, mdx, donor_layout, donor, host_node, donor_node,
                     # Not fitting still means putting it where the part it
                     # replaces sits. A donor left exactly where it was authored
                     # lands about 1.5 units away - inside the chest - which is
                     # never what anyone wanted.
-                    fit=cfg.fit, place=not cfg.fit, scale=cfg.scale,
+                    fit=cfg.fit and offset is None,
+                    place=(not cfg.fit) and offset is None,
+                    model_offset=offset, scale=cfg.scale,
                     merge=(auto if (host_node, donor_node) == anchor else None),
                     reshape=reshape, with_texture=cfg.with_texture,
                 )
