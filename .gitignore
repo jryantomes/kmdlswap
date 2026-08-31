@@ -24,3 +24,6 @@ dist/
 /out_probe2/
 /out_caps/
 /packs/
+
+# my own working files while patching
+/scratch_patch.py
