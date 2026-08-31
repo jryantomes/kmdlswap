@@ -1,10 +1,15 @@
-# In-game testing owed
+# Testing owed
 
-A build that validates is not a build that works. Everything here has been
-built, has passed validation, and has **not** been seen running. The point of
-the list is that the things a validator cannot check - lighting, facial
-animation, whether a head sits on the neck - are exactly the things that go
-wrong.
+Everything here has been built and passes its tests, and none of it has been
+watched by a person. Two kinds of thing are on the list and they fail
+differently:
+
+* **In the game** - a build that validates is not a build that works. Lighting,
+  facial animation and whether a head sits on a neck are exactly what a
+  validator cannot check.
+* **In the app** - the tests drive the widgets headlessly, which proves the
+  wiring and says nothing about whether the thing is usable: how it looks, how
+  long it makes you wait, whether the layout survives your window size.
 
 Copy a build's `.mdl`/`.mdx` into `Override/`, load a save, and look. Delete
 them afterwards; vanilla lives in the BIFs.
@@ -14,6 +19,8 @@ them afterwards; vanilla lives in the BIFs.
 and anything matching `rfk_*`, `c_rfk_*`, `q_rfk_*`.
 
 ---
+
+# Part one: in the game
 
 ## 1. Tangent lighting — the one with no substitute
 
@@ -94,6 +101,53 @@ From `NEXT.md`, predating this session:
       confirming the caution is honest.
 - [ ] `bigmitts` writes only two models. A human draws hands as part of the
       torso and arm meshes, so only droids have a hand node to scale.
+
+---
+
+# Part two: in the app
+
+Faster to check and worth doing first, since a broken list makes the in-game
+tests harder to set up.
+
+## 8. The donor list of faces
+
+Brand new. Open the Transplant tab and pick a host.
+
+- [ ] Faces appear beside the names. **The first time is slow** - about a third
+      of a second per face, so a list of 144 takes the better part of a minute,
+      arriving gradually. After that it is instant, from a cache in
+      `~/.kmdlfun/thumbs`.
+- [ ] Clicking a face selects that donor, and Preview then builds *that* model.
+- [ ] Change the **Show** filter to female, then droid. The list narrows and
+      the faces still match their names - a face on the wrong row is the
+      specific failure the background drawing could cause.
+- [ ] Is seven rows enough to browse, or does the list want to be taller?
+
+## 9. The rest of the Transplant tab
+
+- [ ] **Rank for this host** - reorders best-first and labels each entry with a
+      grade. Takes about ten seconds; the log says what it found.
+- [ ] **Into** - with `p_hk47` as host it should say "pairs with nothing
+      whole-model, choose 'head'". Choosing `head` fills the list.
+- [ ] **Donor from: KOTOR 2** - the list should repopulate from K2, with faces.
+
+## 10. The Custom head tab
+
+- [ ] Browse to a pack folder, **Check only**, and read the verdict. The
+      scanned head in `packs/scanhead` should be REJECTED at 53% solid.
+- [ ] Build one and confirm it lands in the output folder as a named build.
+
+## 11. The Builds tab
+
+- [ ] Builds are listed newest first and say what they came from.
+- [ ] **Install to Override** and **Remove** do what they say. This is the only
+      action that writes into the game - check it does not touch anything of
+      yours.
+
+## 12. The catalogue
+
+- [ ] `python tools/render_catalogue.py --install "<K1 root>"` - 233 models in
+      about a minute. Spot-check a few faces are the right way round.
 
 ---
 
