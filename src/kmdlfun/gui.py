@@ -249,9 +249,11 @@ class App(ttk.Frame):
         )
         ttk.Label(
             page,
-            text=("Preview reports how solid the donor is. Below 76% - the worst "
-                  "vanilla head - the engine culls the inward-facing parts and the "
-                  "head reads as full of holes, which no amount of fitting fixes."),
+            text=("Preview writes nothing: it reports the fit and how solid the "
+                  "donor is, then draws the result on the Preview tab beside the "
+                  "host as it is now. Below 76% solid - the worst vanilla head - "
+                  "the engine culls the inward-facing parts and the head reads as "
+                  "full of holes, which no amount of fitting fixes."),
             foreground="#666", wraplength=620,
         ).grid(row=6, column=0, columnspan=5, sticky="w", pady=(6, 0))
 
@@ -815,17 +817,22 @@ class App(ttk.Frame):
                              f"   drift {a.drift:.3f}")
                 if preview:
                     lines.append(f"      {self._solidity(donor_layout, donor_node)}")
-                if not preview:
-                    mdl, mdx = new_mdl, new_mdx
-
-            if preview:
-                lines.append(f"preview only: {ok}/{len(pairs)} would transfer")
-                self.events.put(("done_text", lines))
-                return
+                mdl, mdx = new_mdl, new_mdx
 
             if cfg.hide and left:
                 mdl, hidden = kvis.hide_nodes(kl.parse(mdl, mdx), mdl, left)
                 lines.append(f"hid {len(hidden)}: {', '.join(hidden)}")
+
+            if preview:
+                # The result exists in memory either way, so a preview can show
+                # it rather than only describe it. Nothing is written.
+                lines.append(f"preview only: {ok}/{len(pairs)} would transfer")
+                try:
+                    self._post_scenes(cfg.install, host, donor, mdl, mdx, lib)
+                except Exception as exc:  # noqa: BLE001
+                    lines.append(f"(could not draw it: {type(exc).__name__}: {exc})")
+                self.events.put(("done_text", lines))
+                return
 
             if not kv.check(kl.parse(mdl, mdx)).ok:
                 self.events.put(("error", "result failed validation; nothing written"))
@@ -841,6 +848,27 @@ class App(ttk.Frame):
         except Exception as exc:  # noqa: BLE001
             self.events.put(("error", f"{type(exc).__name__}: {exc}\n"
                                       f"{traceback.format_exc(limit=3)}"))
+
+    def _post_scenes(self, install, host, donor, mdl, mdx, lib):
+        """Draw the host as it is beside the host as it would be.
+
+        Framed by one shared ruler, because two renders at two scales make a
+        part that changed size look unchanged.
+        """
+        from kmdlswap import layout as kl
+
+        from . import render as krender
+        from . import textures as ktextures
+
+        cache = ktextures.TextureCache(install)
+        before = krender.from_layout(kl.parse(*lib.read(host)), texture_lookup=cache.get)
+        after = krender.from_layout(kl.parse(mdl, mdx), texture_lookup=cache.get)
+        note = (f"{before.triangles} vs {after.triangles} triangles   -   "
+                f"nothing written; this is what Build would produce")
+        self.events.put((
+            "scenes",
+            ([before, after], [f"{host} (now)", f"{host} <- {donor}"], note),
+        ))
 
     @staticmethod
     def _solidity(layout, node_name) -> str:
@@ -885,6 +913,12 @@ class App(ttk.Frame):
                     scenes, labels, note = payload
                     self.viewport.set_scenes(scenes, labels)
                     self.preview_status.config(text=note)
+                    # The viewport lives on the Preview tab, so put it in front
+                    # rather than drawing where nobody is looking.
+                    for i in range(len(self.tabs.tabs())):
+                        if self.tabs.tab(i, "text") == "Preview":
+                            self.tabs.select(i)
+                            break
                 elif kind == "index":
                     self.index = payload
                     self.models = payload.names
