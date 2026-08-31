@@ -244,6 +244,15 @@ def _export_donor_textures(args, mdl: bytes, mdx: bytes, out) -> list[str]:
     return notes
 
 
+def _has_alpha(img) -> bool:
+    """Does this image carry anything in its alpha channel worth keeping?"""
+    if img.mode not in ("RGBA", "LA", "PA") and "transparency" not in img.info:
+        return False
+    alpha = img.convert("RGBA").getchannel("A")
+    lo, hi = alpha.getextrema()
+    return lo < 255          # all-opaque alpha carries nothing
+
+
 def _import(args) -> int:
     """Read a .glb and write a head pack beside it."""
     from pathlib import Path as _Path
@@ -295,7 +304,13 @@ def _import(args) -> int:
             import io
 
             with Image.open(io.BytesIO(imported.image)) as img:
-                img = img.convert("RGB")
+                # Keep alpha. Dropping it is what cost a ported Quarren its
+                # eyes: its texture is RGBA, the RGB conversion threw the
+                # channel away, and the eyes rendered as flat grey while the
+                # rest of the face looked right. The MDL and MDX were
+                # byte-identical either way - the texture file was the whole
+                # difference.
+                img = img.convert("RGBA" if _has_alpha(img) else "RGB")
                 if args.texture_size:
                     n = args.texture_size
                     if img.size != (n, n):
