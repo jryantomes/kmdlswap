@@ -229,6 +229,24 @@ def body_for_head(install, head: str, library=None) -> str | None:
         return None
 
 
+def kind_of(layout) -> str:
+    """What one already-parsed model can donate. See `classify` for the words.
+
+    Split out so a caller that has the layout in hand - the app's scan, which
+    parses every model anyway to build its compatibility index - can label a
+    model without reading it a second time.
+    """
+    from . import apply as kapply
+    from . import parts as kparts
+
+    meshes = kparts.mesh_nodes(layout)
+    if not meshes:
+        return "other"
+    if not any(n.name.lower() == "head" for n in meshes):
+        return "body" if kparts.survey(layout)["torso"] else "other"
+    return "head" if kapply.is_head_model(layout) else "creature"
+
+
 def classify(install, names=None, *, progress=None) -> dict[str, str]:
     """Sort an install's models by what a head swap can take from them.
 
@@ -265,16 +283,7 @@ def classify(install, names=None, *, progress=None) -> dict[str, str]:
         except Exception:  # noqa: BLE001
             out[name] = "other"
             continue
-
-        meshes = kparts.mesh_nodes(layout)
-        if not meshes:
-            out[name] = "other"
-        elif not any(n.name.lower() == "head" for n in meshes):
-            out[name] = "body" if kparts.survey(layout)["torso"] else "other"
-        elif kapply.is_head_model(layout):
-            out[name] = "head"
-        else:
-            out[name] = "creature"
+        out[name] = kind_of(layout)
     return out
 
 

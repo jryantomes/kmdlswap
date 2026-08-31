@@ -108,6 +108,7 @@ class App(ttk.Frame):
         self.models: list[str] = []
         self.index = None
         self.donor_labels: dict[str, str] = {}
+        self.host_labels: dict[str, str] = {}
 
         self._build_paths()
         self._build_tabs()
@@ -137,7 +138,7 @@ class App(ttk.Frame):
         ttk.Button(box, text="Browse", command=self._pick_out).grid(
             row=1, column=2, pady=(6, 0)
         )
-        ttk.Label(box, text="KOTOR 2 (optional)").grid(
+        ttk.Label(box, text="KOTOR II (optional)").grid(
             row=2, column=0, sticky="w", pady=(6, 0)
         )
         self.install2 = tk.StringVar(value=guess_install2())
@@ -151,7 +152,7 @@ class App(ttk.Frame):
         ttk.Label(
             box,
             text=("Builds go to the output folder; \"Install to Override\" copies them "
-                  "into the game. A KOTOR 2 folder lets you borrow its heads."),
+                  "into the game. A KOTOR II folder lets you borrow its heads."),
             foreground="#666", wraplength=620,
         ).grid(row=3, column=0, columnspan=3, sticky="w", pady=(6, 0))
 
@@ -263,7 +264,7 @@ class App(ttk.Frame):
         game.grid(row=2, column=0, columnspan=5, sticky="w", pady=(6, 0))
         ttk.Label(game, text="Donor from").pack(side="left", padx=(0, 6))
         self.donor_game = tk.StringVar(value="K1")
-        for label, value in (("this game", "K1"), ("KOTOR 2", "K2")):
+        for label, value in (("KOTOR", "K1"), ("KOTOR II", "K2")):
             ttk.Radiobutton(game, text=label, value=value, variable=self.donor_game,
                             command=self._refresh_donors).pack(side="left", padx=(0, 10))
         # Sorting the list by measured fit is worth a button rather than being
@@ -763,7 +764,7 @@ class App(ttk.Frame):
             var.set(value)
 
     def _pick_install2(self):
-        chosen = filedialog.askdirectory(title="Pick the KOTOR 2 folder")
+        chosen = filedialog.askdirectory(title="Pick the KOTOR II folder")
         if chosen:
             self.install2.set(chosen)
             self.donor_game.set("K2")
@@ -1061,7 +1062,7 @@ class App(ttk.Frame):
         head" when in fact its head node is the easiest kind of target there is:
         rigid, unskinned, its own topology used as it stands.
         """
-        host = self.host.get().strip()
+        host = self._selected_host()
         nodes = self._host_mesh_nodes(host) if host else []
         self.target_box.config(values=[WHOLE_MODEL] + nodes)
         if self.target_node.get() not in ([WHOLE_MODEL] + nodes):
@@ -1141,7 +1142,7 @@ class App(ttk.Frame):
         """
         if self.worker and self.worker.is_alive():
             return
-        host = self.host.get().strip()
+        host = self._selected_host()
         if not host:
             self._say("choose a host first")
             return
@@ -1232,7 +1233,7 @@ class App(ttk.Frame):
         # it anyway is what left HK-47 with an empty donor list.
         if self.target_node.get() != WHOLE_MODEL:
             path = self._donor_install()
-            host = self.host.get().strip()
+            host = self._selected_host()
             models = self._by_look(path, self._donors_for_host(path, host))
             ranked = self._ranked_labels(host, path, models)
             kinds = self._donor_kinds(path)
@@ -1250,22 +1251,22 @@ class App(ttk.Frame):
             path = self.install2.get().strip()
             kinds = self._donor_kinds(path)
             models = self._by_look(path, self._head_donors(path))
-            ranked = self._ranked_labels(self.host.get().strip(), path, models)
+            ranked = self._ranked_labels(self._selected_host(), path, models)
             self.donor_labels = ranked or {f"{n}   [{kinds[n]}]": n for n in models}
             self._fill_donor_tree()
             self.donor_game_note.config(
-                text=(f"{len(models)} of {len(kinds)} KOTOR 2 models have a head "
+                text=(f"{len(models)} of {len(kinds)} KOTOR II models have a head "
                       f"to give, best fit first" if ranked else
-                      f"{len(models)} of {len(kinds)} KOTOR 2 models have a head "
+                      f"{len(models)} of {len(kinds)} KOTOR II models have a head "
                       f"to give; only geometry crosses over"
-                      if models else "set the KOTOR 2 folder above")
+                      if models else "set the KOTOR II folder above")
             )
             return
 
         self.donor_game_note.config(text="")
         if self.index is None:
             return
-        host = self.host.get().strip()
+        host = self._selected_host()
         if not host or host not in self.index.nodes:
             self.donor_labels = {}
             self._fill_donor_tree()
@@ -1314,6 +1315,19 @@ class App(ttk.Frame):
             )
         if self.donor_labels:
             self.donor.set(next(iter(self.donor_labels)))
+
+    def _selected_host(self) -> str:
+        """The model name behind the host label.
+
+        The list shows `p_carthh   [head]` so the kind is visible while
+        choosing rather than discovered afterwards - a head model and a
+        creature take a swap very differently, and the names do not say which
+        is which. Everything downstream wants the bare name.
+        """
+        raw = self.host.get().strip()
+        if raw in self.host_labels:
+            return self.host_labels[raw]
+        return raw.split()[0] if raw else ""
 
     def _selected_donor(self) -> str:
         raw = self.donor.get().strip()
@@ -1480,7 +1494,10 @@ class App(ttk.Frame):
             names = [n for n in character_models(install, ModelLibrary(install))
                      if n in found and len(found[n]) == 2]
 
+            from .library import kind_of
+
             index = kc.ModelIndex()
+            kinds: dict[str, str] = {}
             for i, name in enumerate(names):
                 if i % 20 == 0:
                     self.events.put(("progress", (i, len(names), f"reading {name}")))
@@ -1489,9 +1506,12 @@ class App(ttk.Frame):
                     lay = kl.parse(e[ResourceType.MDL].data(), e[ResourceType.MDX].data())
                     if kv.check(lay).ok:
                         index.add(kc.describe(lay, name))
+                        # Free: the layout is already in hand, and classifying
+                        # separately would read all 233 models a second time.
+                        kinds[name] = kind_of(lay)
                 except Exception:  # noqa: BLE001, S112
                     continue
-            self.events.put(("index", index))
+            self.events.put(("index", (index, kinds, install)))
         except Exception as exc:  # noqa: BLE001
             self.events.put(("error", f"{type(exc).__name__}: {exc}"))
 
@@ -1604,7 +1624,7 @@ class App(ttk.Frame):
                     self.out_dir.get(), self.intensity.get())
             self.worker = threading.Thread(target=self._effect_work, args=args, daemon=True)
         else:
-            host, donor = self.host.get().strip(), self._selected_donor()
+            host, donor = self._selected_host(), self._selected_donor()
             if not host or not donor:
                 messagebox.showinfo("kmdlfun", "Pick a host and a donor.")
                 self.build_btn.config(state="normal")
@@ -1943,11 +1963,21 @@ class App(ttk.Frame):
                             self.tabs.select(i)
                             break
                 elif kind == "index":
+                    payload, kinds, scanned = payload
                     self.index = payload
                     self.models = payload.names
-                    self.host_box.config(values=self.models)
+                    self.host_labels = {
+                        (f"{n}   [{kinds[n]}]" if n in kinds else n): n
+                        for n in self.models
+                    }
+                    self.host_box.config(values=list(self.host_labels))
                     self.preview_box.config(values=self.models)
                     self.head_host_box.config(values=self.models)
+                    # The scan classified everything on its way past, so the
+                    # donor list does not have to read the install again.
+                    cache = getattr(self, "_kind_cache", {})
+                    cache.setdefault(scanned, kinds)
+                    self._kind_cache = cache
                     self._say(f"indexed {len(self.models)} character models")
                     self._refresh_donors()
                     self.build_btn.config(state="normal")
