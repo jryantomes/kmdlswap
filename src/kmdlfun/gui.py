@@ -41,6 +41,7 @@ WINDOW_W, WINDOW_H = 860, 980
 
 WHOLE_MODEL = "matching nodes (whole model)"
 ANYONE = "anyone"
+AUTO_NODE = "automatic"
 
 DEFAULT_INSTALLS = [
     r"E:\SteamLibrary\steamapps\common\swkotor",
@@ -70,6 +71,9 @@ class TransplantSettings:
     # unified body needs the former: HK-47 shares exactly one node name with any
     # head model, so whole-model pairing offers nothing.
     target_node: str = ""
+    # Which donor node fills it. Empty means work it out: same name, then the
+    # donor's head. A model with neither has to be told.
+    donor_node: str = ""
 
 
 def guess_install() -> str:
@@ -263,6 +267,16 @@ class App(ttk.Frame):
                                        values=[WHOLE_MODEL], width=28, state="readonly")
         self.target_box.pack(side="left")
         self.target_box.bind("<<ComboboxSelected>>", lambda _e: self._refresh_donors())
+        ttk.Label(target, text="from").pack(side="left", padx=(10, 6))
+        # Which node of the donor. Automatic covers everything with a head:
+        # same name if there is one, the donor's head otherwise. A kath hound
+        # has neither, so the node has to be nameable.
+        self.donor_node = tk.StringVar(value=AUTO_NODE)
+        self.donor_node_box = ttk.Combobox(
+            target, textvariable=self.donor_node, values=[AUTO_NODE],
+            width=22, state="readonly",
+        )
+        self.donor_node_box.pack(side="left")
         self.target_note = ttk.Label(target, text="", foreground="#666")
         self.target_note.pack(side="left", padx=(8, 0))
 
@@ -883,7 +897,8 @@ class App(ttk.Frame):
         kinds = self._donor_kinds(path)
         return sorted(n for n, k in kinds.items() if k in DONOR_KINDS)
 
-    def _donors_for_host(self, path: str, host: str) -> list[str]:
+    def _donors_for_host(self, path: str, host: str,
+                         named_node: bool = False) -> list[str]:
         """What can be taken *from*, given what is being built *onto*.
 
         A body host wants bodies. Offering it heads was not a filter working
@@ -893,6 +908,12 @@ class App(ttk.Frame):
         from .library import DONOR_KINDS
 
         kinds = self._donor_kinds(path)
+        if named_node:
+            # Naming both nodes is the escape hatch for models the automatic
+            # rules cannot pair: a kath hound and a bantha share no node names
+            # and neither has a head, so neither is a donor by any other test.
+            # Anything that draws something can give a part.
+            return sorted(n for n, k in kinds.items() if k != "empty" and n != host)
         if kinds.get(host) == "body":
             return sorted(n for n, k in kinds.items() if k == "body" and n != host)
         return sorted(n for n, k in kinds.items() if k in DONOR_KINDS)
@@ -909,6 +930,36 @@ class App(ttk.Frame):
     def _on_donor_pick(self, label=None):
         if label:
             self.donor.set(label)
+            self._refresh_donor_nodes()
+
+    def _refresh_donor_nodes(self):
+        """Offer the chosen donor's own mesh nodes."""
+        box = getattr(self, "donor_node_box", None)
+        if box is None:
+            return
+        donor = self._selected_donor()
+        nodes = self._mesh_nodes(self._donor_install(), donor) if donor else []
+        box.config(values=[AUTO_NODE] + nodes)
+        if self.donor_node.get() not in ([AUTO_NODE] + nodes):
+            self.donor_node.set(AUTO_NODE)
+
+    def _mesh_nodes(self, path: str, model: str) -> list[str]:
+        """A model's visible mesh nodes, cached; one model is cheap to read."""
+        cache = getattr(self, "_mesh_cache", {})
+        key = (path, model)
+        if key not in cache:
+            from kmdlswap import layout as kl
+
+            from . import parts as kparts
+            from .library import ModelLibrary
+
+            try:
+                layout = kl.parse(*ModelLibrary(path).read(model))
+                cache[key] = [n.name for n in kparts.mesh_nodes(layout)]
+            except Exception:  # noqa: BLE001
+                cache[key] = []
+            self._mesh_cache = cache
+        return cache[key]
 
     def _fill_donor_tree(self):
         """Put the current labels in the list, then fetch faces for them."""
@@ -1292,7 +1343,8 @@ class App(ttk.Frame):
         if self.target_node.get() != WHOLE_MODEL:
             path = self._donor_install()
             host = self._selected_host()
-            models = self._by_look(path, self._donors_for_host(path, host))
+            models = self._by_look(
+                path, self._donors_for_host(path, host, named_node=True))
             ranked = self._ranked_labels(host, path, models)
             kinds = self._donor_kinds(path)
             self.donor_labels = ranked or {
@@ -1718,6 +1770,8 @@ class App(ttk.Frame):
                 # HK-47 would come out as a floating head.
                 hide=self.opt_hide.get() and not target,
                 target_node=target,
+                donor_node=("" if self.donor_node.get() == AUTO_NODE
+                            else self.donor_node.get()),
             )
             self.worker = threading.Thread(
                 target=self._transplant_work,
@@ -1772,17 +1826,22 @@ class App(ttk.Frame):
                 # is the whole point on a host whose names are its own.
                 from . import compat as kcompat
 
-                same = [p for p in pairs if p[0] == cfg.target_node]
-                if same:
-                    pairs = same
+                if cfg.donor_node:
+                    pairs = [(cfg.target_node, cfg.donor_node)]
                 else:
-                    donor_head = kcompat.head_node(donor_layout)
-                    if donor_head is None:
-                        self.events.put(("error",
-                                         f"{donor} has no head node to put into "
-                                         f"{host}:{cfg.target_node}"))
-                        return
-                    pairs = [(cfg.target_node, donor_head.name)]
+                    same = [p for p in pairs if p[0] == cfg.target_node]
+                    if same:
+                        pairs = same
+                    else:
+                        donor_head = kcompat.head_node(donor_layout)
+                        if donor_head is None:
+                            self.events.put(("error",
+                                             f"{donor} has no node named "
+                                             f"{cfg.target_node!r} and no head. "
+                                             f"Choose which of its nodes to use "
+                                             f"in the 'from' list."))
+                            return
+                        pairs = [(cfg.target_node, donor_head.name)]
             if not pairs:
                 self.events.put(("error",
                                  f"{host} and {donor} share no mesh node names, "
