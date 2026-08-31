@@ -104,28 +104,57 @@ armature modifier, a node origin that is not the geometry centre, and a differin
 axis convention each produced a model that passed every validator and was still
 wrong.
 
-## kmdlfun — companion effects app
+## kmdlfun — the app
 
-A separate, playful tool built on the kmdlswap engine. Every edit goes through
-the same validated splice path, so the same coverage, offset-closure and
-identity checks guard these as guard a real geometry swap.
+Built on the kmdlswap engine. Every edit goes through the same validated splice
+path, so the same coverage, offset-closure and identity checks guard these as
+guard a real geometry swap. Nothing here writes into the game except one
+explicit action on the Builds tab.
 
 ```bash
+kmdlfun gui                     # the desktop app; no extra dependencies
+
 kmdlfun effects                 # list effects
 kmdlfun companions              # list companions and their models
-kmdlfun preview --install "<K1 root>" --companion hk47 --effect bighead
-kmdlfun build   --install "<K1 root>" --effect bighead --companion all --out out_fun/
-kmdlfun build   --install "<K1 root>" --effect bighead --companion all --out out/                 --pivot bounds  # the old per-node pivot, kept for comparison
-kmdlfun gui                     # Tkinter desktop app (no extra dependencies)
-kmdlfun render p_hk47 --install "<K1 root>" --highlight head --out shot.png
-kmdlfun render p_hk47 --install "<K1 root>" --compare out/p_hk47.mdl --out before_after.png
-kmdlfun render p_hk47 --install "<K1 root>" --textured --turntable 24 --out spin.png
+kmdlfun preview   --install "<K1>" --companion hk47 --effect bighead
+kmdlfun build     --install "<K1>" --effect bighead --companion all --out out_fun/
+
+kmdlfun transplant --install "<K1>" --host p_carthh --donor n_dustilh --out out_fun/
+kmdlfun rank       --install "<K1>" --host p_carthh --who female --notes
+kmdlfun head       packs/myhead --install "<K1>" --host p_hk47 --node head --decimate --fit
+kmdlfun import     model.glb --out packs/myhead
+kmdlfun builds     --out out_fun/ --verify
+kmdlfun render     p_hk47 --install "<K1>" --textured --turntable 24 --out spin.png
 ```
 
-Effects: **bighead**, **smallhead**, **bobblehead**, **chibi**, **bigmitts** —
-each a uniform scale of a part, with an adjustable intensity.
+### The app
 
-Four things the models forced:
+Five tabs sharing the folder settings, log and build button.
+
+**Effects** — **bighead**, **smallhead**, **bobblehead**, **chibi**,
+**bigmitts**, each a uniform scale of a part with an adjustable intensity,
+previewed as a whole character rather than a headless body.
+
+**Transplant** — geometry from one model into another. The donor list shows
+**faces rather than names**, because `n_shaardanh` and `n_lashoweh` are both
+clean fits on Carth and one of them is the one you meant. It can be sorted by
+measured fit, filtered to male / female / droid, pointed at KOTOR 2, and aimed
+at a **single named node** when whole-model pairing finds nothing — which is
+what a unified body like HK-47 always did, since it shares exactly one node name
+with any head model.
+
+**Custom head** — a mesh from outside the game into one node, with decimation,
+fitting, winding repair and cropping. A pack is checked before anything is
+built, and a failure names the check.
+
+**Preview** — draws the result out of the built MDL/MDX bytes, so it checks the
+output rather than re-displaying the input. A head model is drawn **on its
+body**, before and after at one shared scale.
+
+**Builds** — named, kept folders with a manifest recording what went in, so a
+good result can be reproduced. Installing points at one of these.
+
+### What the models forced
 
 - **Human companions keep their head in a separate model** (`p_carthh`), which
   holds hair, teeth, eyes, brows and tongue as *separate nodes*. Scaling only
@@ -162,11 +191,14 @@ command line. It draws the posed model straight out of MDL/MDX bytes, so
 previewing a build is a check on the output rather than a re-display of the
 input mesh.
 
-It is a software rasteriser in numpy, not Blender. `tools/render_catalogue.py`
-still shells out to Blender and should: for 164 models the several seconds of
-start-up cost amortise away. For one model they do not, and a preview you have
-to wait for is a preview you stop using. A full HK-47 body is 2,467 triangles
-and draws in about 76 ms, which is fast enough to drag with the mouse.
+It is a software rasteriser in numpy, not Blender. A full HK-47 body is 2,467
+triangles and draws in about 76 ms, which is fast enough to drag with the mouse
+- and a preview you have to wait for is a preview you stop using.
+`tools/render_catalogue.py` used to shell out to Blender and no longer does:
+every image it had produced was of the back of someone's head, so they all had
+to be redrawn anyway, and redoing them through a second camera convention that
+no test covers would have been a strange way to fix a camera bug. It now draws
+all 233 models in about a minute with the same renderer the app uses.
 
 The **comparison** is the part that earns it. A single untextured render tells
 you little — vanilla heads look strange without their texture too. Vanilla drawn
@@ -195,9 +227,16 @@ wasn't. Settled two ways and now fixed in both renderers:
 Conventions pinned by tests, because each fails silently by eye: characters face
 **+Y**, verified from the position of every eye, teeth and tongue node rather
 than from a texture; and a before-and-after must share one framing, or a head
-that changed size looks unchanged. There is no backface culling and lighting is
-two-sided, because the head spec tolerates 5% of faces winding against their
-normals and culling by winding would punch holes in meshes we accept.
+that changed size looks unchanged.
+
+Backface culling is **off by default and available**, which is the right way
+round for two different jobs. Two-sided drawing is kinder to a preview, since
+the head spec tolerates 5% of faces winding against their normals and culling
+those would punch holes in meshes we accept. But the engine draws front faces
+only, so a mesh that folds back on itself renders full of holes in game and
+looks perfect two-sided - which is why the catalogue and the solidity check
+both cull, and why solidity is reported as a number rather than trusted to the
+eye.
 
 The V axis runs down the image with no flip. That one rests on visual
 inspection: no cheap automated check separates the two conventions on real
@@ -205,9 +244,16 @@ data — a head's UV islands are too uniform for mean texel colour to tell them
 apart, which was measured rather than assumed — so the test pins the sampler
 and the docstring records how the orientation was actually established.
 
-There is still no animation, no lightmap and no transparency. So it says nothing
-about the one failure this project knows is real — that a skinned head's vertex
-count must not change. A preview is not proof either.
+There is still no animation, no lightmap and no transparency, so a preview
+cannot see the failures that only appear once a model moves or is lit: whether
+facial animation survives, and whether a reverse-engineered tangent basis lights
+the right way round. A preview is not proof. [TESTING.md](TESTING.md) is the
+list of what still has to be watched in the game itself.
+
+(This paragraph used to end "the one failure this project knows is real — that
+a skinned head's vertex count must not change". That rule was wrong; it was a
+node pointer at model header `+168` our writer never relocated. See
+[`reports/SKIN_ROOT_POINTER_FINDINGS.md`](reports/SKIN_ROOT_POINTER_FINDINGS.md).)
 
 Findings and measurements:
 [`reports/KMDLFUN_PIVOT_FINDINGS.md`](reports/KMDLFUN_PIVOT_FINDINGS.md).
