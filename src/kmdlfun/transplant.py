@@ -104,6 +104,43 @@ def _bounds(points):
     return lo, hi
 
 
+# Share of a donor's vertices allowed to sit further than a tenth of the host
+# part's diagonal from its surface. Measured over the 61 vanilla heads fitted
+# onto Carth: median 0%, 75th percentile 1.2%, 90th 4.8%, worst 11.5%
+# (n_yoda). So it is a warning and never a refusal - vanilla itself reaches
+# these numbers, and n_rodian at 10.9% is a donor this project has used.
+FAR_FRACTION = 0.10
+FAR_WARN = 0.05
+
+
+def transfer_strain(host_geo, donor_positions) -> tuple[float, float]:
+    """How far the donor sits from the host surface: (mean, fraction far).
+
+    Weight transfer gives every new vertex the weights of the closest point on
+    the *host's* surface. Where the two shapes agree that is exactly right.
+    Where they do not - a Quarren's head lobes have no counterpart anywhere on
+    a human head - the vertex inherits from whatever happened to be nearest and
+    then swings with a bone that has nothing to do with it. In game that reads
+    as a head that animates but is smashed about.
+
+    Both numbers are relative to the host part's diagonal, so they mean the
+    same thing whatever is being replaced.
+    """
+    import numpy as np
+
+    from kmdlswap.weights import _closest_points_on_triangles
+
+    H = np.asarray([p[:3] for p in host_geo.positions], dtype=np.float64)
+    tri = np.asarray([f.vertices for f in host_geo.faces], dtype=np.int64)
+    if not len(tri) or not len(donor_positions):
+        return 0.0, 0.0
+    extent = float(np.linalg.norm(H.max(axis=0) - H.min(axis=0))) or 1.0
+    P = np.asarray([p[:3] for p in donor_positions], dtype=np.float64)
+    d2, _ = _closest_points_on_triangles(P, H[tri[:, 0]], H[tri[:, 1]], H[tri[:, 2]])
+    dist = np.sqrt(d2.min(axis=1)) / extent
+    return float(dist.mean()), float((dist > FAR_FRACTION).mean())
+
+
 def to_host_space(
     donor_layout: kl.Layout,
     donor_node,
@@ -337,6 +374,19 @@ def transplant_node(
             if new_texture:
                 result.warnings.append(
                     f"took the donor's geometry, UVs and texture {new_texture!r} whole"
+                )
+
+        if not reshape and host_node.is_skin:
+            mean, far = transfer_strain(ke.extract(host_layout, host_node),
+                                        mesh.positions)
+            if far > FAR_WARN:
+                result.warnings.append(
+                    f"{far:.0%} of the donor's vertices sit more than "
+                    f"{FAR_FRACTION:.0%} of the part's size away from the host's "
+                    f"surface (mean {mean:.0%}). They will inherit weights from "
+                    f"whatever is nearest and can swing with bones that have "
+                    f"nothing to do with them. Use --reshape if it looks smashed "
+                    f"in game"
                 )
 
         geo, swap_report = build_replacement(
