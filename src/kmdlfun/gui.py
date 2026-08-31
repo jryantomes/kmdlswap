@@ -163,11 +163,13 @@ class App(ttk.Frame):
     def _build_tabs(self):
         self.tabs = ttk.Notebook(self)
         self.tabs.grid(row=1, column=0, sticky="nsew", pady=(0, 8))
-        self._build_effect_tab()
+        # Transplant first because it is what the tool is for. Effects last:
+        # it was written first and sat in front for that reason alone.
         self._build_transplant_tab()
         self._build_head_tab()
         self._build_preview_tab()
         self._build_builds_tab()
+        self._build_effect_tab()
 
     # ---- effects tab -------------------------------------------------------
 
