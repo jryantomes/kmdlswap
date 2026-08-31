@@ -129,18 +129,24 @@ def uv_sphere(rings: int, segments: int):
     positions.append((0.0, 0.0, -1.0))
     uvs.append((0.5, 0.0))
 
+    # Wound outward. This was inward until 2026-08-30, which means every head
+    # this module ever generated was inside out: the engine draws front faces
+    # only, so it would have rendered hollow. Nothing caught it because the
+    # previewer is two-sided by design and the topology checks - one piece,
+    # closed, degenerate - are all blind to which way a surface faces. The
+    # `solid` check in headspec exists now, and found this on its first run.
     faces: list[tuple[int, int, int]] = []
     for s in range(segments):
         n = (s + 1) % segments
-        faces.append((top, grid[0][n], grid[0][s]))
-        faces.append((bottom, grid[-1][s], grid[-1][n]))
+        faces.append((top, grid[0][s], grid[0][n]))
+        faces.append((bottom, grid[-1][n], grid[-1][s]))
     for r in range(len(grid) - 1):
         for s in range(segments):
             n = (s + 1) % segments
             a, b = grid[r][s], grid[r][n]
             c, d = grid[r + 1][n], grid[r + 1][s]
-            faces.append((a, b, c))
-            faces.append((a, c, d))
+            faces.append((a, c, b))
+            faces.append((a, d, c))
     return positions, faces, uvs
 
 
