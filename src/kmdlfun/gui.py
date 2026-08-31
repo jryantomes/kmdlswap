@@ -45,7 +45,9 @@ class TransplantSettings:
     """
 
     install: str
+    donor_install: str
     out_dir: str
+    auto_merge: bool
     fit: bool
     scale: float
     reshape: bool
@@ -55,6 +57,20 @@ class TransplantSettings:
 
 def guess_install() -> str:
     for p in DEFAULT_INSTALLS:
+        if (Path(p) / "chitin.key").is_file():
+            return p
+    return ""
+
+
+DEFAULT_INSTALLS_2 = [
+    r"E:\SteamLibrary\steamapps\common\Knights of the Old Republic II",
+    r"C:\Program Files (x86)\Steam\steamapps\common\Knights of the Old Republic II",
+    r"C:\GOG Games\Star Wars - KotOR2",
+]
+
+
+def guess_install2() -> str:
+    for p in DEFAULT_INSTALLS_2:
         if (Path(p) / "chitin.key").is_file():
             return p
     return ""
@@ -108,12 +124,23 @@ class App(ttk.Frame):
         ttk.Button(box, text="Browse", command=self._pick_out).grid(
             row=1, column=2, pady=(6, 0)
         )
+        ttk.Label(box, text="KOTOR 2 (optional)").grid(
+            row=2, column=0, sticky="w", pady=(6, 0)
+        )
+        self.install2 = tk.StringVar(value=guess_install2())
+        ttk.Entry(box, textvariable=self.install2).grid(
+            row=2, column=1, sticky="ew", padx=6, pady=(6, 0)
+        )
+        ttk.Button(box, text="Browse", command=self._pick_install2).grid(
+            row=2, column=2, pady=(6, 0)
+        )
+
         ttk.Label(
             box,
-            text=("Builds go to the output folder. \"Install to Override\" copies them into "
-                  "the game, and \"Remove\" puts it back to vanilla."),
-            foreground="#666",
-        ).grid(row=2, column=0, columnspan=3, sticky="w", pady=(6, 0))
+            text=("Builds go to the output folder; \"Install to Override\" copies them "
+                  "into the game. A KOTOR 2 folder lets you borrow its heads."),
+            foreground="#666", wraplength=620,
+        ).grid(row=3, column=0, columnspan=3, sticky="w", pady=(6, 0))
 
     def _build_tabs(self):
         self.tabs = ttk.Notebook(self)
@@ -190,6 +217,16 @@ class App(ttk.Frame):
         self.donor_box.grid(row=0, column=3, sticky="ew", padx=6)
 
         ttk.Button(page, text="Scan install", command=self._scan).grid(row=0, column=4)
+
+        game = ttk.Frame(page)
+        game.grid(row=7, column=0, columnspan=5, sticky="w", pady=(8, 0))
+        ttk.Label(game, text="Donor from").pack(side="left", padx=(0, 6))
+        self.donor_game = tk.StringVar(value="K1")
+        for label, value in (("this game", "K1"), ("KOTOR 2", "K2")):
+            ttk.Radiobutton(game, text=label, value=value, variable=self.donor_game,
+                            command=self._refresh_donors).pack(side="left", padx=(0, 10))
+        self.donor_game_note = ttk.Label(game, text="", foreground="#666")
+        self.donor_game_note.pack(side="left", padx=(8, 0))
         self.donor_note = ttk.Label(
             page,
             text="The host keeps its hierarchy, skeleton and animations. Only geometry moves.",
@@ -209,6 +246,7 @@ class App(ttk.Frame):
         # thought to be fixed. It is not - that was a stale pointer in our own
         # writer - so the donor now comes across whole by default, keeping its
         # own shape, UVs and texture.
+        self.opt_automerge = tk.BooleanVar(value=True)
         self.opt_reshape = tk.BooleanVar(value=False)
         self.opt_texture = tk.BooleanVar(value=True)
         self.opt_hide = tk.BooleanVar(value=True)
@@ -220,12 +258,17 @@ class App(ttk.Frame):
             opts, text="Hide parts the donor lacks", variable=self.opt_hide
         ).grid(row=0, column=1, sticky="w", padx=(0, 14))
         ttk.Checkbutton(
-            opts, text="Fit donor to host's size", variable=self.opt_fit
+            opts, text="Fit donor to host's size (off: keep the donor's own size)",
+            variable=self.opt_fit,
         ).grid(row=1, column=0, sticky="w", padx=(0, 14), pady=(4, 0))
         ttk.Checkbutton(
             opts, text="Reshape: keep host's topology and UVs instead",
             variable=self.opt_reshape,
         ).grid(row=1, column=1, sticky="w", pady=(4, 0))
+        ttk.Checkbutton(
+            opts, text="Fold in donor parts this host has no node for",
+            variable=self.opt_automerge,
+        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
         size = ttk.Frame(page)
         size.grid(row=3, column=0, columnspan=5, sticky="w", pady=(8, 0))
@@ -237,23 +280,17 @@ class App(ttk.Frame):
         ).pack(side="left", padx=6)
         self.scale_label = ttk.Label(size, text="1.00x", width=7)
         self.scale_label.pack(side="left")
-        ttk.Label(
-            size,
-            text=("Fit matches the donor's tightest axis, so a donor with different "
-                  "proportions lands smaller than the part it replaces. Nudge it here."),
-            foreground="#666", wraplength=420,
-        ).pack(side="left", padx=(10, 0))
+        ttk.Label(size, text="nudge the fitted size", foreground="#666").pack(
+            side="left", padx=(10, 0)
+        )
 
         ttk.Button(page, text="Preview", command=lambda: self._start(preview=True)).grid(
             row=4, column=0, sticky="w", pady=(10, 0)
         )
         ttk.Label(
             page,
-            text=("Preview writes nothing: it reports the fit and how solid the "
-                  "donor is, then draws the result on the Preview tab beside the "
-                  "host as it is now. Below 76% solid - the worst vanilla head - "
-                  "the engine culls the inward-facing parts and the head reads as "
-                  "full of holes, which no amount of fitting fixes."),
+            text=("Preview writes nothing - it draws the result on the Preview tab "
+                  "and reports how solid the donor is. Under 76% reads as holes."),
             foreground="#666", wraplength=620,
         ).grid(row=6, column=0, columnspan=5, sticky="w", pady=(6, 0))
 
@@ -444,7 +481,7 @@ class App(ttk.Frame):
         box.grid(row=2, column=0, sticky="ew")
         box.columnconfigure(0, weight=1)
         box.rowconfigure(0, weight=1)
-        self.log = tk.Text(box, height=8, wrap="word", state="disabled")
+        self.log = tk.Text(box, height=6, wrap="word", state="disabled")
         self.log.grid(row=0, column=0, sticky="nsew")
         bar = ttk.Scrollbar(box, command=self.log.yview)
         bar.grid(row=0, column=1, sticky="ns")
@@ -481,6 +518,13 @@ class App(ttk.Frame):
         for var in self.selected.values():
             var.set(value)
 
+    def _pick_install2(self):
+        chosen = filedialog.askdirectory(title="Pick the KOTOR 2 folder")
+        if chosen:
+            self.install2.set(chosen)
+            self.donor_game.set("K2")
+            self._refresh_donors()
+
     def _pick_install(self):
         d = filedialog.askdirectory(title="Select the KOTOR install folder")
         if d:
@@ -504,8 +548,41 @@ class App(ttk.Frame):
         else:
             subprocess.run(["xdg-open", str(d)], check=False)
 
+    def _k2_models(self) -> list[str]:
+        """Character models in the second install, indexed once."""
+        path = self.install2.get().strip()
+        if not path:
+            return []
+        if getattr(self, "_k2_cache", (None, None))[0] != path:
+            from .library import ModelLibrary
+
+            try:
+                lib = ModelLibrary(path)
+            except Exception as exc:  # noqa: BLE001
+                self._say(f"could not read the KOTOR 2 install: {exc}")
+                self._k2_cache = (path, [])
+            else:
+                self._k2_cache = (path, sorted(
+                    n for n in lib.index if n.startswith(("p_", "n_", "c_"))
+                ))
+        return self._k2_cache[1]
+
     def _refresh_donors(self):
         """Offer only donors that can actually pair with the chosen host."""
+        if self.donor_game.get() == "K2":
+            # No compatibility index for the second game - that would mean
+            # scanning it as well. Preview reports what actually pairs, which is
+            # the same answer a little later.
+            models = self._k2_models()
+            self.donor_labels = {n: n for n in models}
+            self.donor_box.config(values=models)
+            self.donor_game_note.config(
+                text=(f"{len(models)} KOTOR 2 models; only geometry crosses over"
+                      if models else "set the KOTOR 2 folder above")
+            )
+            return
+
+        self.donor_game_note.config(text="")
         if self.index is None:
             return
         host = self.host.get().strip()
@@ -740,7 +817,10 @@ class App(ttk.Frame):
             # already take their settings as arguments; this one did not.
             settings = TransplantSettings(
                 install=self.install.get().strip(),
+                donor_install=(self.install2.get().strip()
+                               if self.donor_game.get() == "K2" else ""),
                 out_dir=self.out_dir.get(),
+                auto_merge=self.opt_automerge.get(),
                 fit=self.opt_fit.get(),
                 scale=self.opt_scale.get(),
                 reshape=self.opt_reshape.get(),
@@ -777,14 +857,22 @@ class App(ttk.Frame):
             from .library import ModelLibrary
 
             lib = ModelLibrary(cfg.install)
-            for name in (host, donor):
-                if not lib.has(name):
-                    self.events.put(("error", f"no model named {name!r} in that install"))
-                    return
+            donor_lib = ModelLibrary(cfg.donor_install) if cfg.donor_install else lib
+            if not lib.has(host):
+                self.events.put(("error", f"no model named {host!r} in the host game"))
+                return
+            if not donor_lib.has(donor):
+                self.events.put(("error", f"no model named {donor!r} in the donor game"))
+                return
 
             mdl, mdx = lib.read(host)
-            donor_layout = kl.parse(*lib.read(donor))
+            donor_layout = kl.parse(*donor_lib.read(donor))
             host_layout = kl.parse(mdl, mdx)
+            if donor_layout.game != host_layout.game:
+                lines_prefix = (f"donor is a {donor_layout.game} model, host is "
+                                f"{host_layout.game}: geometry only")
+            else:
+                lines_prefix = None
             pairs = ktp.match_nodes(host_layout, donor_layout)
             if not pairs:
                 self.events.put(("error",
@@ -792,7 +880,20 @@ class App(ttk.Frame):
                                  f"so there is nothing to move between them"))
                 return
 
-            lines = [f"{len(pairs)} matching node(s)"]
+            lines = [lines_prefix] if lines_prefix else []
+            lines.append(f"{len(pairs)} matching node(s)")
+
+            anchor = ktp.anchor_pair(pairs, host_layout)
+            auto = []
+            if cfg.auto_merge and anchor:
+                h, d = anchor
+                auto = ktp.auto_merge_candidates(
+                    donor_layout, donor_layout.node_by_name(d),
+                    host_layout, host_layout.node_by_name(h),
+                )
+                if auto:
+                    lines.append(f"folding in {len(auto)} part(s) the host has no "
+                                 f"node for: {', '.join(auto)}")
             taken = {h for h, _ in pairs}
             left = [n.name for n in kparts.mesh_nodes(host_layout) if n.name not in taken]
             if left:
@@ -805,7 +906,12 @@ class App(ttk.Frame):
                 self.events.put(("progress", (i, len(pairs), f"{host_node} <- {donor_node}")))
                 new_mdl, new_mdx, r = ktp.transplant_node(
                     mdl, mdx, donor_layout, donor, host_node, donor_node,
-                    fit=cfg.fit, scale=cfg.scale,
+                    # Not fitting still means putting it where the part it
+                    # replaces sits. A donor left exactly where it was authored
+                    # lands about 1.5 units away - inside the chest - which is
+                    # never what anyone wanted.
+                    fit=cfg.fit, place=not cfg.fit, scale=cfg.scale,
+                    merge=(auto if (host_node, donor_node) == anchor else None),
                     reshape=reshape, with_texture=cfg.with_texture,
                 )
                 if not r.ok:
@@ -842,6 +948,12 @@ class App(ttk.Frame):
             out.mkdir(parents=True, exist_ok=True)
             (out / f"{host}.mdl").write_bytes(mdl)
             (out / f"{host}.mdx").write_bytes(mdx)
+            if cfg.donor_install and cfg.with_texture:
+                from . import textures as ktextures
+
+                lines.extend(ktextures.export_donor_textures(
+                    mdl, mdx, cfg.donor_install, out
+                ))
             lines.append(f"wrote {out / host}.mdl and .mdx")
             lines.append("Copy both into Override. A successful build is not proof.")
             self.events.put(("done_text", lines))
@@ -960,8 +1072,8 @@ class App(ttk.Frame):
 def run() -> int:
     root = tk.Tk()
     root.title("kmdlfun - KOTOR model tools")
-    root.geometry("760x900")
-    root.minsize(700, 640)
+    root.geometry("780x940")
+    root.minsize(720, 600)
     try:
         ttk.Style().theme_use("vista")
     except tk.TclError:

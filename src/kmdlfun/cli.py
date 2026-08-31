@@ -51,6 +51,11 @@ def main(argv: list[str] | None = None) -> int:
                          "into a KOTOR 1 host, say. Only the donor's geometry "
                          "crosses over; the host is written in its own format")
     tp.add_argument("--node", nargs="*", help="host node(s); default every matching node")
+    tp.add_argument("--no-auto-merge", action="store_true",
+                    help="do not fold in donor parts the host has no node for. "
+                         "By default they are folded in when their bone exists "
+                         "on the host, which is what carries a Quarren's mouth "
+                         "tentacles without anyone having to name them")
     tp.add_argument("--merge", action="append", default=[], metavar="NODE",
                     help="fold this donor node into the mesh being replaced, "
                          "bound to the bone it hung from. For parts a host has "
@@ -199,58 +204,17 @@ def _load_layout(name: str, install: str | None):
     return kl.parse(*ModelLibrary(install).read(name))
 
 
-def _export_donor_textures(args, mdl: bytes, mdx: bytes, out) -> list[str]:
-    """Save any texture the built model names that the host game lacks."""
-    from kmdlswap import layout as kl
-
-    from . import parts as kparts
-    from . import render as krender
-    from . import textures as ktextures
-
-    donor_side = ktextures.TextureCache(args.donor_install)
-    layout = kl.parse(mdl, mdx)
-
-    # Deliberately not "skip it if the host already has it". A texture cache
-    # searches Override first, so once a build has been installed the host does
-    # have it, and the next build would silently omit it - producing an output
-    # folder that works on this machine and nowhere else. Exporting is cheap and
-    # idempotent; guessing is not.
-    notes: list[str] = []
-    for name in sorted({krender.node_texture(layout, n)
-                        for n in kparts.mesh_nodes(layout)} - {""}):
-        # Prefer the shipped bytes. Only fall back to decoding and re-encoding
-        # if they cannot be had.
-        raw = ktextures.raw_texture(args.donor_install, name)
-        if raw is not None:
-            data, ext = raw
-            path = out / f"{name}.{ext}"
-            path.write_bytes(data)
-            notes.append(f"copied {path.name} ({len(data)} bytes) from the donor's "
-                         f"game, unconverted")
-            continue
-
-        image = donor_side.get(name)
-        if image is None:
-            continue                       # the host game supplies this one
-        try:
-            from PIL import Image
-        except ImportError:
-            notes.append(f"texture {name!r} needs Pillow to export")
-            continue
-        path = out / f"{name}.tga"
-        Image.fromarray(image, mode="RGB").save(path)
-        notes.append(f"exported {path.name} ({image.shape[1]}x{image.shape[0]}) "
-                     f"- it comes from the donor's game")
-    return notes
-
-
 def _has_alpha(img) -> bool:
-    """Does this image carry anything in its alpha channel worth keeping?"""
+    """Does this image carry anything in its alpha channel worth keeping?
+
+    Dropping alpha is what cost a ported Quarren its eyes, so a texture that
+    has one is written out as 32-bit. An all-opaque channel carries nothing and
+    is not worth the extra bytes.
+    """
     if img.mode not in ("RGBA", "LA", "PA") and "transparency" not in img.info:
         return False
-    alpha = img.convert("RGBA").getchannel("A")
-    lo, hi = alpha.getextrema()
-    return lo < 255          # all-opaque alpha carries nothing
+    lo, _ = img.convert("RGBA").getchannel("A").getextrema()
+    return lo < 255
 
 
 def _import(args) -> int:
@@ -595,7 +559,7 @@ def _transplant(args) -> int:
     # worked out in model space, and every part moves by the same amount.
     model_offset = None
     if args.pair and len(pairs) > 1 and not args.fit:
-        anchor_host, anchor_donor = pairs[0]
+        anchor_host, anchor_donor = ktp.anchor_pair(pairs, host_layout)
         model_offset = ktp.model_alignment(
             donor_layout, donor_layout.node_by_name(anchor_donor),
             host_layout, host_layout.node_by_name(anchor_host),
@@ -604,12 +568,27 @@ def _transplant(args) -> int:
               f"by the same amount")
         print()
 
+    # Parts the host has no node for, that its own skeleton can still drive.
+    anchor = ktp.anchor_pair(pairs, host_layout)
+    auto = []
+    if not args.no_auto_merge and not args.merge and anchor:
+        h, d = anchor
+        auto = ktp.auto_merge_candidates(
+            donor_layout, donor_layout.node_by_name(d),
+            host_layout, host_layout.node_by_name(h),
+        )
+        if auto:
+            print(f"  folding in {len(auto)} donor part(s) {args.host} has no node "
+                  f"for: {', '.join(auto)}")
+            print()
+
     results = []
     for host_node, donor_node in pairs:
         mdl2, mdx2, r = ktp.transplant_node(
             mdl, mdx, donor_layout, args.donor, host_node, donor_node,
             fit=args.fit, scale=args.scale, place=args.place,
-            model_offset=model_offset, merge=args.merge or None,
+            model_offset=model_offset,
+            merge=(args.merge or auto) if (host_node, donor_node) == anchor else None,
             max_influences=args.max_influences, reshape=args.reshape,
             with_texture=args.with_texture,
         )
@@ -658,7 +637,11 @@ def _transplant(args) -> int:
         # loads and renders untextured grey, which looks like a modelling
         # failure and is really a missing file - so write it out rather than
         # leaving behind a build that cannot work.
-        for line in _export_donor_textures(args, mdl, mdx, out_dir):
+        from . import textures as ktextures
+
+        for line in ktextures.export_donor_textures(
+            mdl, mdx, args.donor_install, out_dir
+        ):
             print(f"  {line}")
 
     print()

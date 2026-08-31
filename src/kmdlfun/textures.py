@@ -152,3 +152,49 @@ def raw_texture(install: str | Path, resref: str) -> tuple[bytes, str] | None:
     restype = getattr(result, "restype", None)
     ext = getattr(restype, "extension", None) or "tpc"
     return bytes(data), str(ext).lstrip(".")
+
+
+def export_donor_textures(mdl: bytes, mdx: bytes, donor_install, out_dir) -> list[str]:
+    """Write out any texture the built model names that the donor game supplies.
+
+    A donor from another install brings a texture the host game has never heard
+    of, and without it the model loads grey - which reads as a modelling failure
+    and is really a missing file. The shipped bytes are copied verbatim where
+    they can be, because a re-encode is a place for a mistake to hide: decoding
+    a Quarren's RGBA texture to RGB dropped its alpha and cost it its eyes.
+    """
+    from pathlib import Path as _Path
+
+    from kmdlswap import layout as kl
+
+    from . import parts as kparts
+    from . import render as krender
+
+    out_dir = _Path(out_dir)
+    layout = kl.parse(mdl, mdx)
+    donor_side = TextureCache(donor_install)
+
+    notes: list[str] = []
+    for name in sorted({krender.node_texture(layout, n)
+                        for n in kparts.mesh_nodes(layout)} - {""}):
+        raw = raw_texture(donor_install, name)
+        if raw is not None:
+            data, ext = raw
+            path = out_dir / f"{name}.{ext}"
+            path.write_bytes(data)
+            notes.append(f"copied {path.name} ({len(data)} bytes) from the donor's "
+                         f"game, unconverted")
+            continue
+
+        image = donor_side.get(name)
+        if image is None:
+            continue                       # the host game supplies this one
+        try:
+            from PIL import Image
+        except ImportError:
+            notes.append(f"texture {name!r} needs Pillow to export")
+            continue
+        path = out_dir / f"{name}.tga"
+        Image.fromarray(image, mode="RGB").save(path)
+        notes.append(f"exported {path.name} ({image.shape[1]}x{image.shape[0]})")
+    return notes
