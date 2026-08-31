@@ -422,10 +422,25 @@ def character(body: Layout, head: Layout | None = None, **kwargs) -> Scene:
     except KeyError:
         return scene              # a self-contained model has no hook and needs none
 
+    on_head = place_head(body, head, **kwargs)
+    return scene if on_head is None else join([scene, on_head])
+
+
+def place_head(body: Layout, head: Layout, **kwargs) -> Scene | None:
+    """Just the head, moved onto the body's hook - or None if there is no hook.
+
+    Split out of `character` so a caller can frame the head without drawing the
+    body alone to find it. A head swap is judged on the face, and on a whole
+    standing figure the face is a few dozen pixels.
+    """
+    try:
+        hook = space.rest_pose(body)[body.node_by_name("headhook").index]
+    except KeyError:
+        return None
     on_head = from_layout(head, **kwargs)
     rotation = np.asarray(hook.rotation, dtype=np.float64)
     on_head.positions = on_head.positions @ rotation.T + np.asarray(hook.position)
-    return join([scene, on_head])
+    return on_head
 
 
 def shared_bounds(scenes) -> tuple[np.ndarray, float]:

@@ -44,6 +44,48 @@ def app(root, install_path):
     a.destroy()
 
 
+@pytest.fixture(scope="module")
+def scanned(install_path):
+    """The install scan, done once for the whole module.
+
+    Four tests need a populated host and donor list and the scan takes about
+    thirty-five seconds, because it reads all 233 models. Doing it per test
+    spent two minutes of every run re-deriving the same answer. The one test
+    that is *about* the scan still runs it for real.
+    """
+    from kmdlfun import catalogue as kc
+    from kmdlfun.library import ModelLibrary, character_models, kind_of
+    from kmdlswap import layout as kl
+    from kmdlswap import validate as kv
+
+    lib = ModelLibrary(str(install_path))
+    index = kc.ModelIndex()
+    kinds = {}
+    for name in character_models(str(install_path), lib):
+        try:
+            layout = kl.parse(*lib.read(name))
+            if kv.check(layout).ok:
+                index.add(kc.describe(layout, name))
+                kinds[name] = kind_of(layout)
+        except Exception:  # noqa: BLE001, S112
+            continue
+    return index, kinds
+
+
+def apply_scan(a, scanned, install_path):
+    """Hand an app the scan result, exactly as its own drain loop would."""
+    index, kinds = scanned
+    a.index = index
+    a.models = index.names
+    a.host_labels = {
+        (f"{n}   [{kinds[n]}]" if n in kinds else n): n for n in a.models
+    }
+    a.host_box.config(values=list(a.host_labels))
+    a.preview_box.config(values=a.models)
+    a.head_host_box.config(values=a.models)
+    a._kind_cache = {str(install_path): kinds}
+
+
 def pump(a, seconds=3.0):
     """Drain the worker's queue the way the running app would."""
     a.worker.join(300)
@@ -553,7 +595,7 @@ def test_the_app_can_check_a_custom_head_pack(app):
     assert "solid" in log, "it must say which check failed"
 
 
-def test_the_donor_list_can_be_filtered_by_who(app):
+def test_the_donor_list_can_be_filtered_by_who(app, scanned, install_path):
     """164 models in alphabetical order does not answer "show me the female
     heads". The filter has to narrow the list without breaking the mapping the
     build path relies on, and has to say it is on - a short list with no
@@ -561,9 +603,8 @@ def test_the_donor_list_can_be_filtered_by_who(app):
     from kmdlfun.gui import ANYONE, WHOLE_MODEL
 
     transplant_tab(app)
+    apply_scan(app, scanned, install_path)
     app.host.set("p_carthh")
-    app._scan()
-    pump(app, seconds=20.0)
 
     app.donor_look.set(ANYONE)
     app._refresh_donors()
@@ -729,14 +770,13 @@ def test_a_cross_game_build_ships_only_what_the_host_lacks(app, tmp_path, k2_pat
     )
 
 
-def test_the_host_list_says_what_each_model_is(app):
+def test_the_host_list_says_what_each_model_is(app, scanned, install_path):
     """A head model and a creature take a swap very differently and their names
     do not say which is which - `p_hk47` carries its head inside its body,
     `p_carthh` is a head on its own. Knowing that after choosing is too late.
     """
     transplant_tab(app)
-    app._scan()
-    pump(app, seconds=30.0)
+    apply_scan(app, scanned, install_path)
 
     values = list(app.host_box.cget("values"))
     assert values, "no hosts listed"
@@ -750,12 +790,11 @@ def test_the_host_list_says_what_each_model_is(app):
     assert {"head", "creature", "body"} <= kinds, kinds
 
 
-def test_a_labelled_host_still_resolves_to_a_model(app):
+def test_a_labelled_host_still_resolves_to_a_model(app, scanned, install_path):
     """Everything downstream wants the bare name, and a bare name typed in by
     hand has to keep working too."""
     transplant_tab(app)
-    app._scan()
-    pump(app, seconds=30.0)
+    apply_scan(app, scanned, install_path)
 
     label = next(v for v in app.host_box.cget("values") if v.startswith("p_carthh "))
     app.host.set(label)
@@ -803,3 +842,47 @@ def test_the_games_are_named(app):
     walk(app)
     assert "KOTOR" in labels and "KOTOR II" in labels, labels
     assert "this game" not in labels
+
+
+def test_the_preview_frames_the_head_it_swapped(app, tmp_path):
+    """Drawing the head on its body gave the swap context and cost the detail.
+
+    A head on a standing figure is a few dozen pixels, which is not enough to
+    judge the thing that changed - so the camera frames the head by default and
+    the whole figure is a click away.
+    """
+    transplant_tab(app)
+    app.out_dir.set(str(tmp_path))
+    app.host.set("p_carthh")
+    app._refresh_donors()
+    app.donor.set("n_dustilh")
+    app.opt_fit.set(False)
+    app._start(preview=True)
+    pump(app, seconds=15.0)
+
+    assert app._focus_bounds is not None, "no head framing was worked out"
+    assert app._whole_bounds is not None
+    assert app.preview_frame.get() == "head", "the head is the default"
+
+    head_radius = float(app._focus_bounds[1])
+    whole_radius = float(app._whole_bounds[1])
+    assert head_radius < whole_radius / 3, (
+        f"head framing is barely tighter: {head_radius:.3f} vs {whole_radius:.3f}"
+    )
+    assert app.viewport.bounds is app._focus_bounds
+
+    app.preview_frame.set("whole")
+    app._apply_framing()
+    assert app.viewport.bounds is app._whole_bounds
+
+    app.preview_frame.set("head")
+    app._apply_framing()
+    assert app.viewport.bounds is app._focus_bounds
+
+
+def test_zoom_is_reachable_without_a_mouse_wheel(app):
+    """The wheel already zoomed and nothing said so."""
+    app.preview_zoom.set(2.5)
+    app._apply_zoom()
+    assert app.viewport.zoom == pytest.approx(2.5)
+    assert "2.5" in app.zoom_label.cget("text")
