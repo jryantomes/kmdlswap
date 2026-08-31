@@ -720,19 +720,83 @@ def transplant_node(
     return new_mdl, new_mdx, result
 
 
-def match_nodes(host_layout: kl.Layout, donor_layout: kl.Layout) -> list[tuple[str, str]]:
+# Bodies are named to two conventions and nobody wrote that down. Counted over
+# the 67 KOTOR 1 body models: sixteen use `larm/rarm/torso` and nine use
+# `arml/armr/torso`, which is why Carth and Bastila - both perfectly ordinary
+# humans - paired only their torsos and swapped no arms at all.
+#
+# The canonical form keeps the **side** in it. Reducing `larm` and `armr` to
+# the same key would pair a left arm with a right one, and the result reads as
+# a body whose elbows bend the wrong way - a mistake that looks like a rigging
+# fault rather than a naming one.
+ALIASES: dict[str, str] = {
+    "larm": "arm.l", "arml": "arm.l", "arml2": "arm.l", "l_arm": "arm.l",
+    "rarm": "arm.r", "armr": "arm.r", "armr2": "arm.r", "r_arm": "arm.r",
+    "lleg": "leg.l", "legl": "leg.l", "l_leg": "leg.l",
+    "rleg": "leg.r", "legr": "leg.r", "r_leg": "leg.r",
+    "torso": "torso", "torso2": "torso", "torsonew": "torso",
+    "legs": "legs",
+    "body": "body",
+}
+
+
+def canonical(name: str) -> str | None:
+    """The part a node name means, or None if it is not one we know."""
+    return ALIASES.get(name.strip().lower())
+
+
+def _canonical_index(nodes) -> dict[str, str]:
+    """Canonical name -> node name, for the parts that are unambiguous.
+
+    A model carrying two nodes that reduce to the same part is left out of
+    aliasing entirely rather than guessed at: which of two torsos is *the*
+    torso is not something a name can answer.
+    """
+    seen: dict[str, list[str]] = {}
+    for node in nodes:
+        key = canonical(node.name)
+        if key:
+            seen.setdefault(key, []).append(node.name)
+    return {k: v[0] for k, v in seen.items() if len(v) == 1}
+
+
+def match_nodes(host_layout: kl.Layout, donor_layout: kl.Layout, *,
+                aliases: bool = True) -> list[tuple[str, str]]:
     """Pair host nodes with donor nodes by name, ignoring case.
 
     A swap never renames anything, so casing is only a pairing heuristic - the
     same part is `torso` in one model and `Torso` in another.
+
+    Exact names win. Only what is left over is matched through `ALIASES`, so a
+    model that names its parts the same way as the host is never reinterpreted.
     """
-    donors = {
-        n.name.lower(): n.name
-        for n in kparts.mesh_nodes(donor_layout)
-    }
+    host_nodes = kparts.mesh_nodes(host_layout)
+    donor_nodes = kparts.mesh_nodes(donor_layout)
+    donors = {n.name.lower(): n.name for n in donor_nodes}
+
     pairs = []
-    for node in kparts.mesh_nodes(host_layout):
+    unmatched = []
+    for node in host_nodes:
         match = donors.get(node.name.lower())
         if match:
             pairs.append((node.name, match))
+        else:
+            unmatched.append(node)
+
+    if not aliases or not unmatched:
+        return pairs
+
+    taken = {d for _h, d in pairs}
+    donor_parts = {k: v for k, v in _canonical_index(donor_nodes).items()
+                   if v not in taken}
+    host_parts = _canonical_index(unmatched)
+    for key, host_name in host_parts.items():
+        donor_name = donor_parts.get(key)
+        if donor_name:
+            pairs.append((host_name, donor_name))
+
+    # Keep the host's own node order, so the anchor and the report read the
+    # way the model does.
+    order = {n.name: i for i, n in enumerate(host_nodes)}
+    pairs.sort(key=lambda pair: order.get(pair[0], 0))
     return pairs
