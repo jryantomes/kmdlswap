@@ -67,7 +67,8 @@ def main(argv: list[str] | None = None) -> int:
                          "it usually has spare ones - Carth's hair and eyelids "
                          "can carry a Quarren's mouth tentacles. Repeatable; the "
                          "first pair anchors the alignment for the rest")
-    tp.add_argument("--out", required=True)
+    tp.add_argument("--out", required=True, help="where builds are kept")
+    tp.add_argument("--name", help="name this build; defaults to host-donor")
     tp.add_argument("--fit", action="store_true", help="scale the donor part to the host part's size")
     tp.add_argument("--place", action="store_true",
                     help="move the donor onto the host part without resizing it, "
@@ -155,6 +156,11 @@ def main(argv: list[str] | None = None) -> int:
     rn.add_argument("--show-hidden", action="store_true",
                     help="draw meshes the render flag turns off, in grey")
 
+    bl = sub.add_parser("builds", help="list the builds in an output folder")
+    bl.add_argument("--out", required=True)
+    bl.add_argument("--verify", action="store_true",
+                    help="check each build's files against its own manifest")
+
     sub.add_parser("gui", help="launch the desktop app")
 
     args = p.parse_args(argv)
@@ -175,6 +181,8 @@ def main(argv: list[str] | None = None) -> int:
             return _import(args)
         if args.cmd == "render":
             return _render(args)
+        if args.cmd == "builds":
+            return _builds(args)
         if args.cmd == "gui":
             from .gui import run
 
@@ -202,6 +210,37 @@ def _load_layout(name: str, install: str | None):
     from .library import ModelLibrary
 
     return kl.parse(*ModelLibrary(install).read(name))
+
+
+def _builds(args) -> int:
+    """What is in an output folder, and what each thing is."""
+    from . import builds as kbuilds
+
+    found = kbuilds.find(args.out)
+    if not found:
+        print(f"no builds in {args.out}")
+        return 0
+
+    print(f"{len(found)} build(s) in {args.out}\n")
+    for build in found:
+        print(f"  {build.summary}")
+        if build.manifest.get("unmanaged"):
+            print("      (no manifest - made before builds were named, or dropped in)")
+            continue
+        merged = build.manifest.get("merged") or []
+        if merged:
+            print(f"      folded in: {', '.join(merged)}")
+        options = build.manifest.get("options") or {}
+        on = [k for k, v in options.items() if v is True]
+        scale = options.get("scale")
+        if scale and scale != 1.0:
+            on.append(f"scale {scale:g}")
+        if on:
+            print(f"      {', '.join(on)}")
+        if args.verify:
+            problems = build.check()
+            print("      " + ("verified" if not problems else "; ".join(problems)))
+    return 0
 
 
 def _has_alpha(img) -> bool:
@@ -616,10 +655,12 @@ def _transplant(args) -> int:
         print("nothing transferred", file=sys.stderr)
         return 1
 
+    hidden_names: list[str] = []
     if args.hide_unmatched and left:
         from . import visibility as kvis
 
         mdl, hidden = kvis.hide_nodes(kl.parse(mdl, mdx), mdl, left)
+        hidden_names = list(hidden)
         print(f"hid {len(hidden)} node(s) the donor does not have: {', '.join(hidden)}")
 
     final = kv.check(kl.parse(mdl, mdx))
@@ -627,7 +668,14 @@ def _transplant(args) -> int:
         print("kmdlfun: result failed validation; refusing to write it", file=sys.stderr)
         return 1
 
-    out_dir = Path(args.out)
+    # Each build gets its own folder, so one does not overwrite the last and
+    # "the Quarren one" is a thing you can point at.
+    from . import builds as kbuilds
+
+    root = Path(args.out)
+    root.mkdir(parents=True, exist_ok=True)
+    name = args.name or kbuilds.unique_name(root, f"{args.host}-{args.donor}")
+    out_dir = root / kbuilds.slug(name)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / f"{args.host}.mdl").write_bytes(mdl)
     (out_dir / f"{args.host}.mdx").write_bytes(mdx)
@@ -644,10 +692,28 @@ def _transplant(args) -> int:
         ):
             print(f"  {line}")
 
+    build = kbuilds.adopt(out_dir, {
+        "name": name,
+        "kind": "transplant",
+        "host": {"model": args.host, "game": host_layout.game, "install": args.install},
+        "donor": {"model": args.donor, "game": donor_layout.game,
+                  "install": args.donor_install or args.install},
+        "nodes": [list(pair) for pair in pairs],
+        "merged": list(args.merge or auto),
+        "hidden": hidden_names,
+        "options": {
+            "fit": args.fit, "place": args.place, "scale": args.scale,
+            "reshape": args.reshape, "with_texture": args.with_texture,
+            "hide_unmatched": args.hide_unmatched,
+            "auto_merge": not args.no_auto_merge,
+        },
+    })
+
     print()
     print(f"{len(done)}/{len(pairs)} node(s) transferred")
-    print(f"wrote {out_dir / args.host}.mdl and .mdx")
-    print("Copy both into the game's Override directory. Verify in-game.")
+    print(f"build '{build.name}' in {out_dir}")
+    print(f"  {', '.join(f['name'] for f in build.manifest['files'])}")
+    print("Install it from the app, or copy the folder's contents into Override.")
     return 0
 
 

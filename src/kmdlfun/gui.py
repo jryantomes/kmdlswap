@@ -148,6 +148,7 @@ class App(ttk.Frame):
         self._build_effect_tab()
         self._build_transplant_tab()
         self._build_preview_tab()
+        self._build_builds_tab()
 
     # ---- effects tab -------------------------------------------------------
 
@@ -295,6 +296,90 @@ class App(ttk.Frame):
         ).grid(row=6, column=0, columnspan=5, sticky="w", pady=(6, 0))
 
     # ---- shared bottom -----------------------------------------------------
+
+    # ---- builds tab --------------------------------------------------------
+
+    def _build_builds_tab(self):
+        """What has been made, kept rather than overwritten.
+
+        Every build used to land on the last one in a single folder, so there
+        was no way to keep two heads, go back to one that worked, or tell what
+        a file was a day later.
+        """
+        page = ttk.Frame(self.tabs, padding=8)
+        self.tabs.add(page, text="Builds")
+        page.columnconfigure(0, weight=1)
+        page.rowconfigure(1, weight=1)
+
+        top = ttk.Frame(page)
+        top.grid(row=0, column=0, columnspan=2, sticky="ew")
+        ttk.Button(top, text="Refresh", command=self._refresh_builds).pack(side="left")
+        ttk.Button(top, text="Install selected", command=self._install).pack(
+            side="left", padx=(6, 0)
+        )
+        ttk.Button(top, text="Remove installed", command=self._uninstall).pack(
+            side="left", padx=(6, 0)
+        )
+        ttk.Button(top, text="Open folder", command=self._open_build).pack(
+            side="left", padx=(6, 0)
+        )
+
+        self.build_list = tk.Listbox(page, height=7, exportselection=False)
+        self.build_list.grid(row=1, column=0, sticky="nsew", pady=(6, 0))
+        self.build_list.bind("<<ListboxSelect>>", lambda _e: self._on_build_select())
+        bar = ttk.Scrollbar(page, command=self.build_list.yview)
+        bar.grid(row=1, column=1, sticky="ns", pady=(6, 0))
+        self.build_list.configure(yscrollcommand=bar.set)
+
+        self.build_detail = ttk.Label(
+            page, text="", foreground="#444", wraplength=620, justify="left"
+        )
+        self.build_detail.grid(row=2, column=0, columnspan=2, sticky="w", pady=(6, 0))
+        self.builds: list = []
+
+    def _refresh_builds(self):
+        from . import builds as kbuilds
+
+        self.builds = kbuilds.find(self.out_dir.get().strip())
+        self.build_list.delete(0, "end")
+        for b in self.builds:
+            self.build_list.insert("end", b.summary)
+        if self.builds:
+            self.build_list.selection_set(0)
+            self._on_build_select()
+        else:
+            self.build_detail.config(text="Nothing built yet in this output folder.")
+
+    def _selected_build(self):
+        picked = self.build_list.curselection() if self.builds else ()
+        return self.builds[picked[0]] if picked else None
+
+    def _on_build_select(self):
+        build = self._selected_build()
+        if build is None:
+            return
+        m = build.manifest
+        bits = [", ".join(f["name"] for f in m.get("files", [])) or "no files"]
+        if m.get("merged"):
+            bits.append("folded in: " + ", ".join(m["merged"]))
+        options = m.get("options") or {}
+        on = [k for k, v in options.items() if v is True]
+        if options.get("scale") not in (None, 1.0):
+            on.append(f"scale {options['scale']:g}")
+        if on:
+            bits.append(", ".join(on))
+        problems = build.check()
+        if problems:
+            bits.append("CHANGED SINCE BUILD: " + "; ".join(problems))
+        self.build_detail.config(text="\n".join(bits))
+
+    def _open_build(self):
+        import subprocess
+
+        build = self._selected_build()
+        target = build.path if build else Path(self.out_dir.get().strip())
+        if target.is_dir():
+            subprocess.Popen(["explorer", str(target)])
 
     # ---- preview tab -------------------------------------------------------
 
@@ -632,12 +717,25 @@ class App(ttk.Frame):
         if not self._check_install():
             return
         install = self.install.get().strip()
-        p = kinstall.plan(install, self.out_dir.get())
-        if not p.total:
+        # Install one named build, not "whatever is loose in the output folder".
+        # That folder now holds several builds side by side, so it is no longer
+        # a thing that can be installed as a unit.
+        build = self._selected_build()
+        if build is None:
+            self._refresh_builds()
+            build = self._selected_build()
+        if build is None:
             messagebox.showinfo("kmdlfun", "Nothing built to install yet.")
             return
 
+        source = build.path
+        p = kinstall.plan(install, source)
+        if not p.total:
+            messagebox.showinfo("kmdlfun", f"'{build.name}' has nothing to install.")
+            return
+
         names = [f.name for f in (p.new + p.ours + p.foreign)]
+        self._say(f"\ninstalling build '{build.name}'")
         preview = "\n".join("  " + n for n in names[:12])
         if len(names) > 12:
             preview += f"\n  ... and {len(names) - 12} more"
@@ -664,7 +762,7 @@ class App(ttk.Frame):
             return
 
         try:
-            done = kinstall.apply(install, self.out_dir.get(), allow_foreign=True)
+            done = kinstall.apply(install, source, allow_foreign=True)
         except OSError as exc:
             messagebox.showerror("kmdlfun", f"Could not install: {exc}")
             return
@@ -944,7 +1042,11 @@ class App(ttk.Frame):
                 self.events.put(("error", "result failed validation; nothing written"))
                 return
 
-            out = Path(cfg.out_dir)
+            from . import builds as kbuilds
+
+            root = Path(cfg.out_dir)
+            root.mkdir(parents=True, exist_ok=True)
+            out = root / kbuilds.unique_name(root, f"{host}-{donor}")
             out.mkdir(parents=True, exist_ok=True)
             (out / f"{host}.mdl").write_bytes(mdl)
             (out / f"{host}.mdx").write_bytes(mdx)
@@ -954,8 +1056,22 @@ class App(ttk.Frame):
                 lines.extend(ktextures.export_donor_textures(
                     mdl, mdx, cfg.donor_install, out
                 ))
-            lines.append(f"wrote {out / host}.mdl and .mdx")
-            lines.append("Copy both into Override. A successful build is not proof.")
+            build = kbuilds.adopt(out, {
+                "kind": "transplant",
+                "host": {"model": host, "game": host_layout.game,
+                         "install": cfg.install},
+                "donor": {"model": donor, "game": donor_layout.game,
+                          "install": cfg.donor_install or cfg.install},
+                "nodes": [list(pair) for pair in pairs],
+                "merged": list(auto),
+                "options": {
+                    "fit": cfg.fit, "place": not cfg.fit, "scale": cfg.scale,
+                    "reshape": cfg.reshape, "with_texture": cfg.with_texture,
+                    "hide_unmatched": cfg.hide, "auto_merge": cfg.auto_merge,
+                },
+            })
+            lines.append(f"build '{build.name}' kept in {out}")
+            lines.append("Install it from the Builds tab. A build is not proof.")
             self.events.put(("done_text", lines))
         except Exception as exc:  # noqa: BLE001
             self.events.put(("error", f"{type(exc).__name__}: {exc}\n"
@@ -1042,6 +1158,7 @@ class App(ttk.Frame):
                 elif kind == "done_effect":
                     self._finish_effect(payload)
                 elif kind == "done_text":
+                    self._refresh_builds()
                     for line in payload:
                         self._say(line)
                     self.progress.config(value=100)
