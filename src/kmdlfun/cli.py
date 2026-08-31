@@ -161,6 +161,17 @@ def main(argv: list[str] | None = None) -> int:
     bl.add_argument("--verify", action="store_true",
                     help="check each build's files against its own manifest")
 
+    rk = sub.add_parser("rank", help="sort donors by how well they fit a host")
+    rk.add_argument("--install", required=True, help="the host's game")
+    rk.add_argument("--host", required=True, help="model to put a head on, e.g. p_carthh")
+    rk.add_argument("--donor-install", help="where donors come from (default: --install)")
+    rk.add_argument("--donors", nargs="*",
+                    help="donor names; default is every model a head can come from")
+    rk.add_argument("--top", type=int, default=25, help="how many to show (0 for all)")
+    rk.add_argument("--notes", action="store_true",
+                    help="say what the number does not, for each donor")
+    rk.add_argument("--json", help="also write the full ranking here")
+
     sub.add_parser("gui", help="launch the desktop app")
 
     args = p.parse_args(argv)
@@ -183,6 +194,8 @@ def main(argv: list[str] | None = None) -> int:
             return _render(args)
         if args.cmd == "builds":
             return _builds(args)
+        if args.cmd == "rank":
+            return _rank(args)
         if args.cmd == "gui":
             from .gui import run
 
@@ -502,10 +515,6 @@ def _build(args) -> int:
     print("\nCopy the .mdl/.mdx files into the game's Override directory to use them.")
     print("A successful build is not proof; verify in-game.")
     return 0 if not report.failed else 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
 
 
 def _transplant(args) -> int:
@@ -935,3 +944,65 @@ def _fit_mesh(mesh, pack, layout, node):
           f"{fmt([a_hi[i]-a_lo[i] for i in range(3)])}"
           f"   facing {pack.facing}, up {pack.up}, anchor {pack.anchor}")
     return mesh
+
+
+def _rank(args) -> int:
+    """Which donors are worth building, best first.
+
+    Building one to find out costs minutes, and the list is a few hundred names
+    in alphabetical order. See `kmdlfun.compat` for what the grades mean - they
+    are vanilla's own percentiles, not invented thresholds.
+    """
+    import json
+
+    from . import compat
+    from .library import DONOR_KINDS, ModelLibrary, classify
+
+    host_lib = ModelLibrary(args.install)
+    donor_lib = ModelLibrary(args.donor_install) if args.donor_install else host_lib
+
+    if not host_lib.has(args.host):
+        print(f"kmdlfun: {args.install} has no model {args.host!r}", file=sys.stderr)
+        return 1
+
+    donors = args.donors
+    if not donors:
+        names = sorted(n for n in donor_lib.index
+                       if n.startswith(("p_", "n_", "c_")) and donor_lib.has(n))
+        print(f"sorting {len(names)} models by what a head can come from...")
+        kinds = classify(donor_lib, names)
+        donors = [n for n, k in kinds.items() if k in DONOR_KINDS]
+
+    print(f"measuring {len(donors)} donors against {args.host}...")
+    fits = compat.rank(*host_lib.read(args.host), donor_lib, donors,
+                       host_name=args.host)
+    if not fits:
+        print("nothing to measure")
+        return 1
+
+    print(f"\n{compat.summarise(fits)}\n")
+    shown = fits if args.top <= 0 else fits[: args.top]
+    for fit in shown:
+        print("  " + fit.line)
+        if args.notes:
+            for note in fit.notes():
+                print("        - " + note)
+    if len(shown) < len(fits):
+        print(f"\n  ... and {len(fits) - len(shown)} more (--top 0 for all)")
+
+    print("\n  w = keeps its own weights   d = needs decimating   "
+          "+ = has extra parts to fold in")
+
+    if args.json:
+        with open(args.json, "w", encoding="utf-8") as fh:
+            json.dump([{"donor": f.donor, "grade": f.grade, "far": f.far,
+                        "mean": f.mean, "own_weights": f.own_weights,
+                        "vertices": f.vertices, "size_ratio": f.size_ratio,
+                        "extra_parts": f.extra_parts, "blocked": f.blocked}
+                       for f in fits], fh, indent=1)
+        print(f"  wrote {args.json}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

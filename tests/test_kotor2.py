@@ -7,44 +7,12 @@ written in its own format. Nothing writes a K2 file.
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
-
 import pytest
 
 from kmdlswap import edit as ke
 from kmdlswap import layout as kl
 from kmdlswap import validate as kv
 from kmdlswap.nodes import FUNCTION_POINTERS, MDL_VERTICES_AT, MDX_BLOCK_AT
-
-K2_INSTALLS = [
-    r"E:\SteamLibrary\steamapps\common\Knights of the Old Republic II",
-    r"C:\Program Files (x86)\Steam\steamapps\common\Knights of the Old Republic II",
-    r"C:\GOG Games\Star Wars - KotOR2",
-]
-
-
-def find_k2() -> Path | None:
-    for c in [os.environ["KOTOR2_PATH"]] if "KOTOR2_PATH" in os.environ else K2_INSTALLS:
-        p = Path(c)
-        if (p / "chitin.key").is_file():
-            return p
-    return None
-
-
-@pytest.fixture(scope="session")
-def k2_path() -> Path:
-    p = find_k2()
-    if p is None:
-        pytest.skip("no KOTOR 2 install found (set KOTOR2_PATH)")
-    return p
-
-
-@pytest.fixture(scope="session")
-def k2(k2_path):
-    from kmdlfun.library import ModelLibrary
-
-    return ModelLibrary(str(k2_path))
 
 
 def test_the_two_games_are_told_apart_by_their_function_pointers():

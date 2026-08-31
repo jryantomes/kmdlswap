@@ -377,3 +377,59 @@ def test_the_lookup_prefers_the_host_game(install_path):
     assert direct is not None
     assert np.array_equal(look("P_CarthH01"), direct)
     assert look("no_such_texture_at_all") is None
+
+
+def test_the_donor_list_can_be_sorted_by_measured_fit(app, k2_path):
+    """Alphabetical order says nothing about which donors are worth building.
+
+    Ranking reads every donor model, so it runs on a worker - and like every
+    other worker here it must not touch Tk. The list it produces has to stay a
+    list the rest of the tab can still use: same names, same mapping back to
+    model names, only the order and the labels change.
+    """
+    transplant_tab(app)
+    app.install2.set(str(k2_path))
+    app.donor_game.set("K2")
+    app.host.set("p_carthh")
+    app._refresh_donors()
+
+    before = list(app.donor_labels.values())
+    assert before, "no donors offered to rank"
+    assert "[creature]" in list(app.donor_labels)[0], "unranked labels say the kind"
+
+    app._rank_donors()
+    pump(app, seconds=20.0)
+    log = app.log.get("1.0", "end")
+
+    assert "main thread is not in main loop" not in log
+    assert "could not rank donors" not in log, log[-400:]
+    assert "donors measured" in log
+    assert "best fits:" in log
+
+    after = list(app.donor_labels.values())
+    assert set(after) == set(before), "ranking must not lose or invent donors"
+    assert after != before, "the order should now reflect measured fit"
+
+    # The label carries the grade, or the sort is invisible.
+    labels = list(app.donor_labels)
+    assert any("clean" in x for x in labels), labels[:5]
+    assert app.donor_labels[labels[0]] == after[0], "labels must still resolve"
+
+    # The one donor with real in-game experience behind it stays honest.
+    quarren = [x for x in labels if x.startswith("n_quarren")]
+    assert quarren and "rough" in quarren[0], quarren
+    assert "+parts" in quarren[0], "its four tentacles have to be flagged"
+
+    # And picking one still resolves to a model name the build path accepts.
+    app.donor.set(labels[0])
+    assert app._selected_donor() == after[0]
+
+
+def test_ranking_without_a_host_says_so_rather_than_failing(app):
+    transplant_tab(app)
+    app.host.set("")
+    app._rank_donors()
+    assert "choose a host first" in app.log.get("1.0", "end")
+    assert str(app.rank_btn.cget("state")) == "normal", (
+        "the button must not be left disabled after a refusal"
+    )

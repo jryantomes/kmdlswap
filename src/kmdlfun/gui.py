@@ -234,6 +234,12 @@ class App(ttk.Frame):
         for label, value in (("this game", "K1"), ("KOTOR 2", "K2")):
             ttk.Radiobutton(game, text=label, value=value, variable=self.donor_game,
                             command=self._refresh_donors).pack(side="left", padx=(0, 10))
+        # Sorting the list by measured fit is worth a button rather than being
+        # automatic: it reads every donor model, which takes about ten seconds
+        # for K2's 128, and most of the time the name is already known.
+        self.rank_btn = ttk.Button(game, text="Rank for this host",
+                                   command=self._rank_donors)
+        self.rank_btn.pack(side="left", padx=(6, 0))
         self.donor_game_note = ttk.Label(game, text="", foreground="#666")
         self.donor_game_note.pack(side="left", padx=(8, 0))
         self.donor_note = ttk.Label(
@@ -682,16 +688,116 @@ class App(ttk.Frame):
         kinds = self._donor_kinds(path)
         return sorted(n for n, k in kinds.items() if k in DONOR_KINDS)
 
+    def _donor_install(self) -> str:
+        """Where donors are coming from, which game depends on the radio."""
+        if self.donor_game.get() == "K2":
+            return self.install2.get().strip()
+        return self.install.get().strip()
+
+    def _rank_donors(self):
+        """Sort the donor list by how well each one will actually sit.
+
+        Alphabetical order says nothing about which donors are worth building,
+        and building one to find out costs minutes. This measures how far each
+        donor's shape sits from the host's after fitting, which is exactly the
+        thing that decides whether it comes out looking right or smashed.
+        """
+        if self.worker and self.worker.is_alive():
+            return
+        host = self.host.get().strip()
+        if not host:
+            self._say("choose a host first")
+            return
+        path = self._donor_install()
+        if not path:
+            self._say("set the donor's game folder first")
+            return
+
+        # Worked out here rather than in the worker: it reads Tk vars and can
+        # log, and Tk is not safe to touch off the main thread.
+        donors = self._head_donors(path)
+        if not donors:
+            self._say("no donors to measure in that folder")
+            self.rank_btn.config(state="normal")
+            return
+
+        self.rank_btn.config(state="disabled")
+        self._say(f"\nmeasuring {len(donors)} donors against {host} ...")
+        self.worker = threading.Thread(
+            target=self._rank_work,
+            args=(host, path, self.install.get().strip(), donors),
+            daemon=True,
+        )
+        self.worker.start()
+
+    def _rank_work(self, host: str, donor_path: str, host_path: str, donors):
+        try:
+            from . import compat
+            from .library import ModelLibrary
+
+            host_lib = ModelLibrary(host_path)
+            donor_lib = (host_lib if donor_path == host_path
+                         else ModelLibrary(donor_path))
+
+            def progress(i, total, name):
+                if not i % 10:
+                    self.events.put(("progress", (i, total, f"measuring {name}")))
+
+            fits = compat.rank(*host_lib.read(host), donor_lib, donors,
+                               host_name=host, progress=progress)
+            self.events.put(("ranked", (host, donor_path, fits)))
+        except Exception as exc:  # noqa: BLE001
+            self.events.put(("rank_failed", f"{type(exc).__name__}: {exc}"))
+
+    def _finish_rank(self, host, donor_path, fits):
+        cache = getattr(self, "_rank_cache", {})
+        cache[(host, donor_path)] = fits
+        self._rank_cache = cache
+        from . import compat
+
+        self.rank_btn.config(state="normal")
+        self._say(f"{len(fits)} donors measured: {compat.summarise(fits)}")
+        best = [f for f in fits if not f.blocked][:3]
+        if best:
+            self._say("best fits: " + ", ".join(f"{f.donor} ({f.far:.1%})"
+                                                for f in best))
+        self._refresh_donors()
+
+    def _ranked_labels(self, host: str, path: str, models: list[str]):
+        """Donor labels in measured order, or None if nothing was measured."""
+        fits = getattr(self, "_rank_cache", {}).get((host, path))
+        if not fits:
+            return None
+        offered = set(models)
+        labels = {}
+        for f in fits:
+            if f.donor not in offered:
+                continue
+            if f.blocked:
+                labels[f"{f.donor}   [cannot: {f.blocked.split(' carries ')[-1]}]"] = f.donor
+            else:
+                marks = " +parts" if f.extra_parts else ""
+                weights = " own-weights" if f.own_weights else ""
+                labels[f"{f.donor}   [{f.grade} {f.far:.0%}{weights}{marks}]"] = f.donor
+        # Anything the ranking never saw still belongs in the list.
+        for name in models:
+            if name not in labels.values():
+                labels[f"{name}   [not measured]"] = name
+        return labels
+
     def _refresh_donors(self):
         """Offer only donors that can actually pair with the chosen host."""
         if self.donor_game.get() == "K2":
             path = self.install2.get().strip()
             kinds = self._donor_kinds(path)
             models = self._head_donors(path)
-            self.donor_labels = {f"{n}   [{kinds[n]}]": n for n in models}
+            ranked = self._ranked_labels(self.host.get().strip(), path, models)
+            self.donor_labels = ranked or {f"{n}   [{kinds[n]}]": n for n in models}
             self.donor_box.config(values=list(self.donor_labels))
             self.donor_game_note.config(
                 text=(f"{len(models)} of {len(kinds)} KOTOR 2 models have a head "
+                      f"to give, best fit first" if ranked else
+                      f"{len(models)} of {len(kinds)} KOTOR 2 models have a head "
                       f"to give; only geometry crosses over"
                       if models else "set the KOTOR 2 folder above")
             )
@@ -714,7 +820,9 @@ class App(ttk.Frame):
 
             ranked = [(c, n) for c, n in ranked
                       if kinds.get(n, "head") in DONOR_KINDS]
-        self.donor_labels = {c.label(n): n for c, n in ranked}
+        measured = self._ranked_labels(host, self.install.get().strip(),
+                                       [n for _c, n in ranked])
+        self.donor_labels = measured or {c.label(n): n for c, n in ranked}
         self.donor_box.config(values=list(self.donor_labels))
 
         usable = [c for c, _ in ranked if c.usable]
@@ -1284,6 +1392,11 @@ class App(ttk.Frame):
                         self._say(line)
                     self.progress.config(value=100)
                     self.build_btn.config(state="normal")
+                elif kind == "ranked":
+                    self._finish_rank(*payload)
+                elif kind == "rank_failed":
+                    self.rank_btn.config(state="normal")
+                    self._say("could not rank donors: " + payload)
                 elif kind == "error":
                     self._say("ERROR: " + payload)
                     self.build_btn.config(state="normal")
