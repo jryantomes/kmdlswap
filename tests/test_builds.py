@@ -204,3 +204,30 @@ def test_the_player_heads_are_usable_donors(install_path):
     kinds = classify(lib, wanted)
     for name in wanted:
         assert kinds[name] in DONOR_KINDS, f"{name} classified as {kinds[name]}"
+
+
+def test_a_head_knows_which_body_it_is_worn_with(install_path):
+    """So a preview can show it where it will sit rather than floating.
+
+    `appearance.2da` pairs each head with a body. A self-contained model has
+    none and must say so rather than guessing at one.
+    """
+    from kmdlfun.library import ModelLibrary, body_for_head
+
+    lib = ModelLibrary(str(install_path))
+    assert body_for_head(str(install_path), "p_carthh", lib) == "p_carthbb"
+    assert body_for_head(str(install_path), "p_bastilah", lib) == "p_bastilabb"
+
+    for self_contained in ("p_hk47", "p_t3m3"):
+        if lib.has(self_contained):
+            assert body_for_head(str(install_path), self_contained, lib) is None, (
+                f"{self_contained} is its own body"
+            )
+
+    # Whatever it returns has to be a model that exists, or the preview breaks.
+    for head in ("n_dustilh", "pfhc01", "twilek_m"):
+        if lib.has(head):
+            body = body_for_head(str(install_path), head, lib)
+            assert body is None or lib.has(body), (head, body)
+
+    assert body_for_head(str(install_path), "no_such_head", lib) is None
