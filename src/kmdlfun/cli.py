@@ -192,19 +192,20 @@ def _export_donor_textures(args, mdl: bytes, mdx: bytes, out) -> list[str]:
     from . import render as krender
     from . import textures as ktextures
 
-    host_side = ktextures.TextureCache(args.install)
     donor_side = ktextures.TextureCache(args.donor_install)
     layout = kl.parse(mdl, mdx)
 
+    # Deliberately not "skip it if the host already has it". A texture cache
+    # searches Override first, so once a build has been installed the host does
+    # have it, and the next build would silently omit it - producing an output
+    # folder that works on this machine and nowhere else. Exporting is cheap and
+    # idempotent; guessing is not.
     notes: list[str] = []
     for name in sorted({krender.node_texture(layout, n)
                         for n in kparts.mesh_nodes(layout)} - {""}):
-        if host_side.get(name) is not None:
-            continue                       # the host game already has it
         image = donor_side.get(name)
         if image is None:
-            notes.append(f"texture {name!r} is in neither game; it will render grey")
-            continue
+            continue                       # the host game supplies this one
         try:
             from PIL import Image
         except ImportError:
@@ -213,7 +214,7 @@ def _export_donor_textures(args, mdl: bytes, mdx: bytes, out) -> list[str]:
         path = out / f"{name}.tga"
         Image.fromarray(image, mode="RGB").save(path)
         notes.append(f"exported {path.name} ({image.shape[1]}x{image.shape[0]}) "
-                     f"- it lives only in the donor's game")
+                     f"- it comes from the donor's game")
     return notes
 
 
