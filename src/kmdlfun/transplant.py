@@ -204,6 +204,82 @@ def rigs_match(donor_layout, donor_node, host_layout, host_node) -> bool:
     return bool(donor_names) and donor_names <= host_names
 
 
+def merge_into(donor_layout, donor_node, extra_names, host_layout, host_node):
+    """Fold extra donor nodes into one mesh, each bound to the bone it hung from.
+
+    Some parts of a face are separate nodes rather than part of the head: a
+    Quarren's four mouth tentacles are rigid meshes parented to `f_lmc_g`,
+    `f_Llm_g`, `f_rmc_g` and `f_Rlm_g` - the mouth-corner and lower-lip bones -
+    so they swing when it talks.
+
+    A host cannot gain nodes, and its spare ones hang off the wrong bone: all of
+    Carth's facial meshes are parented to `head_g`, so a tentacle carried in his
+    `hair` node follows his whole head instead of his mouth. That is not a
+    placement problem and no amount of aligning fixes it.
+
+    The way through is to stop treating them as separate parts. Their geometry
+    is brought into the head's own space and appended to it, and every appended
+    vertex is weighted **100% to the bone its node was parented to** - which is
+    exactly the motion the rigid parenting gave it. One skinned mesh, the same
+    deformation, and nothing added to the hierarchy.
+
+    Returns (positions, faces, uvs, influences, report).
+    """
+    import numpy as np
+
+    from . import space
+
+    donor_pose = space.rest_pose(donor_layout)
+    base_rest = donor_pose[donor_node.index]
+    base_R = np.asarray(base_rest.rotation, dtype=np.float64)
+    base_T = np.asarray(base_rest.position, dtype=np.float64)
+
+    host_slot = {
+        host_layout.nodes[i].name.lower(): slot
+        for i, slot in enumerate(host_node.bonemap) if slot >= 0
+    }
+
+    geo = ke.extract(donor_layout, donor_node)
+    positions = [tuple(p) for p in geo.positions]
+    faces = [f.vertices for f in geo.faces]
+    uvs = [tuple(u) for u in geo.columns.get("uv1", [])]
+    influences = list(geo.influences)
+    notes: list[str] = []
+
+    for name in extra_names:
+        try:
+            extra = donor_layout.node_by_name(name)
+        except KeyError:
+            notes.append(f"{name!r} is not a node on the donor")
+            continue
+        bone = (donor_layout.nodes[extra.parent].name
+                if extra.parent is not None else "")
+        slot = host_slot.get(bone.lower())
+        if slot is None:
+            notes.append(
+                f"{name} hangs from {bone!r}, which the host has no bone for; skipped"
+            )
+            continue
+
+        eg = ke.extract(donor_layout, extra)
+        rest = donor_pose[extra.index]
+        R = np.asarray(rest.rotation, dtype=np.float64)
+        T = np.asarray(rest.position, dtype=np.float64)
+        # extra node space -> donor model space -> the head node's own space
+        world = np.asarray(eg.positions, dtype=np.float64) @ R.T + T
+        local = (world - base_T) @ base_R
+
+        offset = len(positions)
+        positions.extend(tuple(float(c) for c in v) for v in local)
+        faces.extend(tuple(i + offset for i in f.vertices) for f in eg.faces)
+        if uvs:
+            uvs.extend(tuple(u) for u in eg.columns.get("uv1", [(0.0, 0.0)] * len(local)))
+        influences.extend([[kmdx.Influence(slot, 1.0)]] * len(local))
+        notes.append(f"merged {name} ({len(local)} verts) bound to {bone}")
+
+    return positions, faces, uvs, influences, notes
+
+
 def model_alignment(donor_layout, donor_node, host_layout, host_node):
     """The model-space shift that puts a donor part where the host's part sits.
 
@@ -237,8 +313,14 @@ def to_host_space(
     scale: float = 1.0,
     place: bool = False,
     model_offset: tuple[float, float, float] | None = None,
+    override=None,
 ) -> tuple[ObjMesh, Alignment]:
-    """Express a donor node's geometry in the host node's own frame."""
+    """Express a donor node's geometry in the host node's own frame.
+
+    `override` supplies (positions, faces, uvs) already in the donor node's own
+    space - what `merge_into` produces - so a mesh built from several donor
+    nodes takes exactly the same route as one read straight off a single node.
+    """
     donor_geo = ke.extract(donor_layout, donor_node)
     host_geo = ke.extract(host_layout, host_node)
 
@@ -260,11 +342,12 @@ def to_host_space(
     # places relative to its head, rather than each being centred on whichever
     # unrelated node of Carth's is carrying it.
     shift = model_offset or (0.0, 0.0, 0.0)
+    source_positions = override[0] if override else donor_geo.positions
     moved = [
         host_rest.to_local(
             tuple(c + shift[i] for i, c in enumerate(to_model(donor_rest, v)))
         )
-        for v in donor_geo.positions
+        for v in source_positions
     ]
 
     host_lo, host_hi = _bounds(host_geo.positions)
@@ -273,11 +356,6 @@ def to_host_space(
     donor_size = tuple(donor_hi[i] - donor_lo[i] for i in range(3))
     host_mid = [(host_hi[i] + host_lo[i]) / 2 for i in range(3)]
     donor_mid = [(donor_hi[i] + donor_lo[i]) / 2 for i in range(3)]
-    alignment = Alignment(
-        host_size=host_size,
-        donor_size=donor_size,
-        offset=tuple(donor_mid[i] - host_mid[i] for i in range(3)),
-    )
 
     if place and not fit:
         # Move it, do not resize it. Fitting exists because a raw donor often
@@ -309,13 +387,31 @@ def to_host_space(
             tuple(host_mid[i] + (v[i] - donor_mid[i]) * f for i in range(3)) for v in moved
         ]
 
+    # Measured after any placing or fitting, so the reported drift is where the
+    # part ends up rather than where it started. Reporting the raw offset was
+    # actively misleading: a correctly placed merge still showed "drift 1.529".
+    final_lo, final_hi = _bounds(moved)
+    final_mid = [(final_hi[i] + final_lo[i]) / 2 for i in range(3)]
+    alignment = Alignment(
+        host_size=host_size,
+        donor_size=tuple(final_hi[i] - final_lo[i] for i in range(3)),
+        offset=tuple(final_mid[i] - host_mid[i] for i in range(3)),
+    )
+
     mesh = ObjMesh(name=donor_node.name)
     mesh.positions = [tuple(v) for v in moved]
-    mesh.faces = [f.vertices for f in donor_geo.faces]
-    mesh.materials = [f.material for f in donor_geo.faces]
-    if "uv1" in donor_geo.columns:
-        mesh.uvs = [tuple(t) for t in donor_geo.columns["uv1"]]
-    if "normal" in donor_geo.columns:
+    if override:
+        mesh.faces = list(override[1])
+        mesh.uvs = list(override[2])
+        mesh.materials = [donor_geo.faces[0].material if donor_geo.faces else 1] * len(
+            mesh.faces
+        )
+    else:
+        mesh.faces = [f.vertices for f in donor_geo.faces]
+        mesh.materials = [f.material for f in donor_geo.faces]
+        if "uv1" in donor_geo.columns:
+            mesh.uvs = [tuple(t) for t in donor_geo.columns["uv1"]]
+    if "normal" in donor_geo.columns and not override:
         # Normals are directions: rotate, never translate.
         def rotate(rest, v, transpose=False):
             if transpose:
@@ -408,6 +504,7 @@ def transplant_node(
     scale: float = 1.0,
     place: bool = False,
     model_offset: tuple[float, float, float] | None = None,
+    merge: list[str] | None = None,
     max_influences: int = 4,
     reshape: bool = False,
     with_texture: bool = False,
@@ -435,10 +532,22 @@ def transplant_node(
         result.error = problem
         return host_mdl, host_mdx, result
 
+    # Extra donor nodes are folded in before anything is moved, so the whole
+    # face travels as one mesh and carries the weights that go with it.
+    override = None
+    merged_influences = None
+    if merge:
+        positions, faces, uvs, merged_influences, notes = merge_into(
+            donor_layout, donor_node, merge, host_layout, host_node
+        )
+        override = (positions, faces, uvs)
+        result.warnings.extend(notes)
+
     try:
         mesh, alignment = to_host_space(
             donor_layout, donor_node, host_layout, host_node,
             fit=fit, scale=scale, place=place, model_offset=model_offset,
+            override=override,
         )
         result.alignment = alignment
         result.warnings.extend(alignment.notes())
@@ -494,7 +603,14 @@ def transplant_node(
                     f"took the donor's geometry, UVs and texture {new_texture!r} whole"
                 )
 
-        if (not reshape and host_node.is_skin and donor_node.is_skin
+        if merged_influences is not None and len(merged_influences) == len(mesh.positions):
+            # merge_into already expressed these in the host's slots.
+            host_influences = merged_influences
+            result.warnings.append(
+                f"one skinned mesh of {len(mesh.positions)} vertices, "
+                f"{len({i.bone_slot for f in host_influences for i in f})} bones"
+            )
+        elif (not reshape and host_node.is_skin and donor_node.is_skin
                 and rigs_match(donor_layout, donor_node, host_layout, host_node)):
             donor_geo = ke.extract(donor_layout, donor_node)
             if len(donor_geo.influences) == len(mesh.positions):

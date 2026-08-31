@@ -360,3 +360,78 @@ def test_recentring_each_part_separately_would_scatter_them(k2, pair):
         "recentring each part on its own host node must change the spacing, "
         "or this test proves nothing"
     )
+
+
+# --- folding rigid parts into a skinned mesh ---------------------------------
+
+
+def test_merged_parts_are_bound_to_the_bone_they_hung_from(k2, pair):
+    """A Quarren's mouth tentacles are rigid meshes parented to its lip bones,
+    so they swing when it talks. Carried in one of Carth's spare nodes they
+    would follow his whole head instead, because every facial mesh of his hangs
+    off `head_g` - which is a parenting problem no amount of placing fixes.
+
+    Folding them into the head and weighting each 100% to its old parent bone
+    reproduces exactly the motion the parenting gave them.
+    """
+    from kmdlfun import transplant as ktp
+    from kmdlswap import weights as kw
+
+    host = kl.parse(*pair("p_carthh"))
+    hn = host.node_by_name("Head")
+    donor = kl.parse(*k2.read("n_quarren"))
+    dn = donor.node_by_name("head")
+
+    tents = ["tent01", "tent02", "tent03", "tent04"]
+    positions, faces, uvs, influences, notes = ktp.merge_into(
+        donor, dn, tents, host, hn
+    )
+
+    base = ke.extract(donor, dn)
+    assert len(positions) > len(base.positions), "nothing was merged"
+    assert len(influences) == len(positions)
+    assert len(uvs) == len(positions)
+    assert not kw.check(influences)
+    assert max(v for f in faces for v in f) < len(positions)
+
+    slot_to_name = {s: host.nodes[i].name for i, s in enumerate(hn.bonemap) if s >= 0}
+    expected = {"tent01": "f_lmc_g", "tent02": "f_Llm_g",
+                "tent03": "f_rmc_g", "tent04": "f_Rlm_g"}
+    at = len(base.positions)
+    for name in tents:
+        count = donor.node_by_name(name).vertex_count
+        block = influences[at:at + count]
+        assert all(len(i) == 1 and i[0].weight == 1.0 for i in block), (
+            f"{name} must be rigidly bound, not blended"
+        )
+        got = {slot_to_name[i[0].bone_slot] for i in block}
+        assert got == {expected[name]}, f"{name} bound to {got}"
+        at += count
+
+
+def test_a_part_whose_bone_the_host_lacks_is_skipped_and_reported(k2, pair):
+    """Never bind it to something arbitrary just to keep it."""
+    from kmdlfun import transplant as ktp
+
+    host = kl.parse(*pair("p_carthh"))
+    donor = kl.parse(*k2.read("n_quarren"))
+    # `cape` hangs off a torso bone that a head model has no equivalent of.
+    _, _, _, _, notes = ktp.merge_into(
+        donor, donor.node_by_name("head"), ["cape"], host, host.node_by_name("Head")
+    )
+    assert any("skipped" in n for n in notes), notes
+
+
+def test_drift_reports_where_the_part_ends_up(k2, pair):
+    """It used to be measured before placing, so a correctly aligned merge
+    still reported a drift of 1.5 - which misled me while building this."""
+    from kmdlfun import transplant as ktp
+
+    host = kl.parse(*pair("p_carthh"))
+    donor = kl.parse(*k2.read("n_quarren"))
+    _, aligned = ktp.to_host_space(donor, donor.node_by_name("head"),
+                                   host, host.node_by_name("Head"), place=True)
+    _, raw = ktp.to_host_space(donor, donor.node_by_name("head"),
+                               host, host.node_by_name("Head"))
+    assert aligned.drift < 1e-6, f"placed part should report no drift, got {aligned.drift}"
+    assert raw.drift > 1.0, "an unplaced donor really is far away"
