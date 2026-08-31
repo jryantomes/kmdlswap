@@ -79,3 +79,72 @@ the tool now decodes and writes any texture the host game lacks beside the model
 Writing. Every path that produces a file produces a K1 file, because the host is
 always a K1 model. Making K2 a *host* would need the writer to emit the longer
 trimesh header, which nothing here does and nothing here has tested.
+
+## What the community says, and what the corpus says (2026-08-31)
+
+Searched for prior art on K2 → K1 porting after the first cross-game head went
+in. The community has done this for years, and the standard account is worth
+knowing - along with where our measurements disagree with it.
+
+### The documented approach, and why ours differs
+
+The usual route ([Deadly Stream](https://deadlystream.com/topic/8173-kotor-2-head-to-kotor-1/))
+is to convert the *whole model* with MDLEdit: load it with the K2 button
+selected, switch to K1, save as ASCII, reload, save as binary, then register it
+in `appearance.2da`, `heads.2da` and `portraits.2da`. The head keeps its own
+K2 skeleton, and the K1 supermodel then has to drive it.
+
+That is where their trouble starts. The reported symptoms are specific:
+
+> the facial bones in K1 & K2 being different ... mouths wide open or grinning
+> like an idiot, eyes drooping in cutscenes
+
+and separately, lips that do not move in dialogue with a seam down the middle of
+the face. The recommended fix is to move the head "over to a set of KOTOR 1
+bones", which needs the destination game's supermodel present during conversion.
+
+**We do not have that problem, because we never bring the skeleton.** The host
+keeps its own hierarchy, bones and animations; only geometry crosses, and the
+donor's weights are remapped into the host's bone slots *by name*. The community's
+recommended fix is our default.
+
+### Where the corpus disagrees with the lore
+
+"The facial bones in K1 & K2 being different" is the stated blocker. Measured, it
+does not hold up as a difference *between games*.
+
+Bone positions relative to `head_g`, which removes the constant model-origin
+offset between a head-only model and a full body:
+
+| comparison | mean | max |
+|---|---|---|
+| K1 Carth vs **K2** Quarren | 0.0387 | 0.0811 |
+| K1 Carth vs **K1** Bith | 0.0582 | 0.0707 |
+| **K1** `n_bith` vs **K2** `n_bith` | **0.000000** | **0.000000** |
+
+The same character shipped in both games has a **bit-identical** facial rig. And
+across 49 K1 heads compared with Carth's own layout, the median worst-bone
+difference is 0.0299, the 90th percentile 0.0866 and the worst 0.1165 - so the
+K2 Quarren's 0.0811 sits comfortably inside the variation K1 already has among
+its *own* heads.
+
+Facial bones do differ head to head, because each is placed to suit a face. They
+do not differ because of the game. What breaks a whole-model port is the
+skeleton and supermodel travelling with the mesh, not the bone layout itself.
+
+### Confirmed independently
+
+- **332 vs 340 bytes.** The community records the size difference we measured,
+  though as "the model root node size" rather than the trimesh header.
+- **K2-only mesh properties.** KotORBlender is documented as having found ten
+  missing trimesh properties, four of them K2-only - consistent with 8 extra
+  bytes carrying a small number of extra fields.
+- The format thread itself does **not** document where those bytes sit, so the
+  field-by-field `n_bith` comparison in this report still appears to be new.
+
+### One thing to remember for player heads
+
+K1 wants **five** dark-side texture stages where K2 ships **three**, so a ported
+*player* head needs two intermediate skins blended by hand. Irrelevant to a
+companion swap, which uses one texture, but it would bite immediately on a
+playable head.
