@@ -119,10 +119,29 @@ def test_named_npcs_are_read_from_the_body_they_wear(looked):
 # --- refusing to guess ------------------------------------------------------
 
 
-def test_a_head_worn_by_both_is_reported_as_neither(look_of):
-    """`n_darthrevanh` is the face of male and female Revan alike. Picking one
-    would be a coin toss presented as data."""
-    assert look_of("n_darthrevanh") == "unknown"
+def test_a_head_worn_by_both_is_reported_as_both(look_of):
+    """Revan is the player character and can be either, so one head model is
+    worn by `N_DarthRevanM` and `N_DarthRevanF` alike.
+
+    That is not missing evidence, so calling it unknown would be wrong in a way
+    that costs something: filtering to female would hide a head that genuinely
+    is a female Revan.
+    """
+    assert look_of("n_darthrevanh") == who.EITHER
+    assert who.matches(who.EITHER, "male")
+    assert who.matches(who.EITHER, "female")
+    assert not who.matches(who.EITHER, "droid")
+
+
+def test_a_male_head_reused_on_a_female_body_is_still_male(look_of):
+    """Two other heads are worn by both bodies and neither is ambiguous.
+
+    `comm_w_m` is a male commoner head the game also hangs on `L_RepOffF`, and
+    `pmhc02` is a player male head reused for `N_JediCounF`. Their own name and
+    `portraits.2da` say male, and both are consulted before the body is.
+    """
+    for name in ("comm_w_m", "pmhc02"):
+        assert look_of(name) == "male", name
 
 
 def test_a_head_with_no_evidence_stays_unknown(looked):

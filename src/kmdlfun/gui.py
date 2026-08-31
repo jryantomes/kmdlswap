@@ -273,7 +273,7 @@ class App(ttk.Frame):
         ttk.Label(game, text="Show").pack(side="left", padx=(12, 4))
         self.donor_look = tk.StringVar(value=ANYONE)
         ttk.Combobox(game, textvariable=self.donor_look, width=10, state="readonly",
-                     values=[ANYONE, "male", "female", "droid", "unknown"],
+                     values=[ANYONE, "male", "female", "droid", "either", "unknown"],
                      ).pack(side="left")
         self.donor_look.trace_add("write", lambda *_: self._refresh_donors())
         self.donor_game_note = ttk.Label(game, text="", foreground="#666")
@@ -998,8 +998,12 @@ class App(ttk.Frame):
         wanted = self.donor_look.get()
         if wanted == ANYONE:
             return models
+        from . import who
+
         looks = self._donor_looks(path)
-        return [m for m in models if looks.get(m, "unknown") == wanted]
+        # `who.matches` rather than equality, so a head that is deliberately
+        # both - Revan's - shows up under male and under female alike.
+        return [m for m in models if who.matches(looks.get(m, "unknown"), wanted)]
 
     def _donor_install(self) -> str:
         """Where donors are coming from, which game depends on the radio."""

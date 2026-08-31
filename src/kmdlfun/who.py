@@ -27,6 +27,11 @@ are. Substring matching is a trap here - "Malak" contains "mal" - so only
 whole-token patterns count, and anything still unresolved stays `unknown`
 rather than being guessed.
 
+"Either" is a real answer, not a shrug. Revan is the player character and can
+be male or female, so one head model is worn by both bodies; filtering to
+female includes it, because it genuinely is a female Revan's face. `unknown` is
+kept for the different case of having no evidence at all.
+
 What is deliberately *not* used: the supermodel. It looks like it should say -
 until you notice `S_Female02` is the supermodel of `p_carthh`, `n_dustilh` and
 `pmhc01`, all of them male. It names an animation set, not a person.
@@ -39,9 +44,21 @@ import re
 MALE = "male"
 FEMALE = "female"
 DROID = "droid"
+# Not "we could not tell" but "it is deliberately both". Revan is the player
+# character and can be either, so one head model is worn by `N_DarthRevanM` and
+# `N_DarthRevanF` alike. Filtering to male or to female both include these,
+# because such a head genuinely is a valid choice for either.
+EITHER = "either"
 UNKNOWN = "unknown"
 
-LOOKS = (MALE, FEMALE, DROID, UNKNOWN)
+LOOKS = (MALE, FEMALE, EITHER, DROID, UNKNOWN)
+
+
+def matches(look: str, wanted: str) -> bool:
+    """Does a model of this look belong in a list filtered to `wanted`?"""
+    if wanted in (MALE, FEMALE) and look == EITHER:
+        return True
+    return look == wanted
 
 
 def is_droid(layout) -> bool:
@@ -131,9 +148,15 @@ def _from_body(install) -> dict[str, str]:
     Vrook all wear `N_CommM`. This reaches the named NPCs, which nothing else
     does - no table records their sex directly.
 
-    A head worn by both is reported as neither. `n_darthrevanh` is worn with
-    `N_DarthRevanM` and `N_DarthRevanF`, because it is the same face either
-    way, and answering "male" there would be a coin toss dressed up as data.
+    A head worn by both bodies is reported as `EITHER`, not as a guess and not
+    as unknown: `n_darthrevanh` is worn with `N_DarthRevanM` and
+    `N_DarthRevanF` because Revan is the player character and can be either,
+    so that head really is a valid choice for both.
+
+    That reading is only trusted when nothing better has an opinion. Two other
+    heads are worn by both - `comm_w_m` and `pmhc02` - and both are male heads
+    the game reused on a female NPC body. Their own name and `portraits.2da`
+    say male, and those are consulted first.
     """
     try:
         from pykotor.extract.installation import Installation
@@ -169,7 +192,8 @@ def _from_body(install) -> dict[str, str]:
                 seen.setdefault(head_of[int(nh)], set()).add(
                     MALE if match.group(1) == "M" else FEMALE
                 )
-        return {head: next(iter(s)) for head, s in seen.items() if len(s) == 1}
+        return {head: (next(iter(s)) if len(s) == 1 else EITHER)
+                for head, s in seen.items()}
     except Exception:  # noqa: BLE001
         return {}
 
@@ -231,10 +255,16 @@ def looks(install, names=None, *, library=None, progress=None) -> dict[str, str]
         except Exception:  # noqa: BLE001
             pass
 
+        # A head worn by both bodies is only "either" when nothing better has
+        # an opinion. `comm_w_m` and `pmhc02` are worn by a female body too,
+        # but they are male heads the game reused - and their own name, or
+        # `portraits.2da`, says so plainly.
+        body = bodies.get(key)
         out[name] = (curated.get(key)
                      or portraits.get(key)
-                     or bodies.get(key)
+                     or (body if body != EITHER else None)
                      or _from_name(key)
+                     or body
                      or UNKNOWN)
     return out
 
