@@ -18,6 +18,14 @@ DEFAULT_INSTALLS = [
     r"C:\GOG Games\Star Wars - KotOR",
 ]
 
+# KOTOR 2 is a *reading* capability - a source of donors. Nothing writes a K2
+# file. Override with KOTOR2_PATH.
+K2_INSTALLS = [
+    r"E:\SteamLibrary\steamapps\common\Knights of the Old Republic II",
+    r"C:\Program Files (x86)\Steam\steamapps\common\Knights of the Old Republic II",
+    r"C:\GOG Games\Star Wars - KotOR2",
+]
+
 
 def find_install() -> Path | None:
     candidates = [os.environ["KOTOR1_PATH"]] if "KOTOR1_PATH" in os.environ else DEFAULT_INSTALLS
@@ -56,3 +64,26 @@ def pair(resources):
         return entry["mdl"].data(), entry["mdx"].data()
 
     return _get
+
+
+def find_k2() -> Path | None:
+    for c in [os.environ["KOTOR2_PATH"]] if "KOTOR2_PATH" in os.environ else K2_INSTALLS:
+        p = Path(c)
+        if (p / "chitin.key").is_file():
+            return p
+    return None
+
+
+@pytest.fixture(scope="session")
+def k2_path() -> Path:
+    p = find_k2()
+    if p is None:
+        pytest.skip("no KOTOR 2 install found (set KOTOR2_PATH)")
+    return p
+
+
+@pytest.fixture(scope="session")
+def k2(k2_path):
+    from kmdlfun.library import ModelLibrary
+
+    return ModelLibrary(str(k2_path))
