@@ -433,3 +433,94 @@ def test_ranking_without_a_host_says_so_rather_than_failing(app):
     assert str(app.rank_btn.cget("state")) == "normal", (
         "the button must not be left disabled after a refusal"
     )
+
+
+def head_tab(a):
+    for i in range(len(a.tabs.tabs())):
+        if a.tabs.tab(i, "text") == "Custom head":
+            a.tabs.select(i)
+            return
+    raise AssertionError("no Custom head tab")
+
+
+def test_a_unified_body_can_be_given_a_head_by_naming_the_node(app, tmp_path):
+    """HK-47's donor list was empty and the app offered no way in.
+
+    Whole-model pairing is right for two models of the same kind and useless
+    here, so a single host node can be named instead. The list then asks only
+    "does this donor have a head worth taking".
+    """
+    from kmdlfun.gui import WHOLE_MODEL
+
+    transplant_tab(app)
+    app.out_dir.set(str(tmp_path))
+    app.host.set("p_hk47")
+    app._refresh_donors()
+
+    assert app.target_node.get() == WHOLE_MODEL
+    assert not list(app.donor_box.cget("values")), (
+        "whole-model pairing should still find nothing - that rule is correct"
+    )
+    assert "head" in list(app.target_box.cget("values"))
+
+    app.target_node.set("head")
+    app._refresh_donors()
+    offered = list(app.donor_box.cget("values"))
+    assert len(offered) > 20, "naming the node should offer every head donor"
+    assert "one node of" in app.target_note.cget("text")
+
+    carth = [v for v in offered if v.startswith("p_carthh")]
+    assert carth, offered[:5]
+    app.donor.set(carth[0])
+    # Deliberately on: on a unified body this would hide the whole droid.
+    app.opt_hide.set(True)
+    app.opt_fit.set(True)
+    app._start(preview=False)
+    pump(app, seconds=12.0)
+
+    log = app.log.get("1.0", "end")
+    assert "main thread is not in main loop" not in log
+    assert "ERROR" not in log, log[-500:]
+    assert "the rest of p_hk47 is untouched" in log
+    assert "donor has no:" not in log, (
+        "listing 44 unmatched body meshes is noise when filling one node"
+    )
+
+    built = list(tmp_path.glob("*/p_hk47.mdl"))
+    assert built, list(tmp_path.iterdir())
+
+    # The body survived: hiding was suppressed for a node-targeted build.
+    from kmdlswap import layout as kl
+    from kmdlfun import parts as kparts
+
+    mdl = built[0].read_bytes()
+    mdx = built[0].with_suffix(".mdx").read_bytes()
+    assert len(kparts.mesh_nodes(kl.parse(mdl, mdx))) > 40, (
+        "HK-47 came out as a floating head - hide was not suppressed"
+    )
+
+
+def test_the_app_can_check_a_custom_head_pack(app):
+    """Head packs were command line only, so the app could not do the thing the
+    project was built to do. Checking must write nothing and refuse a bad pack
+    with the reason."""
+    import os
+
+    if not os.path.isdir("packs/scanhead"):
+        pytest.skip("the scanned head pack is not in this checkout")
+
+    head_tab(app)
+    app.pack_dir.set("packs/scanhead")
+    app.head_host.set("p_hk47")
+    app._refresh_head_nodes()
+
+    assert app.head_node.get() == "head", "the head node should be picked for you"
+    assert "not skinned" in app.head_node_note.cget("text")
+
+    app._head_check()
+    pump(app, seconds=30.0)
+    log = app.log.get("1.0", "end")
+
+    assert "main thread is not in main loop" not in log
+    assert "REJECTED" in log
+    assert "solid" in log, "it must say which check failed"
