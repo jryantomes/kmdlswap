@@ -130,6 +130,13 @@ Brand new. Open the Transplant tab and pick a host.
 - [ ] **Into** - with `p_hk47` as host it should say "pairs with nothing
       whole-model, choose 'head'". Choosing `head` fills the list.
 - [ ] **Donor from: KOTOR 2** - the list should repopulate from K2, with faces.
+- [ ] **Preview** with a head-model host draws the head **on its body**, before
+      and after, at one shared scale. That is the view that shows whether a
+      head is the right size and sits on the neck, so it is worth a look before
+      any of the in-game tests above - a head that is obviously wrong here does
+      not need loading to find out.
+- [ ] Preview with `p_hk47` as host draws HK-47 alone. It *is* its own body, so
+      there is nothing to put it on.
 
 ## 10. The Custom head tab
 
