@@ -51,6 +51,12 @@ def main(argv: list[str] | None = None) -> int:
                          "into a KOTOR 1 host, say. Only the donor's geometry "
                          "crosses over; the host is written in its own format")
     tp.add_argument("--node", nargs="*", help="host node(s); default every matching node")
+    tp.add_argument("--pair", action="append", default=[], metavar="HOST=DONOR",
+                    help="put a named donor node into a named host node, even "
+                         "when the names differ. A host cannot gain nodes, but "
+                         "it usually has spare ones - Carth's hair and eyelids "
+                         "can carry a Quarren's mouth tentacles. Repeatable; the "
+                         "first pair anchors the alignment for the rest")
     tp.add_argument("--out", required=True)
     tp.add_argument("--fit", action="store_true", help="scale the donor part to the host part's size")
     tp.add_argument("--place", action="store_true",
@@ -497,7 +503,24 @@ def _transplant(args) -> int:
         print(f"  donor is a {donor_layout.game} model, host is "
               f"{host_layout.game}: geometry only")
 
-    if args.node:
+    if args.pair:
+        hosts = {n.name.lower(): n.name for n in ktp.kparts.mesh_nodes(
+            host_layout, visible_only=False)}
+        donors = {n.name.lower(): n.name for n in ktp.kparts.mesh_nodes(donor_layout)}
+        pairs = []
+        for spec in args.pair:
+            if "=" not in spec:
+                print(f"kmdlfun: --pair wants HOST=DONOR, got {spec!r}", file=sys.stderr)
+                return 1
+            h, d = (s.strip() for s in spec.split("=", 1))
+            if h.lower() not in hosts:
+                print(f"kmdlfun: {args.host} has no node {h!r}", file=sys.stderr)
+                return 1
+            if d.lower() not in donors:
+                print(f"kmdlfun: {args.donor} has no node {d!r}", file=sys.stderr)
+                return 1
+            pairs.append((hosts[h.lower()], donors[d.lower()]))
+    elif args.node:
         donors = {n.name.lower(): n.name for n in ktp.kparts.mesh_nodes(donor_layout)}
         pairs = []
         for wanted in args.node:
@@ -535,11 +558,27 @@ def _transplant(args) -> int:
     elif left:
         print(f"  will hide (donor has no such node): {', '.join(left)}")
         print()
+    # With explicit pairs the parts have to keep their positions relative to one
+    # another - four tentacles centred individually on four unrelated host nodes
+    # would land in four wrong places. So the first pair anchors a single shift,
+    # worked out in model space, and every part moves by the same amount.
+    model_offset = None
+    if args.pair and len(pairs) > 1 and not args.fit:
+        anchor_host, anchor_donor = pairs[0]
+        model_offset = ktp.model_alignment(
+            donor_layout, donor_layout.node_by_name(anchor_donor),
+            host_layout, host_layout.node_by_name(anchor_host),
+        )
+        print(f"  aligned on {anchor_host} <- {anchor_donor}; every part moves "
+              f"by the same amount")
+        print()
+
     results = []
     for host_node, donor_node in pairs:
         mdl2, mdx2, r = ktp.transplant_node(
             mdl, mdx, donor_layout, args.donor, host_node, donor_node,
             fit=args.fit, scale=args.scale, place=args.place,
+            model_offset=model_offset,
             max_influences=args.max_influences, reshape=args.reshape,
             with_texture=args.with_texture,
         )

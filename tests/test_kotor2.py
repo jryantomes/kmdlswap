@@ -259,3 +259,104 @@ def test_place_moves_without_resizing(k2, pair):
     host_mid = np.asarray(ke.extract(host, hn).positions).mean(axis=0)
     assert np.linalg.norm(np.asarray(native.positions).mean(axis=0) - host_mid) < \
         np.linalg.norm(np.asarray(raw.positions).mean(axis=0) - host_mid)
+
+
+# --- borrowing parts a host has no name for ----------------------------------
+
+
+def to_model(host, node_name, mesh):
+    """A host node's local coordinates back in host model space.
+
+    `to_host_space` returns each part in the local space of whichever host node
+    is carrying it, so two parts cannot be compared directly - a head in Head's
+    frame and a tentacle in hair's frame are numbers about different origins.
+    """
+    import numpy as np
+
+    from kmdlfun import space
+
+    rest = space.rest_pose(host)[host.node_by_name(node_name).index]
+    R = np.asarray(rest.rotation)
+    T = np.asarray(rest.position)
+    return np.asarray(mesh.positions) @ R.T + T
+
+
+def centre_of(points):
+    import numpy as np
+
+    P = np.asarray(points)
+    return (P.min(axis=0) + P.max(axis=0)) / 2.0
+
+
+def test_a_shared_alignment_keeps_parts_in_their_relative_places(k2, pair):
+    """A Quarren's mouth tentacles are four separate nodes, and Carth has no
+    node called `tent01`. He does have spare facial nodes, and vertex counts are
+    free, so they can carry the tentacles - but only if every part moves by the
+    *same* amount. Centred individually on four unrelated host nodes they would
+    land in four wrong places.
+    """
+    import numpy as np
+
+    from kmdlfun import transplant as ktp
+
+    host = kl.parse(*pair("p_carthh"))
+    donor = kl.parse(*k2.read("n_quarren"))
+    offset = ktp.model_alignment(donor, donor.node_by_name("head"),
+                                 host, host.node_by_name("Head"))
+
+    head, _ = ktp.to_host_space(donor, donor.node_by_name("head"),
+                                host, host.node_by_name("Head"), model_offset=offset)
+    tent, _ = ktp.to_host_space(donor, donor.node_by_name("tent01"),
+                                host, host.node_by_name("hair"), model_offset=offset)
+
+    head_c = centre_of(to_model(host, "Head", head))
+    tent_c = centre_of(to_model(host, "hair", tent))
+
+    # The anchor lands exactly on the part it replaces.
+    assert np.allclose(head_c, centre_of(to_model(
+        host, "Head", type("M", (), {"positions": ke.extract(
+            host, host.node_by_name("Head")).positions})())), atol=1e-6)
+
+    # The tentacle keeps the spacing it had on the donor, in model space.
+    donor_gap = float(np.linalg.norm(
+        centre_of(to_model(donor, "tent01", type("M", (), {"positions": ke.extract(
+            donor, donor.node_by_name("tent01")).positions})()))
+        - centre_of(to_model(donor, "head", type("M", (), {"positions": ke.extract(
+            donor, donor.node_by_name("head")).positions})()))))
+    got = float(np.linalg.norm(tent_c - head_c))
+    assert got == pytest.approx(donor_gap, abs=1e-6), (
+        f"spacing changed: donor {donor_gap:.4f}, built {got:.4f}"
+    )
+    assert 0.02 < got < 0.5, f"a tentacle should sit near the face, got {got:.3f}"
+
+
+def test_recentring_each_part_separately_would_scatter_them(k2, pair):
+    """The failure the shared alignment exists to prevent."""
+    import numpy as np
+
+    from kmdlfun import transplant as ktp
+
+    host = kl.parse(*pair("p_carthh"))
+    donor = kl.parse(*k2.read("n_quarren"))
+
+    scattered = []
+    for host_name, donor_name in (("Head", "head"), ("hair", "tent01")):
+        mesh, _ = ktp.to_host_space(donor, donor.node_by_name(donor_name),
+                                    host, host.node_by_name(host_name), place=True)
+        scattered.append(centre_of(to_model(host, host_name, mesh)))
+
+    offset = ktp.model_alignment(donor, donor.node_by_name("head"),
+                                 host, host.node_by_name("Head"))
+    aligned = []
+    for host_name, donor_name in (("Head", "head"), ("hair", "tent01")):
+        mesh, _ = ktp.to_host_space(donor, donor.node_by_name(donor_name),
+                                    host, host.node_by_name(host_name),
+                                    model_offset=offset)
+        aligned.append(centre_of(to_model(host, host_name, mesh)))
+
+    gap_scattered = float(np.linalg.norm(scattered[1] - scattered[0]))
+    gap_aligned = float(np.linalg.norm(aligned[1] - aligned[0]))
+    assert abs(gap_scattered - gap_aligned) > 1e-3, (
+        "recentring each part on its own host node must change the spacing, "
+        "or this test proves nothing"
+    )
