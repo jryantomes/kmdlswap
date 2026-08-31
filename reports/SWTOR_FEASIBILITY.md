@@ -36,9 +36,16 @@ Tripo head took, which worked.
 Two things from our own corpus are worth handing back to that community:
 
 * **16 is the size of the `bone_indices` table in the skin header, not a cap on
-  what a mesh may use.** Ten vanilla K1 meshes use **17** bones, including
-  `n_yoda:Head`, `n_trandoshan:Head` and `p_juhanibb:torso`. The engine reads the
-  bonemap, not the fixed table. Dropping two bones may not have been necessary.
+  what a mesh may use.** Twenty-one vanilla K1 meshes use **17** bones -
+  `c_brith:Brith_mesh`, `c_ithorian:torso`, `c_iriaz:IriazUpr`,
+  `c_terantanak:Torso`, `l_selkath:head` and a run of `m01aa_*` cutscene heads
+  among them. The engine reads the bonemap, not the fixed table, so dropping two
+  bones may not have been necessary.
+
+  (An earlier draft of this said ten meshes and named Yoda, a Trandoshan and
+  Juhani's torso. That was wrong on both the count and every example; the
+  figure above is measured across all 2,832 models and agrees with the skinning
+  census in `SKINNING_FINDINGS.md`.)
 * The other reported symptoms - lips not moving, a seam down the middle of the
   face - are what a whole-model port produces when the K2/TOR skeleton meets a
   K1 supermodel. See `KOTOR2_FINDINGS.md`; the same class of problem, same cause.
