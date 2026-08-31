@@ -18,6 +18,7 @@ from __future__ import annotations
 import queue
 import threading
 import traceback
+from dataclasses import dataclass
 from pathlib import Path
 
 import tkinter as tk
@@ -33,6 +34,23 @@ DEFAULT_INSTALLS = [
     r"C:\Program Files (x86)\Steam\steamapps\common\swkotor",
     r"C:\GOG Games\Star Wars - KotOR",
 ]
+
+
+@dataclass(frozen=True)
+class TransplantSettings:
+    """A snapshot of the tab's controls, taken on the main thread.
+
+    Tk variables must not be read from a worker; this is what gets handed over
+    instead. Frozen so a worker cannot pretend to change a setting mid-run.
+    """
+
+    install: str
+    out_dir: str
+    fit: bool
+    scale: float
+    reshape: bool
+    with_texture: bool
+    hide: bool
 
 
 def guess_install() -> str:
@@ -182,36 +200,55 @@ class App(ttk.Frame):
 
         opts = ttk.Frame(page)
         opts.grid(row=2, column=0, columnspan=5, sticky="w", pady=(10, 0))
-        self.opt_reshape = tk.BooleanVar(value=True)
+        # Reshape used to be forced on, because a head's vertex count was
+        # thought to be fixed. It is not - that was a stale pointer in our own
+        # writer - so the donor now comes across whole by default, keeping its
+        # own shape, UVs and texture.
+        self.opt_reshape = tk.BooleanVar(value=False)
         self.opt_texture = tk.BooleanVar(value=True)
         self.opt_hide = tk.BooleanVar(value=True)
-        self.opt_fit = tk.BooleanVar(value=False)
-        ttk.Checkbutton(
-            opts, text="Reshape (required for heads)", variable=self.opt_reshape
-        ).grid(row=0, column=0, sticky="w", padx=(0, 14))
+        self.opt_fit = tk.BooleanVar(value=True)
         ttk.Checkbutton(
             opts, text="Take donor's texture", variable=self.opt_texture
-        ).grid(row=0, column=1, sticky="w", padx=(0, 14))
+        ).grid(row=0, column=0, sticky="w", padx=(0, 14))
         ttk.Checkbutton(
             opts, text="Hide parts the donor lacks", variable=self.opt_hide
-        ).grid(row=1, column=0, sticky="w", padx=(0, 14), pady=(4, 0))
+        ).grid(row=0, column=1, sticky="w", padx=(0, 14))
         ttk.Checkbutton(
             opts, text="Fit donor to host's size", variable=self.opt_fit
+        ).grid(row=1, column=0, sticky="w", padx=(0, 14), pady=(4, 0))
+        ttk.Checkbutton(
+            opts, text="Reshape: keep host's topology and UVs instead",
+            variable=self.opt_reshape,
         ).grid(row=1, column=1, sticky="w", pady=(4, 0))
 
+        size = ttk.Frame(page)
+        size.grid(row=3, column=0, columnspan=5, sticky="w", pady=(8, 0))
+        ttk.Label(size, text="Scale").pack(side="left")
+        self.opt_scale = tk.DoubleVar(value=1.0)
+        ttk.Scale(
+            size, from_=0.6, to=1.8, variable=self.opt_scale, orient="horizontal",
+            length=200, command=lambda _=None: self._on_scale_change(),
+        ).pack(side="left", padx=6)
+        self.scale_label = ttk.Label(size, text="1.00x", width=7)
+        self.scale_label.pack(side="left")
         ttk.Label(
-            page,
-            text=(
-                "A skinned mesh in a head model must keep its vertex count, or the "
-                "mouth and eyebrows stop moving in-game. Reshape keeps it."
-            ),
-            wraplength=620,
-            foreground="#a35",
-        ).grid(row=3, column=0, columnspan=5, sticky="w", pady=(8, 0))
+            size,
+            text=("Fit matches the donor's tightest axis, so a donor with different "
+                  "proportions lands smaller than the part it replaces. Nudge it here."),
+            foreground="#666", wraplength=420,
+        ).pack(side="left", padx=(10, 0))
 
         ttk.Button(page, text="Preview", command=lambda: self._start(preview=True)).grid(
             row=4, column=0, sticky="w", pady=(10, 0)
         )
+        ttk.Label(
+            page,
+            text=("Preview reports how solid the donor is. Below 76% - the worst "
+                  "vanilla head - the engine culls the inward-facing parts and the "
+                  "head reads as full of holes, which no amount of fitting fixes."),
+            foreground="#666", wraplength=620,
+        ).grid(row=6, column=0, columnspan=5, sticky="w", pady=(6, 0))
 
     # ---- shared bottom -----------------------------------------------------
 
@@ -246,6 +283,14 @@ class App(ttk.Frame):
         self.preview_textured = tk.BooleanVar(value=True)
         ttk.Checkbutton(
             opts, text="Textured", variable=self.preview_textured,
+        ).pack(side="left", padx=(0, 16))
+        # Off by default so the normal view stays two-sided, which is right for
+        # judging shape. On, it draws only what the engine draws - the one way
+        # to see an inside-out mesh before the game does.
+        self.preview_cull = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            opts, text="Cull backfaces (as the engine draws)",
+            variable=self.preview_cull, command=self._repaint_viewport,
         ).pack(side="left")
 
         ttk.Label(page, text="Highlight").grid(row=2, column=0, sticky="w", pady=(6, 0))
@@ -284,6 +329,10 @@ class App(ttk.Frame):
                   "not proof."),
             foreground="#a35", wraplength=600,
         ).grid(row=6, column=0, columnspan=3, sticky="w", pady=(4, 0))
+
+    def _repaint_viewport(self):
+        self.viewport.cull = self.preview_cull.get()
+        self.viewport.repaint()
 
     def _show_preview(self):
         if self.worker and self.worker.is_alive():
@@ -662,8 +711,24 @@ class App(ttk.Frame):
                     self._say("\n" + c.why_not(host, donor))
                     self._say("Building anyway, but expect little to transfer.")
             self._say(f"\n=== {host} <- {donor}{' (preview)' if preview else ''} ===")
+            # Every Tk variable is read here, on the main thread, and handed to
+            # the worker as plain values. Reading them from the worker happens to
+            # survive while the main loop is spinning and raises "main thread is
+            # not in main loop" when it is not - the effects and preview workers
+            # already take their settings as arguments; this one did not.
+            settings = TransplantSettings(
+                install=self.install.get().strip(),
+                out_dir=self.out_dir.get(),
+                fit=self.opt_fit.get(),
+                scale=self.opt_scale.get(),
+                reshape=self.opt_reshape.get(),
+                with_texture=self.opt_texture.get(),
+                hide=self.opt_hide.get(),
+            )
             self.worker = threading.Thread(
-                target=self._transplant_work, args=(host, donor, preview), daemon=True
+                target=self._transplant_work,
+                args=(host, donor, preview, settings),
+                daemon=True,
             )
         self.worker.start()
 
@@ -679,7 +744,7 @@ class App(ttk.Frame):
             self.events.put(("error", f"{type(exc).__name__}: {exc}\n"
                                       f"{traceback.format_exc(limit=3)}"))
 
-    def _transplant_work(self, host, donor, preview):
+    def _transplant_work(self, host, donor, preview, cfg):
         try:
             from kmdlswap import layout as kl
             from kmdlswap import validate as kv
@@ -689,7 +754,7 @@ class App(ttk.Frame):
             from . import visibility as kvis
             from .library import ModelLibrary
 
-            lib = ModelLibrary(self.install.get().strip())
+            lib = ModelLibrary(cfg.install)
             for name in (host, donor):
                 if not lib.has(name):
                     self.events.put(("error", f"no model named {name!r} in that install"))
@@ -710,16 +775,16 @@ class App(ttk.Frame):
             left = [n.name for n in kparts.mesh_nodes(host_layout) if n.name not in taken]
             if left:
                 lines.append(f"donor has no: {', '.join(left)}"
-                             + ("  (will hide)" if self.opt_hide.get() else ""))
+                             + ("  (will hide)" if cfg.hide else ""))
 
-            reshape = self.opt_reshape.get() or self.opt_texture.get()
+            reshape = cfg.reshape
             ok = 0
             for i, (host_node, donor_node) in enumerate(pairs):
                 self.events.put(("progress", (i, len(pairs), f"{host_node} <- {donor_node}")))
                 new_mdl, new_mdx, r = ktp.transplant_node(
                     mdl, mdx, donor_layout, donor, host_node, donor_node,
-                    fit=self.opt_fit.get(), reshape=reshape,
-                    with_texture=self.opt_texture.get(),
+                    fit=cfg.fit, scale=cfg.scale,
+                    reshape=reshape, with_texture=cfg.with_texture,
                 )
                 if not r.ok:
                     lines.append(f"  {host_node}: REFUSED {r.error}")
@@ -728,6 +793,8 @@ class App(ttk.Frame):
                 a = r.alignment
                 lines.append(f"  {host_node} <- {donor_node}   fit {a.worst_ratio:.2f}x"
                              f"   drift {a.drift:.3f}")
+                if preview:
+                    lines.append(f"      {self._solidity(donor_layout, donor_node)}")
                 if not preview:
                     mdl, mdx = new_mdl, new_mdx
 
@@ -736,7 +803,7 @@ class App(ttk.Frame):
                 self.events.put(("done_text", lines))
                 return
 
-            if self.opt_hide.get() and left:
+            if cfg.hide and left:
                 mdl, hidden = kvis.hide_nodes(kl.parse(mdl, mdx), mdl, left)
                 lines.append(f"hid {len(hidden)}: {', '.join(hidden)}")
 
@@ -744,7 +811,7 @@ class App(ttk.Frame):
                 self.events.put(("error", "result failed validation; nothing written"))
                 return
 
-            out = Path(self.out_dir.get())
+            out = Path(cfg.out_dir)
             out.mkdir(parents=True, exist_ok=True)
             (out / f"{host}.mdl").write_bytes(mdl)
             (out / f"{host}.mdx").write_bytes(mdx)
@@ -754,6 +821,36 @@ class App(ttk.Frame):
         except Exception as exc:  # noqa: BLE001
             self.events.put(("error", f"{type(exc).__name__}: {exc}\n"
                                       f"{traceback.format_exc(limit=3)}"))
+
+    @staticmethod
+    def _solidity(layout, node_name) -> str:
+        """How much of a donor node faces outward, and what that means.
+
+        The single best predictor of whether a swap will look right. The engine
+        draws front faces only, so a mesh that folds back on itself renders full
+        of holes - and nothing else in the preview can see that, because a
+        two-sided viewer shows it as perfect.
+        """
+        from kmdlswap import edit as ke
+        from kmdlswap.obj import ObjMesh
+
+        from . import headspec, repair
+
+        geo = ke.extract(layout, layout.node_by_name(node_name))
+        mesh = ObjMesh(name=node_name)
+        mesh.positions = [tuple(p) for p in geo.positions]
+        mesh.faces = [f.vertices for f in geo.faces]
+        solid = repair.outward_fraction(mesh.positions, mesh.faces)
+        if solid >= headspec.SOLID_PASS:
+            verdict = "good"
+        elif solid >= headspec.SOLID_REJECT:
+            verdict = "marginal - some of it will be culled"
+        else:
+            verdict = "TOO LOW - this will render full of holes"
+        return f"solid {solid:.0%} ({verdict})"
+
+    def _on_scale_change(self):
+        self.scale_label.config(text=f"{self.opt_scale.get():.2f}x")
 
     def _drain(self):
         try:
