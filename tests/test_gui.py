@@ -524,3 +524,54 @@ def test_the_app_can_check_a_custom_head_pack(app):
     assert "main thread is not in main loop" not in log
     assert "REJECTED" in log
     assert "solid" in log, "it must say which check failed"
+
+
+def test_the_donor_list_can_be_filtered_by_who(app):
+    """164 models in alphabetical order does not answer "show me the female
+    heads". The filter has to narrow the list without breaking the mapping the
+    build path relies on, and has to say it is on - a short list with no
+    explanation reads as a bug."""
+    from kmdlfun.gui import ANYONE, WHOLE_MODEL
+
+    transplant_tab(app)
+    app.host.set("p_carthh")
+    app._scan()
+    pump(app, seconds=20.0)
+
+    app.donor_look.set(ANYONE)
+    app._refresh_donors()
+    everyone = list(app.donor_labels.values())
+    assert everyone, "no donors offered at all"
+
+    app.donor_look.set("female")
+    app._refresh_donors()
+    female = list(app.donor_labels.values())
+
+    assert female, "no female donors offered"
+    assert len(female) < len(everyone), "the filter did not narrow anything"
+    assert set(female) <= set(everyone), "the filter invented donors"
+    assert "p_bastilah" in female
+    assert "p_carthh" not in female and "p_hk47" not in female
+
+    app.donor_look.set("droid")
+    app._refresh_donors()
+    assert not list(app.donor_labels.values()), (
+        "no droid pairs with Carth whole-model, and the filter should not "
+        "pretend otherwise"
+    )
+
+    # Droids are offered where they can actually go: into one named node.
+    # Carth's node is `Head`, capitalised - the selector offers the real names.
+    head = next(n for n in app.target_box.cget("values") if n.lower() == "head")
+    app.target_node.set(head)
+    app._refresh_donors()
+    droids = list(app.donor_labels.values())
+    assert "p_hk47" in droids, droids[:6]
+    assert not set(droids) & set(female), "nothing is both"
+    assert "showing droid only" in app.donor_game_note.cget("text")
+
+    # Back to everyone, and nothing was lost on the way.
+    app.target_node.set(WHOLE_MODEL)
+    app.donor_look.set(ANYONE)
+    app._refresh_donors()
+    assert set(app.donor_labels.values()) == set(everyone)

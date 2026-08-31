@@ -1,0 +1,159 @@
+"""Sorting donors into male, female and droid.
+
+The interesting part is which sources can be trusted. The game ships tables
+that look authoritative and are not: `portraits.2da` marks Jolee as sex 1 and
+he is male, and Carth's row has no appearance number at all. So the tests below
+are mostly about *not* believing things - the classifier says `unknown` rather
+than guessing, and every source it does use is checked against characters
+whose identity nobody disputes.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from kmdlfun import who
+from kmdlfun.library import DONOR_KINDS, ModelLibrary, classify
+
+
+@pytest.fixture(scope="module")
+def k1(install_path):
+    return ModelLibrary(str(install_path))
+
+
+@pytest.fixture(scope="module")
+def donors(k1):
+    names = sorted(n for n in k1.index
+                   if n.startswith(("p_", "n_", "c_")) and k1.has(n))
+    return [n for n, k in classify(k1, names).items() if k in DONOR_KINDS]
+
+
+@pytest.fixture(scope="module")
+def looked(install_path, k1, donors):
+    return who.looks(str(install_path), donors, library=k1)
+
+
+@pytest.fixture(scope="module")
+def look_of(install_path, k1):
+    """One model by name, whether or not it is offered as a donor.
+
+    Juhani's and Revan's heads are not in the donor list - they have no plain
+    `head` mesh node - but they are the two clearest tests of the sources, so
+    they are asked about directly.
+    """
+    def get(name: str):
+        if not k1.has(name):
+            pytest.skip(f"{name} is not in this install")
+        return who.looks(str(install_path), [name], library=k1)[name]
+
+    return get
+
+
+# --- droids are structural --------------------------------------------------
+
+
+def test_droids_are_told_apart_by_how_they_are_built(k1, donors, install_path):
+    """A rigid head and no facial bones, which is exactly the ten droids.
+
+    Names are not consulted. `c_drdprobe` and `c_drdmktwo` are droids by name
+    and have no head node at all, so they are not donors and never come up;
+    `p_hk47` and `p_t3m3` are droids and say nothing about it in their names.
+    """
+    from kmdlswap import layout as kl
+
+    expected = {"c_drdassassin", "c_drdastro", "c_drdmkfour", "c_drdmkone",
+                "c_drdprot", "c_drdsentry", "c_drdspyder", "c_drdwar",
+                "p_hk47", "p_t3m3"}
+    found = {n for n in donors if who.is_droid(kl.parse(*k1.read(n)))}
+
+    assert found == expected, f"missed {expected - found}, invented {found - expected}"
+
+
+def test_an_organic_head_is_never_a_droid(k1):
+    from kmdlswap import layout as kl
+
+    for name in ("p_carthh", "p_bastilah", "n_dustilh", "n_rodian", "n_yoda"):
+        if k1.has(name):
+            assert not who.is_droid(kl.parse(*k1.read(name))), name
+
+
+def test_hk47_and_t3_are_droids_without_their_names_being_read(looked):
+    assert looked["p_hk47"] == "droid"
+    assert looked["p_t3m3"] == "droid"
+
+
+# --- the parts the game gets wrong ------------------------------------------
+
+
+def test_the_companions_come_out_right_where_the_game_does_not(looked, look_of):
+    """`portraits.2da` says Jolee is sex 1, and Carth's row has no appearance
+    number. Both are `forpc=0` rows, which is why that column is only read for
+    `forpc=1`, and why the nine companions are written down instead."""
+    assert looked["p_joleeh"] == "male", "the game's own table says otherwise"
+    assert looked["p_carthh"] == "male", "the game's own table says nothing"
+    assert looked["p_candh"] == "male"
+    assert looked["p_bastilah"] == "female"
+    assert looked["p_missionh"] == "female"
+    assert look_of("p_juhanih") == "female"
+
+
+def test_the_player_creation_heads_come_from_the_games_tables(install_path, k1):
+    """The `forpc=1` rows are the ones that were maintained, and they are right."""
+    heads = ["pmhc01", "pfhc01", "pmha03", "pfhb02"]
+    present = [h for h in heads if k1.has(h)]
+    if not present:
+        pytest.skip("player heads are not separate models in this install")
+
+    looked = who.looks(str(install_path), present, library=k1)
+    for name in present:
+        assert looked[name] == ("female" if name[1] == "f" else "male"), name
+
+
+def test_named_npcs_are_read_from_the_body_they_wear(looked):
+    """Nothing records their sex directly, but the body does: Dustil wears
+    `N_SithComM`, Davik and Gadon and Vrook all wear `N_CommM`."""
+    for name in ("n_dustilh", "n_davikh", "n_gadonh", "n_vrookh"):
+        assert looked.get(name) == "male", name
+
+
+# --- refusing to guess ------------------------------------------------------
+
+
+def test_a_head_worn_by_both_is_reported_as_neither(look_of):
+    """`n_darthrevanh` is the face of male and female Revan alike. Picking one
+    would be a coin toss presented as data."""
+    assert look_of("n_darthrevanh") == "unknown"
+
+
+def test_a_head_with_no_evidence_stays_unknown(looked):
+    """Dodonna's body is `N_Dodonna` - no marker - and no table says more."""
+    assert looked.get("n_dodonnah") == "unknown"
+
+
+def test_substrings_do_not_decide_anything(looked):
+    """"Malak" contains "mal" and "female" contains "male", which is why the
+    name patterns match whole tokens only."""
+    for name in ("n_darthmalak", "n_darthmalak02", "n_darthmalak03"):
+        assert looked.get(name) == "unknown", (
+            f"{name} was classified from a substring of 'Malak'"
+        )
+
+
+def test_aliens_are_not_forced_into_a_box(looked):
+    """The axis does not apply to most of them and the data does not say, so
+    they stay unknown rather than being assigned."""
+    for name in ("n_bith", "n_duros", "n_rodian", "n_trandoshan", "n_yoda"):
+        if name in looked:
+            assert looked[name] == "unknown", name
+
+
+def test_everything_lands_in_one_of_the_four(looked):
+    assert set(looked.values()) <= set(who.LOOKS)
+
+
+def test_the_split_is_useful_rather_than_mostly_unknown(looked):
+    """A classifier that answered "unknown" almost every time would be honest
+    and useless. Over half of the donors should be placed."""
+    placed = [v for v in looked.values() if v != "unknown"]
+    assert len(placed) > len(looked) * 0.5, who.summarise(looked)
+    assert who.summarise(looked).count(",") >= 2

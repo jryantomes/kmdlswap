@@ -21,27 +21,31 @@ class Companion:
     name: str
     models: tuple[str, ...]
     note: str = ""
+    # Written down rather than read from the game, because the game is wrong
+    # about two of them: portraits.2da marks Jolee as sex 1, and Carth's row
+    # has no appearance number at all. See `who.py`.
+    look: str = ""
 
 
 COMPANIONS: tuple[Companion, ...] = (
     Companion("bastila", "Bastila Shan",
-              ("p_bastilaba", "p_bastilabb", "p_bastilabb02", "p_bastilah")),
+              ("p_bastilaba", "p_bastilabb", "p_bastilabb02", "p_bastilah"), look="female"),
     Companion("carth", "Carth Onasi",
-              ("p_carthba", "p_carthbb", "p_carthbbh", "p_carthh")),
+              ("p_carthba", "p_carthbb", "p_carthbbh", "p_carthh"), look="male"),
     Companion("mission", "Mission Vao",
-              ("p_missionba", "p_missionbb", "p_missionh")),
+              ("p_missionba", "p_missionbb", "p_missionh"), look="female"),
     Companion("zaalbar", "Zaalbar",
-              ("p_zaalbar",), "single self-contained model"),
+              ("p_zaalbar",), "single self-contained model", look="male"),
     Companion("canderous", "Canderous Ordo",
-              ("p_candba", "p_candbb", "p_candh")),
+              ("p_candba", "p_candbb", "p_candh"), look="male"),
     Companion("jolee", "Jolee Bindo",
-              ("p_joleeba", "p_joleebb", "p_joleeh")),
+              ("p_joleeba", "p_joleebb", "p_joleeh"), look="male"),
     Companion("juhani", "Juhani",
-              ("p_juhani", "p_juhaniba", "p_juhanibb", "p_juhanih")),
+              ("p_juhani", "p_juhaniba", "p_juhanibb", "p_juhanih"), look="female"),
     Companion("hk47", "HK-47",
-              ("p_hk47",), "head is a node inside the body model"),
+              ("p_hk47",), "head is a node inside the body model", look="droid"),
     Companion("t3m3", "T3-M4",
-              ("p_t3m3",), "head is a node inside the body model"),
+              ("p_t3m3",), "head is a node inside the body model", look="droid"),
 )
 
 BY_KEY = {c.key: c for c in COMPANIONS}
