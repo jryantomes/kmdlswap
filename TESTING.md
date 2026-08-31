@@ -130,7 +130,11 @@ tests harder to set up.
 
 ## 9. The donor list of faces
 
-Brand new. Open the Transplant tab and pick a host.
+Brand new, and already revised twice from your feedback: the faces were being
+clipped to a fifth of their height by a Treeview row, and a list of them showed
+four at a time out of a hundred and forty-four. It is a grid now.
+
+Open the Transplant tab and pick a host.
 
 - [ ] Faces appear beside the names. **The first time is slow** - about a third
       of a second per face, so a list of 144 takes the better part of a minute,
@@ -142,7 +146,7 @@ Brand new. Open the Transplant tab and pick a host.
       specific failure the background drawing could cause.
 - [ ] Is seven rows enough to browse, or does the list want to be taller?
 
-## 9. The rest of the Transplant tab
+## 10. The rest of the Transplant tab
 
 - [ ] **Rank for this host** - reorders best-first and labels each entry with a
       grade. Takes about ten seconds; the log says what it found.
@@ -157,20 +161,20 @@ Brand new. Open the Transplant tab and pick a host.
 - [ ] Preview with `p_hk47` as host draws HK-47 alone. It *is* its own body, so
       there is nothing to put it on.
 
-## 10. The Custom head tab
+## 11. The Custom head tab
 
 - [ ] Browse to a pack folder, **Check only**, and read the verdict. The
       scanned head in `packs/scanhead` should be REJECTED at 53% solid.
 - [ ] Build one and confirm it lands in the output folder as a named build.
 
-## 11. The Builds tab
+## 12. The Builds tab
 
 - [ ] Builds are listed newest first and say what they came from.
 - [ ] **Install to Override** and **Remove** do what they say. This is the only
       action that writes into the game - check it does not touch anything of
       yours.
 
-## 12. The catalogue
+## 13. The catalogue
 
 - [ ] `python tools/render_catalogue.py --install "<K1 root>"` - 233 models in
       about a minute. Spot-check a few faces are the right way round.
