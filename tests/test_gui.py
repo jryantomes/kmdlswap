@@ -11,6 +11,7 @@ That is exactly how it shipped: `_transplant_work` read seven of them.
 from __future__ import annotations
 
 import hashlib
+import re
 import time
 
 import pytest
@@ -395,7 +396,10 @@ def test_the_donor_list_can_be_sorted_by_measured_fit(app, k2_path):
 
     before = list(app.donor_labels.values())
     assert before, "no donors offered to rank"
-    assert "[creature]" in list(app.donor_labels)[0], "unranked labels say the kind"
+    first = list(app.donor_labels)[0]
+    assert re.search(r"\[(head|creature)\]$", first), (
+        f"unranked labels should say the kind, got {first!r}"
+    )
 
     app._rank_donors()
     pump(app, seconds=20.0)

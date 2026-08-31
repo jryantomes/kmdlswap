@@ -124,7 +124,8 @@ def test_models_are_sorted_by_what_a_head_swap_can_take(pair, install_path):
     right for deciding how to scale something and wrong here - a kath hound has
     neither and is not somewhere to get a face.
     """
-    from kmdlfun.library import DONOR_KINDS, ModelLibrary, classify
+    from kmdlfun.library import (DONOR_KINDS, ModelLibrary,
+                                 character_models, classify)
 
     lib = ModelLibrary(str(install_path))
     wanted = ["p_carthh", "p_carthbb", "p_hk47", "n_bith", "c_kath"]
@@ -145,10 +146,11 @@ def test_models_are_sorted_by_what_a_head_swap_can_take(pair, install_path):
 def test_classification_cuts_the_list_down(install_path):
     """The point of it: a donor list of every model is mostly things that
     cannot go on a neck."""
-    from kmdlfun.library import DONOR_KINDS, ModelLibrary, classify
+    from kmdlfun.library import (DONOR_KINDS, ModelLibrary, character_models,
+                                 classify)
 
     lib = ModelLibrary(str(install_path))
-    names = sorted(n for n in lib.index if n.startswith(("p_", "n_", "c_")))
+    names = character_models(str(install_path), lib)
     kinds = classify(lib, names)
     offerable = [n for n, k in kinds.items() if k in DONOR_KINDS]
 
@@ -156,3 +158,49 @@ def test_classification_cuts_the_list_down(install_path):
         f"{len(offerable)} of {len(names)} - the filter is barely filtering"
     )
     assert len(offerable) > 20, "but it must not throw away most of the good ones"
+
+
+def test_the_games_own_head_list_is_used_rather_than_a_name_pattern(install_path):
+    """Character models are named `p_`, `n_` or `c_` - but heads are not.
+
+    The thirty player-creation heads are `pmhc01` and `pfha03`, and the
+    commoner heads are `comm_a_f`. None match the prefix test, so none were
+    ever offered: forty-two ordinary human faces, twenty-one of each, invisible
+    in every list in the app. `heads.2da` is the game's own answer to "what is
+    a head", and it also turns up `ad_saul` and `czerka_com_h`, which follow no
+    convention at all.
+    """
+    from kmdlfun.library import PREFIXES, ModelLibrary, character_models, head_models
+
+    lib = ModelLibrary(str(install_path))
+    offered = character_models(str(install_path), lib)
+
+    assert "pfhc01" in offered and "pmhc01" in offered, "player heads are missing"
+    assert "comm_a_f" in offered and "comm_a_m" in offered, "commoner heads are missing"
+    assert "p_carthh" in offered, "the prefixed models must still be there"
+
+    by_prefix = [n for n in offered if n.startswith(PREFIXES)]
+    assert len(offered) > len(by_prefix) + 40, (
+        f"only {len(offered) - len(by_prefix)} models came from heads.2da"
+    )
+
+    # Every name offered is a model that actually exists. heads.2da points at
+    # `p_bastillah`, with two Ls, which is not a file.
+    assert all(lib.has(n) for n in offered)
+    named = head_models(str(install_path))
+    assert "p_bastillah" in named and "p_bastillah" not in offered
+
+
+def test_the_player_heads_are_usable_donors(install_path):
+    """Not just listed - they have to survive classification as somewhere a
+    head can come from, or listing them changes nothing."""
+    from kmdlfun.library import DONOR_KINDS, ModelLibrary, classify
+
+    lib = ModelLibrary(str(install_path))
+    wanted = [n for n in ("pfhc01", "pmhc01", "comm_a_f") if lib.has(n)]
+    if not wanted:
+        pytest.skip("no player heads in this install")
+
+    kinds = classify(lib, wanted)
+    for name in wanted:
+        assert kinds[name] in DONOR_KINDS, f"{name} classified as {kinds[name]}"

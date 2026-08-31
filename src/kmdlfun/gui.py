@@ -783,13 +783,11 @@ class App(ttk.Frame):
             return {}
         cache = getattr(self, "_kind_cache", {})
         if path not in cache:
-            from .library import ModelLibrary, classify
+            from .library import ModelLibrary, character_models, classify
 
             try:
                 lib = ModelLibrary(path)
-                names = sorted(n for n in lib.index
-                               if n.startswith(("p_", "n_", "c_")))
-                cache[path] = classify(lib, names)
+                cache[path] = classify(lib, character_models(path, lib))
             except Exception as exc:  # noqa: BLE001
                 self._say(f"could not read that install: {exc}")
                 cache[path] = {}
@@ -1349,10 +1347,13 @@ class App(ttk.Frame):
             for r in inst.chitin_resources():
                 if r.restype() in (ResourceType.MDL, ResourceType.MDX):
                     found.setdefault(r.resname().lower(), {})[r.restype()] = r
-            names = sorted(
-                n for n, k in found.items()
-                if len(k) == 2 and n.startswith(("p_", "n_", "c_"))
-            )
+            # Not a prefix test: the player-creation and commoner heads do
+            # not follow one, and leaving them out hid forty-two ordinary human
+            # faces from every list in the app.
+            from .library import ModelLibrary, character_models
+
+            names = [n for n in character_models(install, ModelLibrary(install))
+                     if n in found and len(found[n]) == 2]
 
             index = kc.ModelIndex()
             for i, name in enumerate(names):

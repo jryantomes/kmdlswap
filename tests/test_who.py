@@ -13,7 +13,8 @@ from __future__ import annotations
 import pytest
 
 from kmdlfun import who
-from kmdlfun.library import DONOR_KINDS, ModelLibrary, classify
+from kmdlfun.library import (DONOR_KINDS, ModelLibrary, character_models,
+                             classify)
 
 
 @pytest.fixture(scope="module")
@@ -22,9 +23,8 @@ def k1(install_path):
 
 
 @pytest.fixture(scope="module")
-def donors(k1):
-    names = sorted(n for n in k1.index
-                   if n.startswith(("p_", "n_", "c_")) and k1.has(n))
+def donors(k1, install_path):
+    names = character_models(str(install_path), k1)
     return [n for n, k in classify(k1, names).items() if k in DONOR_KINDS]
 
 
