@@ -483,7 +483,7 @@ def _transplant(args) -> int:
     for host_node, donor_node in pairs:
         mdl2, mdx2, r = ktp.transplant_node(
             mdl, mdx, donor_layout, args.donor, host_node, donor_node,
-            fit=args.fit, max_influences=args.max_influences, reshape=args.reshape or args.with_texture,
+            fit=args.fit, max_influences=args.max_influences, reshape=args.reshape,
             with_texture=args.with_texture,
         )
         results.append(r)

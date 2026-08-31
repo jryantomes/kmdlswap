@@ -318,6 +318,19 @@ def transplant_node(
                     f"reshaped onto the donor: kept the host's {len(moved)} vertices "
                     f"and its own UVs and texture"
                 )
+        elif with_texture:
+            # Not reshaping, so the donor's own geometry arrives with its own
+            # UVs already attached and its texture simply applies. This used to
+            # be impossible: --with-texture forced a reshape, because a changing
+            # vertex count was thought to break facial animation. It does not
+            # (reports/SKIN_ROOT_POINTER_FINDINGS.md), so the donor can now be
+            # taken whole - its shape, its mapping and its texture together.
+            new_texture = donor_node.textures[0] or None
+            if new_texture:
+                result.warnings.append(
+                    f"took the donor's geometry, UVs and texture {new_texture!r} whole"
+                )
+
         geo, swap_report = build_replacement(
             host_layout, host_node, mesh, max_influences=max_influences,
             influences=host_influences,
