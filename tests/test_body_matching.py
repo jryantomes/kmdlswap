@@ -162,3 +162,76 @@ def test_pairs_come_back_in_the_hosts_own_order(k1):
     order = [n.name for n in kparts.mesh_nodes(host)]
     got = [h for h, _ in ktp.match_nodes(host, donor)]
     assert got == sorted(got, key=order.index)
+
+
+# --- placing several parts together -----------------------------------------
+
+
+def test_parts_other_than_the_anchor_keep_their_positions(k1):
+    """Re-centring each part on its own counterpart pulls arms off shoulders.
+
+    Bastila's arm mesh sits 0.15 closer to her spine than Carth's does and is
+    0.2 longer. Placed on its own it lands on *his* arm's centre, away from the
+    torso it arrived with, and renders as arms floating beside the body. Riding
+    on the anchor's offset keeps the donor's own arrangement.
+    """
+    from kmdlfun import transplant as ktp
+    from kmdlswap import edit as ke
+
+    import numpy as np
+
+    if not (k1.has("p_carthbb") and k1.has("p_bastilabb")):
+        pytest.skip("need both bodies")
+
+    host = kl.parse(*k1.read("p_carthbb"))
+    donor = kl.parse(*k1.read("p_bastilabb"))
+    pairs = ktp.match_nodes(host, donor)
+    anchor = ktp.anchor_pair(pairs, host)
+    assert anchor[0] == "Torso", anchor
+
+    offset = ktp.model_alignment(donor, donor.node_by_name(anchor[1]),
+                                 host, host.node_by_name(anchor[0]))
+
+    def arm_centre(pair, node_name):
+        after = kl.parse(*pair)
+        node = after.node_by_name(node_name)
+        from kmdlfun import space
+
+        rest = space.rest_pose(after)[node.index]
+        P = np.asarray(ke.extract(after, node).positions, float)[:, :3]
+        P = P @ np.asarray(rest.rotation, float).T + np.asarray(rest.position, float)
+        return (P.min(0) + P.max(0)) / 2
+
+    mdl, mdx = k1.read("p_carthbb")
+    a_mdl, a_mdx, r1 = ktp.transplant_node(mdl, mdx, donor, "p_bastilabb",
+                                           "LArm", "ArmL", place=True)
+    assert r1.ok
+    t_mdl, t_mdx, r2 = ktp.transplant_node(mdl, mdx, donor, "p_bastilabb",
+                                           "LArm", "ArmL", model_offset=offset)
+    assert r2.ok
+
+    # The donor's own arm sits nearer the spine than the host's; following the
+    # torso must preserve that, and placing alone must not.
+    x_alone = arm_centre((a_mdl, a_mdx), "LArm")[0]
+    x_together = arm_centre((t_mdl, t_mdx), "LArm")[0]
+    assert abs(x_together) < abs(x_alone), (
+        f"following the anchor should keep the arm inboard: "
+        f"{x_together:.3f} vs {x_alone:.3f}"
+    )
+
+
+def test_the_anchor_itself_is_still_placed(k1):
+    """The anchor is what puts a donor onto the host at all, and its behaviour
+    is the one with in-game evidence behind it. Only the other parts changed."""
+    from kmdlfun import transplant as ktp
+
+    if not (k1.has("p_carthbb") and k1.has("p_bastilabb")):
+        pytest.skip("need both bodies")
+    host = kl.parse(*k1.read("p_carthbb"))
+    donor = kl.parse(*k1.read("p_bastilabb"))
+    mdl, mdx = k1.read("p_carthbb")
+
+    _, _, r = ktp.transplant_node(mdl, mdx, donor, "p_bastilabb",
+                                  "Torso", "torso", fit=True, place=True)
+    assert r.ok
+    assert r.alignment.drift < 1e-6, "the anchor should land on the host's part"

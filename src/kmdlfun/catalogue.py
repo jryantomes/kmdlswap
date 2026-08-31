@@ -235,8 +235,15 @@ class ModelIndex:
     supermodel: dict[str, str] = field(default_factory=dict)
 
     def add(self, entry: ModelEntry) -> None:
+        # Through the same alias table the matcher uses, or the index would
+        # report a Carth/Bastila body swap as sharing one node when the
+        # transplant would actually move three. Head models are untouched:
+        # none of their node names are in the table.
+        from .transplant import canonical
+
         self.nodes[entry.name] = frozenset(
-            p.node.lower() for p in entry.visible_parts if p.swappable
+            canonical(p.node) or p.node.lower()
+            for p in entry.visible_parts if p.swappable
         )
         self.head_model[entry.name] = entry.is_head_model
         self.supermodel[entry.name] = (entry.supermodel or "NULL").lower()

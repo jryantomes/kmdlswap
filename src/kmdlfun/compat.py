@@ -143,6 +143,57 @@ def head_node(layout):
     return None
 
 
+def biggest_node(layout):
+    """The largest visible mesh, by vertex count.
+
+    What to measure when there is no head: on a body that is the torso, which
+    is both the part a swap is really about and the one whose disagreement
+    tells you most about whether two models are built alike.
+    """
+    from . import parts as kparts
+
+    meshes = kparts.mesh_nodes(layout)
+    return max(meshes, key=lambda n: n.vertex_count) if meshes else None
+
+
+def pick_pair(host_layout, donor_layout, node: str | None = None):
+    """Which node to measure against which, or None if there is nothing to.
+
+    Heads are the common case and stay the default. A body has no `head`, so
+    the biggest shared part is measured instead - and the donor's counterpart
+    is found the same way a transplant would find it, through `match_nodes`,
+    so `LArm` and `ArmL` are understood to be the same arm.
+    """
+    from . import transplant as ktrans
+
+    pairs = ktrans.match_nodes(host_layout, donor_layout)
+    if node:
+        for host_name, donor_name in pairs:
+            if host_name.lower() == node.lower():
+                return (host_layout.node_by_name(host_name),
+                        donor_layout.node_by_name(donor_name))
+        # Named but unpaired: fall back to the donor's head, which is what a
+        # node-targeted transplant does.
+        donor_head = head_node(donor_layout)
+        if donor_head is not None:
+            try:
+                return host_layout.node_by_name(node), donor_head
+            except KeyError:
+                return None
+        return None
+
+    host_head, donor_head = head_node(host_layout), head_node(donor_layout)
+    if host_head is not None and donor_head is not None:
+        return host_head, donor_head
+    if not pairs:
+        return None
+    anchor = ktrans.anchor_pair(pairs, host_layout)
+    if anchor is None:
+        return None
+    return (host_layout.node_by_name(anchor[0]),
+            donor_layout.node_by_name(anchor[1]))
+
+
 def measure(
     host_layout,
     host_node,
@@ -203,6 +254,7 @@ def rank(
     donors,
     *,
     host_name: str = "",
+    node: str | None = None,
     progress=None,
 ) -> list[Fit]:
     """Measure every donor against one host, best first.
@@ -211,9 +263,8 @@ def rank(
     for either game, so a K1 host can be ranked against K2's models.
     """
     host_layout = kl.parse(host_mdl, host_mdx)
-    host_node = head_node(host_layout)
-    if host_node is None:
-        raise ValueError(f"{host_name or 'host'} has no 'head' node to replace")
+    if node is None and head_node(host_layout) is None and biggest_node(host_layout) is None:
+        raise ValueError(f"{host_name or 'host'} has no visible mesh to replace")
 
     donors = list(donors)
     out: list[Fit] = []
@@ -235,12 +286,13 @@ def rank(
                 )
             )
             continue
-        node = head_node(donor_layout)
-        if node is None:
-            continue          # not a donor a head can come from; classify() agrees
+        chosen = pick_pair(host_layout, donor_layout, node)
+        if chosen is None:
+            continue          # nothing in common to measure; classify() agrees
+        host_node, donor_node = chosen
         out.append(
             measure(
-                host_layout, host_node, donor_layout, node,
+                host_layout, host_node, donor_layout, donor_node,
                 donor_name=name, host_name=host_name,
             )
         )
