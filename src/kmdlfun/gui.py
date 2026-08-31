@@ -74,6 +74,8 @@ class TransplantSettings:
     # Which donor node fills it. Empty means work it out: same name, then the
     # donor's head. A model with neither has to be told.
     donor_node: str = ""
+    # A new resref to save under, or "" to overwrite the host as before.
+    save_as: str = ""
 
 
 def guess_install() -> str:
@@ -387,9 +389,18 @@ class App(ttk.Frame):
             side="left", padx=(10, 0)
         )
 
-        ttk.Button(page, text="Preview", command=lambda: self._start(preview=True)).grid(
-            row=7, column=0, sticky="w", pady=(8, 0)
-        )
+        saveas = ttk.Frame(page)
+        saveas.grid(row=7, column=0, columnspan=5, sticky="w", pady=(8, 0))
+        ttk.Button(saveas, text="Preview",
+                   command=lambda: self._start(preview=True)).pack(side="left")
+        ttk.Label(saveas, text="Save as").pack(side="left", padx=(16, 6))
+        # Blank means overwrite the host, which is what every build did until
+        # now. A name here makes a new model that sits beside the originals
+        # instead of replacing one.
+        self.save_as = tk.StringVar(value="")
+        ttk.Entry(saveas, textvariable=self.save_as, width=22).pack(side="left")
+        ttk.Label(saveas, text="a new resref, e.g. p_myhead - blank replaces the host",
+                  foreground="#666").pack(side="left", padx=(8, 0))
         ttk.Label(
             page,
             text=("Preview writes nothing - it draws the result on the Preview tab "
@@ -1772,6 +1783,7 @@ class App(ttk.Frame):
                 target_node=target,
                 donor_node=("" if self.donor_node.get() == AUTO_NODE
                             else self.donor_node.get()),
+                save_as=self.save_as.get().strip(),
             )
             self.worker = threading.Thread(
                 target=self._transplant_work,
@@ -1951,10 +1963,24 @@ class App(ttk.Frame):
 
             root = Path(cfg.out_dir)
             root.mkdir(parents=True, exist_ok=True)
-            out = root / kbuilds.unique_name(root, f"{host}-{donor}")
+            written_as = host
+            if cfg.save_as:
+                from kmdlswap import rename as krename
+
+                try:
+                    krename.check_name(cfg.save_as)
+                    mdl, mdx = krename.rename(mdl, mdx, cfg.save_as)
+                except krename.RenameError as exc:
+                    self.events.put(("error", str(exc)))
+                    return
+                written_as = cfg.save_as
+                lines.append(f"saved as {written_as}, a new model rather than a "
+                             f"replacement for {host}")
+
+            out = root / kbuilds.unique_name(root, f"{written_as}-{donor}")
             out.mkdir(parents=True, exist_ok=True)
-            (out / f"{host}.mdl").write_bytes(mdl)
-            (out / f"{host}.mdx").write_bytes(mdx)
+            (out / f"{written_as}.mdl").write_bytes(mdl)
+            (out / f"{written_as}.mdx").write_bytes(mdx)
             if cfg.donor_install and cfg.with_texture:
                 from . import textures as ktextures
 
@@ -1966,6 +1992,7 @@ class App(ttk.Frame):
                 "kind": "transplant",
                 "host": {"model": host, "game": host_layout.game,
                          "install": cfg.install},
+                "saved_as": written_as,
                 "donor": {"model": donor, "game": donor_layout.game,
                           "install": cfg.donor_install or cfg.install},
                 "nodes": [list(pair) for pair in pairs],

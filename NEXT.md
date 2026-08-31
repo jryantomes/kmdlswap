@@ -35,6 +35,13 @@ Five tabs, all sharing the folder settings, log and build button.
 * **Builds** - named, kept folders with a manifest, and the only thing that
   writes into the game.
 
+**Save as** turns a build into a *new* model rather than a replacement. Every
+build before this overwrote a vanilla resref, so installing one replaced that
+character for the whole game and two builds could not coexist. Naming a build
+`p_myhead` rewrites the name inside the model to match the file, which is what
+the engine reads. The 2DA rows that would make the game *offer* a new head are
+not written - that is the next step, not this one.
+
 Command line covers the same ground, plus `kmdlfun rank`, `import`, `render`
 and `builds`.
 

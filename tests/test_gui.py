@@ -957,3 +957,54 @@ def test_naming_the_donor_node_overrides_the_automatic_choice(app, tmp_path):
 
     log = app.log.get("1.0", "end")
     assert "p_carthh:Head from n_dustilh:tongue" in log, log[-400:]
+
+
+def test_saving_under_a_new_name_makes_a_new_model(app, tmp_path):
+    """Every build until now overwrote a vanilla model, so two could not
+    coexist and installing one replaced a character for the whole game.
+
+    The filename alone is not enough: the model carries its own name and the
+    engine reads that one, so they have to agree.
+    """
+    from kmdlswap import layout as kl
+    from kmdlswap import validate as kv
+
+    transplant_tab(app)
+    app.out_dir.set(str(tmp_path))
+    app.host.set("p_carthh")
+    app._refresh_donors()
+    app.donor.set("n_dustilh")
+    app.opt_fit.set(False)
+    app.save_as.set("p_mycustomhead")
+
+    app._start(preview=False)
+    pump(app, seconds=20.0)
+
+    log = app.log.get("1.0", "end")
+    assert "ERROR" not in log, log[-400:]
+    assert "a new model rather than a replacement" in log
+
+    built = list(tmp_path.glob("*/p_mycustomhead.mdl"))
+    assert built, list(tmp_path.iterdir())
+    assert not list(tmp_path.glob("*/p_carthh.mdl")), "it must not also write the host"
+
+    mdl = built[0].read_bytes()
+    mdx = built[0].with_suffix(".mdx").read_bytes()
+    after = kl.parse(mdl, mdx)
+    assert after.model_name == "p_mycustomhead", "the name inside must match the file"
+    assert kv.check(after).ok
+
+
+def test_a_name_the_engine_cannot_use_is_refused_before_building(app, tmp_path):
+    transplant_tab(app)
+    app.out_dir.set(str(tmp_path))
+    app.host.set("p_carthh")
+    app._refresh_donors()
+    app.donor.set("n_dustilh")
+    app.save_as.set("not a resref!")
+
+    app._start(preview=False)
+    pump(app, seconds=15.0)
+
+    assert "not a usable model name" in app.log.get("1.0", "end")
+    assert not list(tmp_path.glob("*/*.mdl")), "nothing should have been written"
