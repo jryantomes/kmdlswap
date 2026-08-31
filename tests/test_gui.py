@@ -63,6 +63,9 @@ def transplant_tab(a):
 def test_one_preview_run(app, tmp_path):
     """Everything a Preview should do, asserted from a single run.
 
+    Preview writes nothing and shows the result: the host as it is beside the
+    host as it would be, framed by one shared ruler.
+
     Split across three tests this cost three full model-library scans for the
     same work. The assertions are independent; the setup is not.
 
@@ -100,6 +103,22 @@ def test_one_preview_run(app, tmp_path):
     assert "1/1 would transfer" in log
     assert "solid 99%" in log and "good" in log
     assert app.status.cget("text") == "preview only: 1/1 would transfer"
+
+    # It draws the result rather than only describing it. Preview used to
+    # report to the log and stop, so the only way to see a swap was to build it
+    # first - which is not a preview.
+    assert len(app.viewport.scenes) == 2, "should show the host before and after"
+    assert app.viewport.labels == ["p_carthh (now)", "p_carthh <- n_bith"]
+    assert app.tabs.tab(app.tabs.select(), "text") == "Preview", (
+        "the viewport lives on the Preview tab, so it has to come forward"
+    )
+
+    # The two must be framed by one ruler, or a part that changed size looks
+    # unchanged. shared_bounds gives every scene the same centre and radius.
+    assert app.viewport.bounds is not None
+
+    # And nothing was written.
+    assert not list(tmp_path.iterdir()), "preview must not write files"
 
 
 @pytest.mark.slow
