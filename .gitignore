@@ -18,6 +18,7 @@ dist/
 /reports/support_matrix.json
 /reports/catalogue.json
 /catalogue/
+/catalogue_*/
 /out_swap/
 /out_fun/
 /out_tripo/

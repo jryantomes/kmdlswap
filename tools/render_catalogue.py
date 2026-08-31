@@ -1,149 +1,95 @@
-"""Render a preview image for every catalogued character model.
+"""Render a preview image for every character model in an install.
 
-Exports each model's visible meshes to a model-space OBJ, then hands the whole
-batch to one Blender process. Splitting it this way keeps all the KOTOR format
-knowledge on this side and uses Blender only as a renderer.
+This used to export each model to OBJ and hand the batch to Blender. That was
+right when there was no renderer here; there is one now, it is the one the app
+draws with, and it has the corrected camera. Every image the old tool produced
+showed the **back** of the character's head, because the whole project had the
+facing wrong until `reports/FACING_FINDINGS.md` - so those images have to be
+thrown away regardless, and regenerating them through Blender would mean
+trusting a second camera convention that no test covers.
+
+Using our own renderer means the catalogue is drawn by the same code the
+Preview tab uses, with the same tests behind it, and needs nothing installed.
 
     python tools/render_catalogue.py --install "<K1 root>"
-    python tools/render_catalogue.py --install "<K1 root>" --limit 8   # smoke test
+    python tools/render_catalogue.py --install "<K1 root>" --limit 8
+    python tools/render_catalogue.py --install "<K2 root>" --out catalogue_k2
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from kmdlfun import parts, space  # noqa: E402
-from kmdlswap import edit as ke  # noqa: E402
+from kmdlfun import render as krender  # noqa: E402
+from kmdlfun import textures as ktextures  # noqa: E402
+from kmdlfun.library import ModelLibrary, character_models  # noqa: E402
 from kmdlswap import layout as kl  # noqa: E402
-from kmdlswap import validate as kv  # noqa: E402
-
-BLENDER_CANDIDATES = [
-    r"C:\Program Files\Blender Foundation\Blender 3.6\blender.exe",
-    r"C:\Program Files\Blender Foundation\Blender 4.0\blender.exe",
-    "blender",
-]
 
 
-def find_blender(explicit: str | None) -> str:
-    if explicit:
-        return explicit
-    for c in BLENDER_CANDIDATES:
-        if c == "blender" or Path(c).is_file():
-            return c
-    raise SystemExit("Blender not found; pass --blender <path to blender.exe>")
-
-
-def write_model_obj(layout: kl.Layout, path: Path) -> int:
-    """Visible meshes, posed into model space. Same convention as
-    tools/dump_model_obj.py, which this deliberately mirrors."""
-    pose = space.rest_pose(layout)
-    lines: list[str] = []
-    base = 1
-    written = 0
-    for node in parts.mesh_nodes(layout):
-        rest = pose[node.index]
-        geo = ke.extract(layout, node)
-        lines.append(f"o {node.name}")
-        for v in geo.positions:
-            w = tuple(
-                rest.position[i] + sum(rest.rotation[i][k] * v[k] for k in range(3))
-                for i in range(3)
-            )
-            lines.append(f"v {w[0]:.6f} {w[1]:.6f} {w[2]:.6f}")
-        for f in geo.faces:
-            a, b, c = (i + base for i in f.vertices)
-            lines.append(f"f {a} {b} {c}")
-        base += len(geo.positions)
-        written += 1
-    path.write_text("\n".join(lines) + "\n", encoding="ascii")
-    return written
-
-
-def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser()
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--install", required=True)
     ap.add_argument("--out", default="catalogue")
     ap.add_argument("--limit", type=int, default=0)
-    ap.add_argument("--blender")
-    ap.add_argument("--keep-obj", action="store_true")
-    args = ap.parse_args(argv)
+    ap.add_argument("--size", type=int, default=256)
+    ap.add_argument("--untextured", action="store_true",
+                    help="draw flat shaded, which is faster and shows shape")
+    ap.add_argument("--yaw", type=float, default=0.0,
+                    help="degrees to turn from front-on")
+    args = ap.parse_args()
 
-    from pykotor.extract.installation import Installation
-    from pykotor.resource.type import ResourceType
-
-    blender = find_blender(args.blender)
     out = Path(args.out)
-    obj_dir = out / "obj"
-    png_dir = out / "png"
-    obj_dir.mkdir(parents=True, exist_ok=True)
-    png_dir.mkdir(parents=True, exist_ok=True)
+    out.mkdir(parents=True, exist_ok=True)
 
-    inst = Installation(args.install)
-    index: dict[str, dict] = {}
-    for r in inst.chitin_resources():
-        if r.restype() in (ResourceType.MDL, ResourceType.MDX):
-            index.setdefault(r.resname().lower(), {})[r.restype()] = r
-    names = sorted(
-        k for k, v in index.items() if len(v) == 2 and k.startswith(("p_", "n_", "c_"))
-    )
+    lib = ModelLibrary(args.install)
+    names = character_models(args.install, lib)
     if args.limit:
         names = names[: args.limit]
 
-    jobs = []
-    for i, name in enumerate(names):
-        e = index[name]
+    lookup = None
+    if not args.untextured:
+        lookup = ktextures.lookup_across([Path(args.install)])
+
+    index = []
+    started = time.time()
+    for i, name in enumerate(names, 1):
+        print(f"[{i}/{len(names)}] {name}", flush=True)
         try:
-            layout = kl.parse(e[ResourceType.MDL].data(), e[ResourceType.MDX].data())
-            if not kv.check(layout).ok:
+            layout = kl.parse(*lib.read(name))
+            scene = krender.from_layout(layout, texture_lookup=lookup)
+            if not len(scene.faces):
+                index.append({"name": name, "skipped": "nothing visible to draw"})
                 continue
-            obj_path = obj_dir / f"{name}.obj"
-            if write_model_obj(layout, obj_path) == 0:
-                continue
-        except Exception as exc:  # noqa: BLE001
-            print(f"  skipped {name}: {type(exc).__name__}: {exc}", file=sys.stderr)
-            continue
-        jobs.append(
-            {
+            # Backface culling, because a two-sided draw hides exactly the
+            # fault this catalogue is most useful for spotting.
+            pixels = krender.render(
+                scene, yaw=args.yaw * 3.14159265 / 180.0,
+                size=args.size, cull=True,
+            )
+            krender.to_png(pixels, out / f"{name}.png")
+            index.append({
                 "name": name,
-                "obj": str(obj_path.resolve()),
-                "png": str((png_dir / f"{name}.png").resolve()),
-            }
-        )
-        if (i + 1) % 40 == 0:
-            print(f"  exported {i + 1}/{len(names)} ...", file=sys.stderr)
+                "image": f"{name}.png",
+                "textured": bool(scene.textured),
+                "faces": int(len(scene.faces)),
+            })
+        except Exception as exc:  # noqa: BLE001
+            print(f"    failed: {type(exc).__name__}: {exc}")
+            index.append({"name": name, "skipped": f"{type(exc).__name__}: {exc}"})
 
-    manifest = out / "manifest.json"
-    manifest.write_text(json.dumps(jobs, indent=1))
-    print(f"exported {len(jobs)} OBJs; rendering with {blender} ...")
-
-    proc = subprocess.run(
-        [
-            blender, "--background", "--python",
-            str(Path(__file__).with_name("blender_render.py").resolve()),
-            "--", "--manifest", str(manifest.resolve()),
-        ],
-        capture_output=True,
-        text=True,
+    (out / "index.json").write_text(
+        json.dumps({"install": str(args.install), "models": index}, indent=1),
+        encoding="utf-8",
     )
-    result = [ln for ln in proc.stdout.splitlines() if ln.startswith("RESULT")]
-    if not result:
-        print(proc.stdout[-2000:], file=sys.stderr)
-        print(proc.stderr[-2000:], file=sys.stderr)
-        raise SystemExit("Blender produced no result line")
-    payload = json.loads(result[0][7:])
-    print(f"rendered {payload['rendered']} previews into {png_dir}")
-    for f in payload["failed"]:
-        print(f"  FAILED {f}", file=sys.stderr)
-
-    if not args.keep_obj:
-        for j in jobs:
-            Path(j["obj"]).unlink(missing_ok=True)
+    drawn = sum(1 for e in index if "image" in e)
+    print(f"\n{drawn} of {len(names)} rendered into {out} "
+          f"in {time.time() - started:.0f}s")
     return 0
 
 
