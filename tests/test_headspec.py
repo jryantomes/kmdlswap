@@ -322,3 +322,54 @@ def test_orient_brings_a_y_up_mesh_upright():
     assert headgen.orient([(0.0, 1.0, 0.0)], facing="+y")[0] == pytest.approx(
         (0.0, 1.0, 0.0), abs=1e-9
     )
+
+
+# --- solidity ----------------------------------------------------------------
+
+
+def test_a_generated_head_is_wound_outward():
+    """headgen produced inside-out spheres until 2026-08-30, so every head this
+    project generated would have rendered hollow in game. The topology checks -
+    one piece, closed, no degenerate faces - are all blind to which way a
+    surface faces, which is how it survived."""
+    from kmdlfun import headgen, repair
+
+    dirs, faces, _ = headgen.uv_sphere(13, 22)
+    points = [headgen.shape(d) for d in dirs]
+    assert repair.outward_fraction(points, faces) > 0.99
+    assert repair.signed_volume(points, faces) > 0
+
+
+def test_an_inside_out_head_is_rejected():
+    from kmdlfun import headgen
+
+    dirs, faces, uvs = headgen.uv_sphere(13, 22)
+    mesh = kobj.ObjMesh(name="inverted")
+    mesh.positions = [headgen.shape(d) for d in dirs]
+    mesh.faces = [(a, c, b) for a, b, c in faces]      # turn it inside out
+    mesh.uvs = uvs
+
+    v = headspec.check_mesh(mesh)
+    assert not v.accepted
+    fail = next(f for f in v.failures if f.check == "solid")
+    assert "folds back on itself" in fail.detail
+
+    # And the checks that were blind to it still are, which is the point.
+    levels = {f.check: f.level for f in v.findings}
+    assert levels["one piece"] == "pass"
+    assert levels["closed"] == "pass"
+
+
+def test_every_vanilla_head_passes_the_solidity_rule(pair):
+    """Measured across the 61 vanilla 'head' meshes: worst 76.6% (n_selkath),
+    median 93.8%. The reject line sits at vanilla's worst."""
+    from kmdlfun import repair
+
+    for model, node_name in (("p_carthh", "Head"), ("p_bastilah", "head"),
+                             ("n_dustilh", "Head"), ("p_t3m3", "Head")):
+        layout = kl.parse(*pair(model))
+        geo = ke.extract(layout, layout.node_by_name(node_name))
+        positions = [tuple(p) for p in geo.positions]
+        faces = [f.vertices for f in geo.faces]
+        got = repair.outward_fraction(positions, faces)
+        assert got >= headspec.SOLID_REJECT, f"{model} would be rejected at {got:.1%}"

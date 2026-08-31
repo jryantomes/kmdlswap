@@ -39,6 +39,12 @@ TRIANGLES_TYPICAL = (440, 796)  # vanilla's range
 TRIANGLES_WARN = 1500          # our own Tripo head shipped at 1198 and rendered
 MODEL_BUDGET = 4000            # the brief's practical whole-model ceiling
 WINDING_WARN = 0.05
+
+# Share of surface area that must face outward, measured across the 61 vanilla
+# 'head' meshes: worst 76.6% (n_selkath), 5th percentile 82.8%, median 93.8%.
+# The reject line sits at vanilla's worst, so vanilla always passes.
+SOLID_PASS = 0.85
+SOLID_REJECT = 0.76
 TEXTURE_MAX = 512              # HK-47's body texture; heads ship at 256
 RESREF_MAX = 16
 
@@ -215,6 +221,28 @@ def check_mesh(mesh: ObjMesh) -> Verdict:
         v.add("warn", "normals",
               "none supplied; they will be computed from the faces, which loses any "
               "smoothing the author intended")
+
+    # How much of the surface actually faces out. The engine draws front faces
+    # only, so a mesh that folds back on itself renders full of holes - which is
+    # what a scanned head did after its individually modelled hair strands were
+    # reduced to a KOTOR budget and collapsed into a self-intersecting tangle.
+    # Consistent winding cannot fix that: every face can agree with its
+    # neighbours while the surface as a whole is knotted.
+    from .repair import outward_fraction
+
+    solid = outward_fraction(mesh.positions, mesh.faces)
+    if solid >= SOLID_PASS:
+        v.add("pass", "solid", f"{solid:.0%} of the surface faces outward")
+    elif solid >= SOLID_REJECT:
+        v.add("warn", "solid",
+              f"only {solid:.0%} of the surface faces outward. Vanilla heads run "
+              f"77%-100%, so parts of this will be culled and read as holes")
+    else:
+        v.add("fail", "solid",
+              f"only {solid:.0%} of the surface faces outward, below the worst "
+              f"vanilla head (77%). The mesh folds back on itself and will render "
+              f"full of holes. Usually a dense source - hair especially - reduced "
+              f"too far to hold its shape")
 
     return v
 
