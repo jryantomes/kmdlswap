@@ -58,3 +58,22 @@ def resolve(keys: list[str] | None) -> list[Companion]:
             f"Known: {', '.join(sorted(BY_KEY))}"
         )
     return [BY_KEY[k] for k in keys]
+
+
+def default_look(models, is_head) -> tuple[str | None, str | None]:
+    """The body and head a companion is normally seen in.
+
+    A companion ships several models - Carth has an underwear body, a clothed
+    one, a spare head and his own - and listing order is not preference. A
+    preview showing him in his underwear with the wrong face answers a question
+    nobody asked.
+
+    Bodies ending `bb` are the clothed default; `ba` is the underlayer. Among
+    heads the plain `p_<name>h` is the character's own, and the longer names are
+    variants, so the shortest wins.
+    """
+    heads = sorted((m for m in models if is_head(m)), key=lambda m: (len(m), m))
+    bodies = [m for m in models if not is_head(m)]
+    clothed = [m for m in bodies if m.lower().endswith("bb")]
+    return (clothed[0] if clothed else (bodies[0] if bodies else None),
+            heads[0] if heads else None)
