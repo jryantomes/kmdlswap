@@ -179,3 +179,45 @@ The result looks like a lumpy blob with a topknot. That is the input.
 no real face — and rendering it undecimated beside the decimated version shows
 decimation reproducing it faithfully. The pipeline is sound; the mesh is not.
 Worth remembering when judging future results by eye.
+
+## Clean confirmation: vanilla donor, halved vertex count — 2026-08-30
+
+Every earlier confirmation carried a confound. The Tripo head had no brow
+geometry; the scanned head was a self-intersecting tangle. `n_bith` has neither
+problem, which makes it the first test of the unlocked path on clean data:
+
+```
+p_carthh Head   565 -> 291 vertices   (a 48% reduction)
+donor           n_bith, its own geometry, UVs and texture N_Bith01
+solid           99%   (vanilla Carth is 96%)
+bones           16 of 16, none lost
+super-root      resolves to neck_g
+```
+
+**In game: renders solid and animates perfectly.**
+
+That settles three things at once. The vertex-count constraint is gone on clean
+data as well as on padding probes. The hollow heads really were mesh quality
+alone, exactly as the solidity measure predicted before either was installed.
+And weight transfer onto genuinely foreign vanilla geometry keeps every bone.
+
+`n_bith` was chosen on evidence rather than taste: across every vanilla `n_*`
+head it is 99% solid, definitively a non-speaking NPC, and roughly half Carth's
+vertex count.
+
+### The one flaw, and what it was
+
+The head read slightly small against the body. `--fit` scales uniformly to the
+*tightest* axis, which is the safe choice - nothing can end up wider than the
+part it replaces and clip through the body - but it means a donor whose
+proportions differ comes out smaller on its other two axes:
+
+| | X | Y | Z |
+|---|---|---|---|
+| Carth's head node | 0.161 | 0.225 | 0.281 |
+| Bith at scale 1.0 | 0.161 | 0.179 | 0.242 |
+| Bith at scale 1.15 | 0.185 | 0.205 | **0.278** |
+
+X matches exactly at 1.0 - that is the axis `min` fit - while height falls 14%
+short, which is what the eye reads. `--scale` now multiplies the fitted size;
+1.15 puts the height within 1% of Carth's.

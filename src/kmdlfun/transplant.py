@@ -111,6 +111,7 @@ def to_host_space(
     host_node,
     *,
     fit: bool = False,
+    scale: float = 1.0,
 ) -> tuple[ObjMesh, Alignment]:
     """Express a donor node's geometry in the host node's own frame."""
     donor_geo = ke.extract(donor_layout, donor_node)
@@ -142,10 +143,16 @@ def to_host_space(
     if fit:
         # Uniform, so the donor is not distorted: match the tightest axis and
         # re-centre on where the host part actually sits.
+        # The tightest axis is the safe choice - nothing ends up wider than the
+        # part it replaces and clips through the body - but it also means a donor
+        # with different proportions comes out smaller than the host on its other
+        # two axes. A Bith skull is tall and narrow against a human head, and in
+        # game it read as noticeably small. `scale` is the knob for that, because
+        # the right answer is a judgement this tool cannot make.
         factors = [
             host_size[i] / donor_size[i] for i in range(3) if donor_size[i] > 1e-9
         ]
-        f = min(factors) if factors else 1.0
+        f = (min(factors) if factors else 1.0) * scale
         moved = [
             tuple(host_mid[i] + (v[i] - donor_mid[i]) * f for i in range(3)) for v in moved
         ]
@@ -246,6 +253,7 @@ def transplant_node(
     donor_node_name: str,
     *,
     fit: bool = False,
+    scale: float = 1.0,
     max_influences: int = 4,
     reshape: bool = False,
     with_texture: bool = False,
@@ -275,7 +283,7 @@ def transplant_node(
 
     try:
         mesh, alignment = to_host_space(
-            donor_layout, donor_node, host_layout, host_node, fit=fit
+            donor_layout, donor_node, host_layout, host_node, fit=fit, scale=scale
         )
         result.alignment = alignment
         result.warnings.extend(alignment.notes())
