@@ -49,6 +49,10 @@ def main(argv: list[str] | None = None) -> int:
     tp.add_argument("--node", nargs="*", help="host node(s); default every matching node")
     tp.add_argument("--out", required=True)
     tp.add_argument("--fit", action="store_true", help="scale the donor part to the host part's size")
+    tp.add_argument("--scale", type=float, default=1.0,
+                    help="multiply the fitted size, for a donor whose "
+                         "proportions differ from the host's and so comes out "
+                         "smaller than the part it replaces")
     tp.add_argument("--max-influences", type=int, default=4)
     tp.add_argument("--reshape", action="store_true",
                     help="keep the host's vertices and move them onto the donor's surface; "
@@ -483,7 +487,8 @@ def _transplant(args) -> int:
     for host_node, donor_node in pairs:
         mdl2, mdx2, r = ktp.transplant_node(
             mdl, mdx, donor_layout, args.donor, host_node, donor_node,
-            fit=args.fit, max_influences=args.max_influences, reshape=args.reshape,
+            fit=args.fit, scale=args.scale,
+            max_influences=args.max_influences, reshape=args.reshape,
             with_texture=args.with_texture,
         )
         results.append(r)
