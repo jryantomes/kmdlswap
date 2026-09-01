@@ -191,10 +191,12 @@ def test_a_lip_fills_the_recording(tmp_path):
 
 
 def kotor_wrapped(inner: bytes, preamble: int = 58) -> bytes:
-    """A real WAV behind KOTOR's fake header, the way voice lines ship.
+    """A real WAV behind a decoy header.
 
-    The outer header claims 8-bit 22 kHz and a data chunk of zero; the truth is
-    the RIFF nested inside it.
+    This is the shape a modder ends up with: the community guide for getting
+    audio into KOTOR has you prepend a header, leaving the real RIFF nested
+    inside. The outer one claims 8-bit 22 kHz and a data chunk of zero. Shipped
+    ambient sound nests the same way behind a longer preamble.
     """
     import struct
 
@@ -206,9 +208,10 @@ def kotor_wrapped(inner: bytes, preamble: int = 58) -> bytes:
 
 
 def test_the_real_wav_inside_kotors_fake_header_is_the_one_read(tmp_path):
-    """`rfk_carth_a1.wav` reads as 16.72 seconds from its outer header and is
-    really 5.76. Believing the wrapper is wrong by a factor of three, and the
-    lip would run for three times as long as the voice."""
+    """The case that matters, because it is what a modder's own files look
+    like. `rfk_carth_a1.wav` reads as 16.72 seconds from its outer header and
+    is really 5.76 - believing the wrapper is wrong by a factor of three, and
+    the lip would run for three times as long as the voice."""
     inner = riff(64000 * 4, byte_rate=64000, rate=32000)   # 4s of 16-bit 32k
     path = tmp_path / "wrapped.wav"
     path.write_bytes(kotor_wrapped(inner))
@@ -217,7 +220,7 @@ def test_the_real_wav_inside_kotors_fake_header_is_the_one_read(tmp_path):
 
 
 def test_the_470_byte_preamble_is_handled_too(tmp_path):
-    """Ambient sound uses a longer wrapper - 0x1D6 - for the same trick."""
+    """Shipped ambient sound uses a longer wrapper - 0x1D6 - the same way."""
     inner = riff(22050 * 2)
     path = tmp_path / "ambient.wav"
     path.write_bytes(kotor_wrapped(inner, preamble=470))
@@ -226,10 +229,11 @@ def test_the_470_byte_preamble_is_handled_too(tmp_path):
 
 
 def test_a_header_over_mp3_data_is_refused_rather_than_guessed(tmp_path):
-    """The shipped `streamwaves` are MP3 behind a WAV header, and nothing in
-    that header is true - `af.wav` claims 384 kHz. Timing it needs frame
+    """Shipped *voice* is a third shape - MP3 behind a WAV header - and nothing
+    in that header is true; `af.wav` claims 384 kHz. Timing it needs frame
     decoding, and a confident wrong length is worse than none: it produces a
-    lip that silently does not match the voice."""
+    lip that silently does not match. SithCodec decodes these properly, and
+    anything it has been through reads like an ordinary file."""
     path = tmp_path / "fake.wav"
     path.write_bytes(riff(500_000, byte_rate=768_000, rate=384_000))
 
