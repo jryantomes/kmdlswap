@@ -87,11 +87,18 @@ def find_head_row(table, head: str) -> int | None:
 
 
 def register_head(install, out_dir, head_resref: str, *, label: str,
-                  like: str = "p_carthh") -> Registration:
+                  like: str = "p_carthh", dressed: bool = True,
+                  outfit: Outfit | str | None = None) -> Registration:
     """Add a head model to `heads.2da`, and an appearance that wears it.
 
     `like` is an existing *head* whose appearance supplies the fifty columns
     this one does not care about - body models, walk speed, blood colour.
+
+    `dressed` repeats one body across every clothing slot, which is what stops
+    a new character spawning in the underwear its template wears when nothing
+    is equipped. `outfit` says what to repeat - one from `outfits()`, or the
+    template's own body if left out. Turn `dressed` off for a party member who
+    really should change clothes with their armour.
     """
     out_dir = Path(out_dir)
     reg = Registration(label=label)
@@ -122,6 +129,10 @@ def register_head(install, out_dir, head_resref: str, *, label: str,
         f"appearance.2da: row {new_row} {label!r}, copied from row {template} "
         f"and pointed at head {row}"
     )
+    if dressed:
+        note = dress(appearance, new_row, outfit)
+        if note:
+            reg.notes.append(f"appearance.2da: {note}")
 
     out_dir.mkdir(parents=True, exist_ok=True)
     for name, table in ((HEADS, heads), (APPEARANCE, appearance)):
@@ -160,6 +171,100 @@ def register_creature(install, out_dir, model_resref: str, *, label: str,
     _save(appearance, path)
     reg.files.append(path)
     return reg
+
+
+SLOTS = "abcdefghi"
+
+
+@dataclass(frozen=True)
+class Outfit:
+    """A body model and the texture that goes with it - one thing to wear."""
+
+    model: str
+    texture: str
+    rows: int = 0
+    example: str = ""
+
+    def __str__(self) -> str:
+        worn = f" - {self.example}" if self.example else ""
+        return f"{self.model}{worn}"
+
+
+def outfits(install, *, library=None) -> list[Outfit]:
+    """Every outfit the game already dresses somebody in, commonest first.
+
+    The clothing slots of `appearance.2da` are a wardrobe: 117 distinct
+    body-and-texture pairs across the 313 humanoid rows, from Czerka officer to
+    Jedi councillor to the generic armour classes. Rather than guess what a new
+    character should wear, offer the modder the rack.
+
+    Pass `library` to drop anything whose model is not on disk.
+    """
+    appearance = _load(install, APPEARANCE)
+    headers = appearance.get_headers()
+    seen: dict[tuple[str, str], list] = {}
+
+    for row in range(appearance.get_height()):
+        if appearance.get_cell(row, "modeltype").strip().upper() != "B":
+            continue
+        label = appearance.get_cell(row, "label").strip()
+        for slot in SLOTS:
+            if f"model{slot}" not in headers:
+                continue
+            model = appearance.get_cell(row, f"model{slot}").strip()
+            texture = appearance.get_cell(row, f"tex{slot}").strip()
+            if not model or model == "****":
+                continue
+            entry = seen.setdefault((model.lower(), texture.lower()),
+                                    [model, texture, 0, ""])
+            entry[2] += 1
+            if not entry[3] and label:
+                entry[3] = label.replace("_", " ")
+
+    found = [Outfit(m, tx, n, eg) for m, tx, n, eg in seen.values()]
+    if library is not None:
+        found = [o for o in found if library.has(o.model)]
+    return sorted(found, key=lambda o: (-o.rows, o.model.lower()))
+
+
+def dress(table, row: int, outfit: Outfit | str | None = None) -> str | None:
+    """Put the same body in every clothing slot, the way NPCs do.
+
+    A `modeltype B` appearance carries a body model per equipment slot, and the
+    game uses `modela` when nothing is equipped. For a party member those are
+    real variants - Carth's `modela` is his underwear and `modelb` his jacket -
+    so a new character copied from his row and given no clothes spawns in the
+    underwear. That is not a missing item; it is the row working as designed
+    for somebody else.
+
+    Every plain NPC sidesteps it by repeating one model across all nine slots:
+    the Czerka officer is `N_CzerkaOff` nine times, so what he is wearing never
+    depends on what he is carrying. This does the same, using the body the row
+    already names as its `race`.
+    """
+    if isinstance(outfit, Outfit):
+        body, texture = outfit.model, outfit.texture or outfit.model
+    else:
+        body = (outfit or table.get_cell(row, "race")).strip()
+        if not body:
+            return None
+        # The texture that goes with that body, taken from whichever slot
+        # already pairs them, rather than assuming the two share a name -
+        # `N_CommM` wears `N_CommMD`.
+        texture = body
+        for slot in SLOTS:
+            column = f"model{slot}"
+            if column in table.get_headers() and                     table.get_cell(row, column).strip().lower() == body.lower():
+                found = table.get_cell(row, f"tex{slot}").strip()
+                if found:
+                    texture = found
+                break
+
+    for slot in SLOTS:
+        for column, value in ((f"model{slot}", body), (f"tex{slot}", texture)):
+            if column in table.get_headers():
+                table.set_cell(row, column, value)
+    return f"wearing {body} ({texture}) in every clothing slot, so what it "            f"wears does not depend on what it is carrying"
 
 
 def _append_like(table, template: int, changes: dict[str, str]) -> int:

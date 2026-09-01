@@ -81,12 +81,18 @@ class Character:
 def create(install, out_dir, *, resref: str, kind: str = NPC,
            name: str | None = None, model: str | None = None,
            label: str | None = None, like: str = "p_carthh",
-           template: str = STOCK_TEMPLATE) -> Character:
+           template: str = STOCK_TEMPLATE, outfit=None) -> Character:
     """Write the files a new character of `kind` needs.
 
     `model` is a head resref this character should wear - the thing a build
     just produced. Without one it reuses whatever the template blueprint wore,
     which is the cheapest kind of NPC and edits no tables at all.
+
+    `outfit` is what the body wears - one of `twoda.outfits()`, or a body
+    model resref. Left out, it wears the template's own body, and the reason
+    to set it is that a party member's row dresses differently from an NPC's:
+    Carth's unequipped slot is his underwear, so a character copied from him
+    and given no clothes spawns in it.
     """
     if kind not in KINDS:
         raise CharacterError(f"{kind!r} is not one of {', '.join(KINDS)}")
@@ -100,7 +106,8 @@ def create(install, out_dir, *, resref: str, kind: str = NPC,
     if model:
         from . import twoda as k2da
 
-        reg = k2da.register_head(install, out_dir, model, label=label, like=like)
+        reg = k2da.register_head(install, out_dir, model, label=label,
+                                 like=like, outfit=outfit)
         appearance_id = reg.appearance_row
         ch.appearance_row = reg.appearance_row
         ch.files.extend(reg.files)

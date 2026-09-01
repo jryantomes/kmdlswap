@@ -308,6 +308,28 @@ is the dialogue as it was before any of this, with no VO_ResRefs at all.
 - [ ] `python tools/render_catalogue.py --install "<K1 root>"` - 233 models in
       about a minute. Spot-check a few faces are the right way round.
 
+## 18. What the character is wearing
+
+Vex spawned undressed on the first run. Diagnosed offline: his appearance row
+was copied from Carth, and `modela` — the body used when nothing is equipped —
+is `P_CarthBA`, Carth's underwear. Party members have a real body per equipment
+slot; plain NPCs repeat one body across all nine, which is why the Czerka
+officer is `N_CzerkaOff` nine times and never undresses. The Transplant tab now
+has a **Wearing** box holding the 117 outfits the game already uses.
+
+- [ ] Rebuild Vex with **Wearing** left on `same body as the host`. He should
+      now be dressed in Carth's jacket rather than the underwear — that alone
+      is the fix.
+- [ ] Rebuild with **Wearing** set to `N_CzerkaOff`. He should be in the Czerka
+      officer's uniform with the transplanted head on top.
+- [ ] Try one where model and texture differ — `N_CommF (Commoner Dirty Fem
+      Asian)` wears `N_CommFD`. A wrong texture here shows as a white or
+      missing body, so this is the one that proves the pairing is read rather
+      than assumed.
+- [ ] Check he still animates and his mouth still moves after the change. The
+      clothing slots should not touch either, but the head and body are the
+      same model at runtime.
+
 ---
 
 ## Housekeeping
