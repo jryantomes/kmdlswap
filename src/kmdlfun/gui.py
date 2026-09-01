@@ -43,6 +43,7 @@ WHOLE_MODEL = "matching nodes (whole model)"
 ANYONE = "anyone"
 AUTO_NODE = "automatic"
 NOT_A_CHARACTER = "just a model"
+SAME_AS_HOST = "same body as the host"
 
 # What is coming, and honestly where each one is. "Command line only" means the
 # work is done and tested and only the button is missing - which is worth
@@ -123,6 +124,7 @@ class TransplantSettings:
     # "" for a bare model, or npc / talker / companion.
     character_kind: str = ""
     character_name: str = ""
+    outfit: str = ""
 
 
 def guess_install() -> str:
@@ -476,6 +478,24 @@ class App(ttk.Frame):
         ttk.Entry(who, textvariable=self.character_name, width=18).pack(side="left")
         self.character_note = ttk.Label(who, text="", foreground="#666")
         self.character_note.pack(side="left", padx=(8, 0))
+
+        # What it wears. An appearance row carries a body model per equipment
+        # slot, and the game uses the unequipped one for a character carrying
+        # no clothes - which on a party member's row is their underwear. Carth
+        # is the example: copy his row, equip nothing, and the character spawns
+        # in `P_CarthBA`. Picking here fills every slot with one outfit, the
+        # way vanilla NPCs do.
+        wear = ttk.Frame(page)
+        wear.grid(row=9, column=0, columnspan=5, sticky="w", pady=(6, 0))
+        ttk.Label(wear, text="Wearing").pack(side="left", padx=(0, 6))
+        self.outfit = tk.StringVar(value=SAME_AS_HOST)
+        self.outfit_box = ttk.Combobox(wear, textvariable=self.outfit,
+                                       width=34, state="readonly",
+                                       values=[SAME_AS_HOST])
+        self.outfit_box.pack(side="left")
+        ttk.Label(wear, text="the game's whole wardrobe - one body in every "
+                             "equipment slot, so it never undresses",
+                  foreground="#666").pack(side="left", padx=(8, 0))
         ttk.Label(
             page,
             text=("Preview writes nothing - it draws the result on the Preview tab "
@@ -1154,6 +1174,38 @@ class App(ttk.Frame):
                 return          # a missing face is not worth interrupting anyone
 
         threading.Thread(target=work, daemon=True).start()
+
+    def _load_wardrobe(self, install: str):
+        """Read what the install already dresses people in, off the Tk thread.
+
+        Reading `appearance.2da` through Override is quick, but the model
+        library it is filtered against is not, and neither belongs on the
+        thread drawing the window.
+        """
+        if getattr(self, "_wardrobe_for", None) == install:
+            return
+        self._wardrobe_for = install
+
+        def work():
+            try:
+                from . import twoda as k2da
+                from .library import ModelLibrary
+
+                rack = k2da.outfits(install, library=ModelLibrary(install))
+                self.events.put(("wardrobe", rack))
+            except Exception:  # noqa: BLE001
+                return          # the box keeps its one safe entry
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _show_wardrobe(self, rack):
+        # The resref leads, because that is what goes in the table and what
+        # `cfg.outfit` is parsed back out of; the example is there to say what
+        # it looks like without rendering 117 bodies.
+        self.outfit_box.config(values=[SAME_AS_HOST] + [
+            f"{o.model}  ({o.example})" if o.example else o.model for o in rack
+        ])
+        self._say(f"{len(rack)} outfits available to wear")
 
     def _show_thumb(self, job: int, label: str, path: str):
         if job != self._thumb_job or label not in self.donor_labels:
@@ -1910,6 +1962,8 @@ class App(ttk.Frame):
                 character_kind=("" if self.character_kind.get() == NOT_A_CHARACTER
                                 else self.character_kind.get()),
                 character_name=self.character_name.get().strip(),
+                outfit=("" if self.outfit.get() == SAME_AS_HOST
+                        else self.outfit.get()),
             )
             self.worker = threading.Thread(
                 target=self._transplant_work,
@@ -2127,6 +2181,7 @@ class App(ttk.Frame):
                             kind=cfg.character_kind,
                             name=cfg.character_name or cfg.save_as,
                             model=written_as, like=host,
+                            outfit=cfg.outfit.split(" ")[0] or None,
                         )
                         lines.extend(ch.notes)
                         lines.extend(f"still yours: {x}" for x in ch.todo)
@@ -2290,6 +2345,7 @@ class App(ttk.Frame):
                     cache.setdefault(scanned, kinds)
                     self._kind_cache = cache
                     self._say(f"indexed {len(self.models)} character models")
+                    self._load_wardrobe(scanned)
                     self._refresh_donors()
                     self.build_btn.config(state="normal")
                 elif kind == "done_effect":
@@ -2300,6 +2356,8 @@ class App(ttk.Frame):
                         self._say(line)
                     self.progress.config(value=100)
                     self.build_btn.config(state="normal")
+                elif kind == "wardrobe":
+                    self._show_wardrobe(payload)
                 elif kind == "thumb":
                     self._show_thumb(*payload)
                 elif kind == "ranked":

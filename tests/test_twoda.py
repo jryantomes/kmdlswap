@@ -130,3 +130,97 @@ def test_a_2da_can_be_installed(install_path, out):
     k2da.register_head(install_path, out, "p_testhead", label="Test_Head")
     names = {p.name for p in kinstall.collect(out)}
     assert {"heads.2da", "appearance.2da"} <= names
+
+
+# --- what it wears ----------------------------------------------------------
+#
+# Seen in game on 2026-09-01: a character copied from Carth's row spawned in
+# his underwear. Not a bug in the row - `modela` is the body worn when nothing
+# is equipped, and for a party member who changes clothes that is `P_CarthBA`.
+# The blueprint carried no clothing, so the game used it.
+
+
+def slots(table, row, column="model"):
+    return [table.get_cell(row, f"{column}{s}") for s in k2da.SLOTS]
+
+
+def test_a_new_character_does_not_inherit_a_party_members_underwear(
+        install_path, out):
+    """The failure, stated directly: Carth's unequipped slot must not survive
+    into a character who owns no clothes."""
+    reg = k2da.register_head(install_path, out, "p_testhead",
+                             label="Test", like="p_carthh")
+    appearance = read(out / "appearance.2da")
+    worn = slots(appearance, reg.appearance_row)
+
+    assert "P_CarthBA" not in worn, "spawns in the underwear"
+    assert len(set(worn)) == 1, f"still changes with equipment: {sorted(set(worn))}"
+
+
+def test_every_slot_gets_the_same_body_the_way_npcs_do(install_path, out):
+    """The Czerka officer is `N_CzerkaOff` nine times over, so what he is
+    wearing never depends on what he is carrying. Copy that."""
+    reg = k2da.register_head(install_path, out, "p_testhead",
+                             label="Test", like="p_carthh")
+    appearance = read(out / "appearance.2da")
+    row = reg.appearance_row
+
+    assert set(slots(appearance, row)) == {appearance.get_cell(row, "race")}
+    assert len(set(slots(appearance, row, "tex"))) == 1
+
+
+def test_an_outfit_can_be_chosen(install_path, out):
+    rack = k2da.outfits(install_path)
+    pick = next(o for o in rack if o.model.lower() == "n_czerkaoff")
+
+    reg = k2da.register_head(install_path, out, "p_testhead", label="Test",
+                             like="p_carthh", outfit=pick)
+    appearance = read(out / "appearance.2da")
+
+    assert set(slots(appearance, reg.appearance_row)) == {pick.model}
+    assert set(slots(appearance, reg.appearance_row, "tex")) == {pick.texture}
+
+
+def test_an_outfit_can_be_named_rather_than_picked(install_path, out):
+    """The GUI passes back the resref it showed, not the object."""
+    reg = k2da.register_head(install_path, out, "p_testhead", label="Test",
+                             like="p_carthh", outfit="N_CzerkaOff")
+    appearance = read(out / "appearance.2da")
+
+    assert set(slots(appearance, reg.appearance_row)) == {"N_CzerkaOff"}
+
+
+def test_the_texture_is_taken_from_the_slot_that_pairs_it(install_path, out):
+    """`N_CommM` wears `N_CommMD`. Assuming the two share a name puts a
+    character in a texture that does not exist."""
+    rack = k2da.outfits(install_path)
+    commoner = next(o for o in rack if o.model.lower() == "n_commf")
+
+    assert commoner.texture.lower() != commoner.model.lower()
+
+    reg = k2da.register_head(install_path, out, "p_testhead", label="Test",
+                             like="p_carthh", outfit=commoner)
+    appearance = read(out / "appearance.2da")
+    assert set(slots(appearance, reg.appearance_row, "tex")) == {commoner.texture}
+
+
+def test_a_party_member_can_keep_changing_clothes(install_path, out):
+    """Off is a real answer: somebody building an actual party member wants
+    the per-slot variants that made this a problem in the first place."""
+    reg = k2da.register_head(install_path, out, "p_testhead", label="Test",
+                             like="p_carthh", dressed=False)
+    appearance = read(out / "appearance.2da")
+
+    assert len(set(slots(appearance, reg.appearance_row))) > 1
+
+
+def test_the_wardrobe_is_what_the_game_already_wears(install_path, out):
+    from kmdlfun.library import ModelLibrary
+
+    rack = k2da.outfits(install_path, library=ModelLibrary(install_path))
+    models = {o.model.lower() for o in rack}
+
+    assert len(rack) > 50, "the wardrobe should be worth browsing"
+    assert {"n_czerkaoff", "n_jedicounm", "n_commf"} <= models
+    assert all(o.texture for o in rack), "an outfit with no texture is unwearable"
+    assert rack == sorted(rack, key=lambda o: (-o.rows, o.model.lower()))
