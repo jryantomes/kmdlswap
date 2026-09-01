@@ -249,16 +249,31 @@ Built on the result above. `kmdlfun lips <dlg> --out <dir> --assign --replies`
 writes a `.lip` per line and, where a line had no `VO_ResRef`, an updated copy
 of the dialogue beside them. **The original dialogue is never edited.**
 
-- [ ] Run it on `rfk_broker.dlg`, copy the whole output folder into Override -
-      lips *and* the updated dialogue, since the lips are useless without the
-      resrefs that name them - and talk to him.
+**Already installed for you, 2026-09-01.** What is in `Override/` now:
+
+| file | what |
+|---|---|
+| `rfk_broker.dlg.backup-before-generated-lips` | **new** - the dialogue as it was a moment before (14,360 bytes, with only entry 0 named) |
+| `rfk_broker.dlg` | replaced, 14,360 → 14,685 bytes. All 26 spoken lines now have a `VO_ResRef` |
+| 26 × `rfk_brok*.lip` | **new** (25) and replaced (1 - `rfk_brk_01.lip`, which was the borrowed Carth one and is now generated like the rest) |
+
+Verified after copying: all 26 spoken lines have a `VO_ResRef` *and* a lip file
+on disk. Your other 19 `rfk_*` files were not touched.
+
+- [x] Installed and ready - just talk to him.
 - [ ] Does the mouth move on **every** line now, not just the first?
 - [ ] Does it stop when the line does, or hang open? Ending on a closed mouth
       is the thing most likely to look wrong.
 
-Timing is estimated from word count at two and a half words a second. If lines
-consistently finish moving too early or too late, that number is the one to
-change.
+Timing is estimated from word count at two and a half words a second, so a long
+line gets a long lip: `rfk_brokere01.lip` runs 13.6 seconds over 110 keyframes.
+If you click past it the mouth stops with the line; if you linger, it stops
+moving before you do. Watch whether that reads as natural or as him running
+out. That rate is the single number to change.
+
+**To undo everything:** delete `Override/rfk_brok*.lip`, then rename
+`rfk_broker.dlg.backup-before-lip-test` back over `rfk_broker.dlg` - that one
+is the dialogue as it was before any of this, with no VO_ResRefs at all.
 
 ## 17. The catalogue
 
