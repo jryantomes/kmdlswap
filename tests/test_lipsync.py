@@ -109,3 +109,76 @@ def test_shapes_are_ones_the_format_knows():
     known = {s.name for s in LIPShape}
     for mapping in (lipsync.DIGRAPHS, lipsync.LETTERS):
         assert set(mapping.values()) <= known, set(mapping.values()) - known
+
+
+# --- timing from a recording ------------------------------------------------
+
+
+def riff(data_bytes: int, *, declared_data: int | None = None,
+         declared_riff: int | None = None, byte_rate: int = 22050) -> bytes:
+    """A WAV, optionally with a header that lies about its own size."""
+    import struct
+
+    fmt = struct.pack("<HHIIHH", 1, 1, byte_rate, byte_rate, 1, 8)
+    body = bytes(data_bytes)
+    data_size = data_bytes if declared_data is None else declared_data
+    chunks = (b"fmt " + struct.pack("<I", len(fmt)) + fmt
+              + b"data" + struct.pack("<I", data_size) + body)
+    riff_size = (len(chunks) + 4) if declared_riff is None else declared_riff
+    return b"RIFF" + struct.pack("<I", riff_size) + b"WAVE" + chunks
+
+
+def test_a_wav_gives_its_real_length(tmp_path):
+    path = tmp_path / "line.wav"
+    path.write_bytes(riff(22050 * 3))
+    assert lipsync.duration_of(path) == pytest.approx(3.0, abs=0.01)
+
+
+def test_a_header_that_lies_is_measured_instead(tmp_path):
+    """The case that matters. `rfk_carth_a1.wav` declares a RIFF size of 50
+    bytes and a data chunk of zero inside a 368 KB file, so `wave.open` reports
+    0.00 seconds - and a lip built on that would never move at all."""
+    path = tmp_path / "lying.wav"
+    path.write_bytes(riff(22050 * 5, declared_data=0, declared_riff=50))
+
+    import wave
+
+    with wave.open(str(path)) as w:
+        assert w.getnframes() == 0, "the standard library believes the header"
+
+    assert lipsync.duration_of(path) == pytest.approx(5.0, abs=0.01)
+
+
+def test_something_that_is_not_audio_says_so(tmp_path):
+    path = tmp_path / "notaudio.wav"
+    path.write_bytes(b"this is not a wav file, not even slightly" * 4)
+    assert lipsync.duration_of(path) is None
+    assert lipsync.duration_of(tmp_path / "missing.wav") is None
+
+
+def test_a_recording_is_found_by_the_line_it_belongs_to(tmp_path):
+    (tmp_path / "abc_e01.wav").write_bytes(riff(22050))
+    (tmp_path / "abc_e02.mp3").write_bytes(riff(22050))
+
+    assert lipsync.find_audio(tmp_path, "abc_e01").name == "abc_e01.wav"
+    assert lipsync.find_audio(tmp_path, "abc_e02").name == "abc_e02.mp3"
+    assert lipsync.find_audio(tmp_path, "abc_e99") is None
+
+
+def test_a_lip_fills_the_recording(tmp_path):
+    """The point of the feature: the mouth moves for as long as the voice does,
+    rather than for as long as the word count guessed."""
+    path = tmp_path / "long.wav"
+    path.write_bytes(riff(22050 * 12))
+    seconds = lipsync.duration_of(path)
+
+    short_text = "Yes."
+    guessed = lipsync.build(short_text)
+    matched = lipsync.build(short_text, seconds=seconds)
+
+    assert guessed.length < 2.0, "four letters would be estimated as brief"
+    assert matched.length == pytest.approx(12.0, abs=0.01)
+    assert len(list(matched)) > len(list(guessed)) * 4, (
+        "it has to fill the time, not just declare it"
+    )
+    assert [k.shape.name for k in matched][-1] == "NEUTRAL"

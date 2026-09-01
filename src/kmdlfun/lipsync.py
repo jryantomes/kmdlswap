@@ -15,7 +15,8 @@ the lip; `o` and `u` round it. Watched at conversational speed that reads as
 speech, because what the eye checks is whether the mouth moves *with* the
 words, not whether it is saying them.
 
-Timing is estimated from the word count. Measured against a shipped line -
+Timing comes from the recording when there is one, and from the word count
+when there is not. Measured against a shipped line -
 `nm13aabast01059_`, 4.71 seconds and 38 keyframes - vanilla runs about eight
 shapes a second, which is the density used here.
 
@@ -27,6 +28,7 @@ screen, which for an unvoiced NPC is the whole of what anyone wanted.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 # Roughly eight shapes a second, from `nm13aabast01059_`: 38 keyframes in 4.71s.
 SHAPES_PER_SECOND = 8.0
@@ -50,6 +52,61 @@ LETTERS = {
     "k": "KG", "g": "KG", "q": "KG",
     "l": "L", "n": "NG", "r": "AH", "w": "OOH", "h": "EH", "j": "SH", "x": "KG",
 }
+
+
+AUDIO_SUFFIXES = (".wav", ".mp3")
+
+
+def duration_of(path) -> float | None:
+    """How long an audio file actually plays for, or None if it cannot be read.
+
+    Not `wave.open`, which believes the header. KOTOR voice files routinely do
+    not: `rfk_carth_a1.wav` declares a RIFF size of 50 bytes and a data chunk of
+    **zero** in a 368 KB file, so the standard library reports 0.00 seconds and
+    a lip generated from that would never move. Its real length is 16.72
+    seconds, which is only visible by measuring the bytes that are there.
+
+    So the declared size is used when it is sane and the remaining bytes when it
+    is not. Files with honest headers - the ones the game ships, and anything a
+    normal recorder writes - come out the same either way.
+    """
+    import struct
+
+    path = Path(path)
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return None
+    if len(raw) < 44 or raw[:4] != b"RIFF":
+        # A real MP3 needs frame-by-frame decoding to time; not worth it here,
+        # and saying so beats guessing.
+        return None
+
+    pos, byte_rate = 12, 0
+    while pos + 8 <= len(raw):
+        chunk = raw[pos:pos + 4]
+        declared = struct.unpack_from("<I", raw, pos + 4)[0]
+        body = pos + 8
+        if chunk == b"fmt " and body + 16 <= len(raw):
+            byte_rate = struct.unpack_from("<I", raw, body + 8)[0]
+        elif chunk == b"data":
+            available = len(raw) - body
+            size = declared if 0 < declared <= available else available
+            return (size / byte_rate) if byte_rate else None
+        if declared <= 0:
+            break
+        pos = body + declared + (declared & 1)
+    return None
+
+
+def find_audio(folder, resref: str):
+    """The recording for a line, if there is one."""
+    folder = Path(folder)
+    for suffix in AUDIO_SUFFIXES:
+        candidate = folder / f"{resref}{suffix}"
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def estimate_length(text: str) -> float:

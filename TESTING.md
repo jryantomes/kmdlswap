@@ -265,8 +265,15 @@ on disk. Your other 19 `rfk_*` files were not touched.
 - [ ] Does it stop when the line does, or hang open? Ending on a closed mouth
       is the thing most likely to look wrong.
 
-Timing is estimated from word count at two and a half words a second, so a long
-line gets a long lip: `rfk_brokere01.lip` runs 13.6 seconds over 110 keyframes.
+If you record the lines, pass `--audio <folder>` and each lip is made exactly
+as long as its own recording - name the files after the line's `VO_ResRef`.
+Worth knowing: KOTOR voice files often lie about their own length. Your
+`rfk_carth_a1.wav` declares a data chunk of **zero** in a 368 KB file, so the
+standard library calls it 0.00 seconds; its real length is 16.72, which is what
+this reads.
+
+Without recordings, timing is estimated from word count at two and a half words
+a second, so a long line gets a long lip: `rfk_brokere01.lip` runs 13.6 seconds over 110 keyframes.
 If you click past it the mouth stops with the line; if you linger, it stops
 moving before you do. Watch whether that reads as natural or as him running
 out. That rate is the single number to change.

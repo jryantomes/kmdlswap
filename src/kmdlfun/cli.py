@@ -211,6 +211,15 @@ def main(argv: list[str] | None = None) -> int:
                          "only lines that already name a VO get a lip")
     lp.add_argument("--replies", action="store_true",
                     help="also do the player's lines")
+    lp.add_argument("--audio", metavar="DIR",
+                    help="a folder of recordings. A line whose VO_ResRef has a "
+                         "matching .wav or .mp3 gets a lip as long as the "
+                         "recording, so the mouth moves for exactly as long as "
+                         "the voice does. Lines without one fall back to an "
+                         "estimate from the word count")
+    lp.add_argument("--seconds", type=float, metavar="N",
+                    help="force every lip to this length, for when the timing "
+                         "is known but the files are not here")
 
     sub.add_parser("gui", help="launch the desktop app")
 
@@ -954,7 +963,8 @@ def _lips(args) -> int:
     prefix = (args.prefix or source.stem)[:11]
 
     lists = ["EntryList"] + (["ReplyList"] if args.replies else [])
-    written = assigned = skipped = 0
+    written = assigned = skipped = timed = estimated = 0
+    unreadable: list[str] = []
     resref_type = None
 
     for listname in lists:
@@ -978,15 +988,40 @@ def _lips(args) -> int:
                 vo = f"{prefix}{'r' if listname == 'ReplyList' else 'e'}{i:02d}"
                 item.set_resref("VO_ResRef", resref_type(vo))
                 assigned += 1
-            size = lipsync.write(text, out_dir / f"{vo}.lip")
+            seconds, source = args.seconds, "given"
+            if seconds is None and args.audio:
+                recording = lipsync.find_audio(args.audio, vo)
+                if recording is not None:
+                    seconds = lipsync.duration_of(recording)
+                    if seconds:
+                        source = recording.name
+                        timed += 1
+                    else:
+                        unreadable.append(recording.name)
+            if seconds is None:
+                source = "estimated"
+                estimated += 1
+
+            size = lipsync.write(text, out_dir / f"{vo}.lip", seconds=seconds)
             written += 1
             if written <= 4:
-                one_line = " ".join(text.split())[:52]
-                print(f"  {vo}.lip  {size:>4}B  {one_line}")
+                one_line = " ".join(text.split())[:40]
+                length = seconds if seconds else lipsync.estimate_length(text)
+                print(f"  {vo}.lip  {size:>4}B  {length:5.2f}s  {source:<18} "
+                      f"{one_line}")
 
     if written > 4:
         print(f"  ... and {written - 4} more")
     print(f"\n{written} lip file(s) written to {out_dir}")
+    if timed:
+        print(f"{timed} lip(s) matched to a recording's real length")
+    if estimated:
+        print(f"{estimated} estimated from the word count"
+              + (" (pass --audio to use the recordings)" if not args.audio else
+                 " - no recording found for those"))
+    if unreadable:
+        print(f"could not read a length from: {', '.join(unreadable[:4])}"
+              + (" ..." if len(unreadable) > 4 else ""))
     if skipped:
         print(f"{skipped} line(s) have no VO_ResRef and were skipped; "
               f"--assign gives them one")
