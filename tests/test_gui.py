@@ -1466,3 +1466,144 @@ def test_the_character_workers_touch_no_tk_variable(app):
     drawn = inspect.getsource(kgui.App._draw_character)
     worker = drawn[drawn.index("def work()"):]
     assert ".get()" not in worker, worker
+
+
+# --- settings, and finding the games ----------------------------------------
+#
+# The Folders panel was three rows of entry boxes permanently occupying the top
+# of the window to say something that changes about twice a year.
+
+
+def test_the_folders_panel_is_not_on_screen(app):
+    """It moved behind Settings. What is left is one line of summary."""
+    from tkinter import ttk
+
+    frames = [w for w in app.winfo_children() if isinstance(w, ttk.LabelFrame)]
+    assert not any(f.cget("text") == "Folders" for f in frames), (
+        "the panel is still taking up the top of the window"
+    )
+    assert app.where.winfo_exists()
+
+
+def test_the_paths_are_still_there_as_variables(app):
+    """Everything else in the app reads these, so moving the widgets must not
+    move the values."""
+    for name in ("install", "install2", "out_dir", "jade"):
+        assert hasattr(app, name), name
+
+
+def test_the_status_line_names_things_rather_than_pathing_them(app, tmp_path):
+    """A path is sixty characters of noise; the folder name is the part
+    anybody reads."""
+    app.install.set(r"E:\SteamLibrary\steamapps\common\swkotor")
+    app.out_dir.set(str(tmp_path / "out_fun"))
+    app._say_where()
+    text = app.where.cget("text")
+
+    assert "swkotor" in text
+    assert "SteamLibrary" not in text, text
+    assert "out_fun" in text
+
+
+def test_an_unset_install_is_flagged_in_the_status_line(app):
+    app.install.set("")
+    app._say_where()
+
+    assert "not set" in app.where.cget("text")
+    # Tk hands back a colour object, not the string it was given.
+    assert str(app.where.cget("foreground")) == "#a35", "it should not look fine"
+
+
+def test_there_is_a_settings_menu(app):
+    labels = []
+    menu = app.settings_menu
+    for i in range(menu.index("end") + 1):
+        try:
+            labels.append(menu.entrycget(i, "label"))
+        except Exception:  # separators have no label
+            labels.append(None)
+
+    assert "Folders..." in labels
+    assert any(l and "Find my games" in l for l in labels)
+    assert any(l and "every drive" in l for l in labels)
+
+
+def test_the_settings_window_opens_once(app):
+    app._open_settings()
+    first = app._settings_window
+    assert first is not None and first.winfo_exists()
+
+    app._open_settings()
+    assert app._settings_window is first, "a second window was opened"
+
+    first.destroy()
+    app._settings_window = None
+
+
+def test_detection_fills_what_is_empty(app):
+    from kmdlfun import installs
+
+    found = installs.Found(paths={installs.K1: r"C:\a\swkotor",
+                                  installs.JADE: r"C:\a\jade"},
+                           how={installs.K1: "test", installs.JADE: "test"})
+    app.install.set("")
+    app.jade.set("")
+    app._show_installs(found, {"kotor": "", "kotor2": "", "jade": ""}, False)
+
+    assert app.install.get() == r"C:\a\swkotor"
+    assert app.jade.get() == r"C:\a\jade"
+
+
+def test_detection_never_overwrites_a_path_somebody_typed(app):
+    """Being helpful about the box they already filled in is just losing their
+    answer."""
+    from kmdlfun import installs
+
+    app.install.set(r"D:\my\own\kotor")
+    found = installs.Found(paths={installs.K1: r"C:\somewhere\else"},
+                           how={installs.K1: "test"})
+    app._show_installs(found, {"kotor": r"D:\my\own\kotor"}, False)
+
+    assert app.install.get() == r"D:\my\own\kotor"
+
+
+def test_a_quiet_startup_says_nothing_about_what_it_found(app):
+    """Announcing three finds on every launch is the clutter this replaced."""
+    from kmdlfun import installs
+
+    app.log.configure(state="normal")
+    app.log.delete("1.0", "end")
+    app.log.configure(state="disabled")
+
+    app.install.set("")
+    found = installs.Found(paths={installs.K1: r"C:\a\swkotor"},
+                           how={installs.K1: "test"})
+    app._show_installs(found, {"kotor": ""}, False)
+
+    assert app.log.get("1.0", "end").strip() == ""
+    assert "swkotor" in app.where.cget("text"), "but the status line updates"
+
+
+def test_asking_out_loud_does_report(app):
+    from kmdlfun import installs
+
+    app.log.configure(state="normal")
+    app.log.delete("1.0", "end")
+    app.log.configure(state="disabled")
+
+    app.install.set("")
+    found = installs.Found(paths={installs.K1: r"C:\a\swkotor"},
+                           how={installs.K1: "Steam library C:\a"})
+    app._show_installs(found, {"kotor": ""}, True)
+
+    assert "swkotor" in app.log.get("1.0", "end")
+
+
+def test_the_detection_worker_touches_no_tk_variable(app):
+    import inspect
+
+    from kmdlfun import gui as kgui
+
+    body = inspect.getsource(kgui.App._detect_installs)
+    worker = body[body.index("def work()"):]
+    assert ".get()" not in worker, worker

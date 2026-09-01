@@ -21,6 +21,7 @@ timer.
 
 from __future__ import annotations
 
+import os
 import queue
 import threading
 import traceback
@@ -87,11 +88,7 @@ UPCOMING = (
     ),
 )
 
-DEFAULT_INSTALLS = [
-    r"E:\SteamLibrary\steamapps\common\swkotor",
-    r"C:\Program Files (x86)\Steam\steamapps\common\swkotor",
-    r"C:\GOG Games\Star Wars - KotOR",
-]
+
 
 
 @dataclass(frozen=True)
@@ -127,24 +124,22 @@ class TransplantSettings:
 
 
 def guess_install() -> str:
-    for p in DEFAULT_INSTALLS:
-        if (Path(p) / "chitin.key").is_file():
-            return p
-    return ""
+    """Where KOTOR is, without asking.
 
+    This used to be three hardcoded folders per game, which works on the
+    machine the list was written on and nowhere else. `installs` reads Steam's
+    own library index instead, so a game on a second drive is found rather
+    than silently missed.
+    """
+    from . import installs
 
-DEFAULT_INSTALLS_2 = [
-    r"E:\SteamLibrary\steamapps\common\Knights of the Old Republic II",
-    r"C:\Program Files (x86)\Steam\steamapps\common\Knights of the Old Republic II",
-    r"C:\GOG Games\Star Wars - KotOR2",
-]
+    return installs.detect().get(installs.K1)
 
 
 def guess_install2() -> str:
-    for p in DEFAULT_INSTALLS_2:
-        if (Path(p) / "chitin.key").is_file():
-            return p
-    return ""
+    from . import installs
+
+    return installs.detect().get(installs.K2)
 
 
 class App(ttk.Frame):
@@ -179,40 +174,207 @@ class App(ttk.Frame):
     # ---- shared ------------------------------------------------------------
 
     def _build_paths(self):
-        box = ttk.LabelFrame(self, text="Folders", padding=8)
-        box.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        """One line saying where things are, and a way in to change them.
+
+        This was a three-row panel with three entry boxes and three Browse
+        buttons, permanently occupying the top of the window to say something
+        that changes about twice a year. It is a summary now; the boxes live
+        behind Settings.
+        """
+        bar = ttk.Frame(self)
+        bar.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        bar.columnconfigure(0, weight=1)
+
+        self.install = tk.StringVar(value="")
+        self.install2 = tk.StringVar(value="")
+        self.out_dir = tk.StringVar(value=str(Path.cwd() / "out_fun"))
+        self.jade = tk.StringVar(value="")
+
+        self.where = ttk.Label(bar, text="looking for your games...",
+                               foreground="#666")
+        self.where.grid(row=0, column=0, sticky="w")
+        ttk.Button(bar, text="Settings", command=self._open_settings).grid(
+            row=0, column=1, padx=(8, 0))
+
+        for var in (self.install, self.install2, self.out_dir):
+            var.trace_add("write", lambda *_a: self._say_where())
+
+        self._build_menu()
+        # Detection reads Steam's index and a few known folders - fast enough
+        # to do on the way up, and the alternative is an empty box that looks
+        # like the app is broken.
+        self.after(10, self._detect_installs)
+
+    def _build_menu(self):
+        master = self.winfo_toplevel()
+        menubar = tk.Menu(master)
+
+        settings = tk.Menu(menubar, tearoff=0)
+        settings.add_command(label="Folders...", command=self._open_settings)
+        settings.add_command(label="Find my games",
+                             command=lambda: self._detect_installs(deep=False,
+                                                                   loud=True))
+        settings.add_command(label="Search every drive",
+                             command=lambda: self._detect_installs(deep=True,
+                                                                   loud=True))
+        settings.add_separator()
+        settings.add_command(label="Open the output folder",
+                             command=self._open_output)
+        menubar.add_cascade(label="Settings", menu=settings)
+
+        try:
+            master.config(menu=menubar)
+        except tk.TclError:
+            pass            # a toplevel that will not take a menubar is not fatal
+        self.menubar = menubar
+        self.settings_menu = settings
+
+    def _say_where(self):
+        """The status line: names, not paths. A path is 60 characters of noise."""
+        bits = []
+        for label, var in (("KOTOR", self.install), ("KOTOR II", self.install2)):
+            value = var.get().strip()
+            bits.append(f"{label}: {Path(value).name if value else 'not set'}")
+        out = self.out_dir.get().strip()
+        bits.append(f"output: {Path(out).name if out else 'not set'}")
+        self.where.config(text="   ".join(bits),
+                          foreground="#666" if self.install.get().strip()
+                          else "#a35")
+
+    def _detect_installs(self, *, deep: bool = False, loud: bool = False):
+        """Fill in whatever is not already set, off the Tk thread."""
+        if getattr(self, "_detecting", False):
+            return
+        self._detecting = True
+        if loud:
+            self._say("looking for your games" + (" on every drive" if deep else ""))
+
+        already = {k: v.get().strip() for k, v in
+                   (("kotor", self.install), ("kotor2", self.install2),
+                    ("jade", self.jade))}
+
+        def work():
+            try:
+                from . import installs
+
+                found = installs.detect(deep=deep)
+                self.events.put(("installs", (found, already, loud)))
+            except Exception as exc:  # noqa: BLE001
+                self.events.put(("installs_failed", str(exc)))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _show_installs(self, found, already, loud):
+        self._detecting = False
+        from . import installs
+
+        pairs = ((installs.K1, self.install), (installs.K2, self.install2),
+                 (installs.JADE, self.jade))
+        filled = []
+        for key, var in pairs:
+            path = found.get(key)
+            # Never overwrite a path somebody typed - being helpful about the
+            # box they already filled in is just losing their answer.
+            if path and not already.get(key):
+                var.set(path)
+                filled.append((key, path, found.how.get(key, "")))
+
+        self._say_where()
+        if filled:
+            installs.save({k: v.get().strip() for k, v in pairs})
+            # Only say so when asked. Announcing three finds on every launch is
+            # the clutter this whole change exists to remove, and the status
+            # line already carries the answer.
+            if loud:
+                for key, path, how in filled:
+                    label = next(g.label for g in installs.GAMES if g.key == key)
+                    self._say(f"found {label} at {path}  ({how})")
+        elif loud or not self.install.get().strip():
+            missing = [g.label for g in installs.GAMES if not found.get(g.key)]
+            self._say("nothing new found"
+                      + (f"; still missing {', '.join(missing)} - "
+                         f"try Settings > Search every drive, or set it by hand"
+                         if missing else ""))
+
+    def _open_output(self):
+        import subprocess
+
+        path = Path(self.out_dir.get().strip() or ".")
+        path.mkdir(parents=True, exist_ok=True)
+        try:
+            if os.name == "nt":
+                os.startfile(path)          # noqa: S606
+            else:
+                subprocess.Popen(["xdg-open", str(path)])
+        except Exception as exc:  # noqa: BLE001
+            self._say(f"could not open {path}: {exc}")
+
+    def _open_settings(self):
+        """The folders, on demand rather than permanently on screen."""
+        if getattr(self, "_settings_window", None) is not None:
+            try:
+                self._settings_window.lift()
+                return
+            except tk.TclError:
+                pass
+
+        win = tk.Toplevel(self)
+        win.title("Folders")
+        win.transient(self.winfo_toplevel())
+        win.columnconfigure(0, weight=1)
+        self._settings_window = win
+
+        def closed():
+            self._settings_window = None
+            win.destroy()
+
+        win.protocol("WM_DELETE_WINDOW", closed)
+
+        box = ttk.Frame(win, padding=12)
+        box.grid(sticky="nsew")
         box.columnconfigure(1, weight=1)
 
-        ttk.Label(box, text="KOTOR install").grid(row=0, column=0, sticky="w")
-        self.install = tk.StringVar(value=guess_install())
-        ttk.Entry(box, textvariable=self.install).grid(row=0, column=1, sticky="ew", padx=6)
-        ttk.Button(box, text="Browse", command=self._pick_install).grid(row=0, column=2)
+        rows = (
+            ("KOTOR install", self.install, self._pick_install),
+            ("Output folder", self.out_dir, self._pick_out),
+            ("KOTOR II (optional)", self.install2, self._pick_install2),
+            ("Jade Empire (optional)", self.jade, self._pick_jade),
+        )
+        for i, (label, var, browse) in enumerate(rows):
+            ttk.Label(box, text=label).grid(row=i, column=0, sticky="w",
+                                            pady=(0 if i == 0 else 6, 0))
+            ttk.Entry(box, textvariable=var, width=52).grid(
+                row=i, column=1, sticky="ew", padx=6,
+                pady=(0 if i == 0 else 6, 0))
+            ttk.Button(box, text="Browse", command=browse).grid(
+                row=i, column=2, pady=(0 if i == 0 else 6, 0))
 
-        ttk.Label(box, text="Output folder").grid(row=1, column=0, sticky="w", pady=(6, 0))
-        self.out_dir = tk.StringVar(value=str(Path.cwd() / "out_fun"))
-        ttk.Entry(box, textvariable=self.out_dir).grid(
-            row=1, column=1, sticky="ew", padx=6, pady=(6, 0)
-        )
-        ttk.Button(box, text="Browse", command=self._pick_out).grid(
-            row=1, column=2, pady=(6, 0)
-        )
-        ttk.Label(box, text="KOTOR II (optional)").grid(
-            row=2, column=0, sticky="w", pady=(6, 0)
-        )
-        self.install2 = tk.StringVar(value=guess_install2())
-        ttk.Entry(box, textvariable=self.install2).grid(
-            row=2, column=1, sticky="ew", padx=6, pady=(6, 0)
-        )
-        ttk.Button(box, text="Browse", command=self._pick_install2).grid(
-            row=2, column=2, pady=(6, 0)
-        )
+        actions = ttk.Frame(box)
+        actions.grid(row=len(rows), column=0, columnspan=3, sticky="w",
+                     pady=(12, 0))
+        ttk.Button(actions, text="Find my games",
+                   command=lambda: self._detect_installs(loud=True)).pack(
+            side="left")
+        ttk.Button(actions, text="Search every drive",
+                   command=lambda: self._detect_installs(deep=True,
+                                                         loud=True)).pack(
+            side="left", padx=(6, 0))
+        ttk.Button(actions, text="Close", command=closed).pack(side="left",
+                                                               padx=(18, 0))
 
         ttk.Label(
             box,
-            text=("Builds go to the output folder; \"Install to Override\" copies them "
-                  "into the game. A KOTOR II folder lets you borrow its heads."),
-            foreground="#666", wraplength=620,
-        ).grid(row=3, column=0, columnspan=3, sticky="w", pady=(6, 0))
+            text=("Builds go to the output folder; \"Install to Override\" copies "
+                  "them into the game. KOTOR II lets you borrow its heads. These "
+                  "are remembered, so this is a once-per-machine job."),
+            foreground="#666", wraplength=470,
+        ).grid(row=len(rows) + 1, column=0, columnspan=3, sticky="w",
+               pady=(10, 0))
+
+    def _pick_jade(self):
+        chosen = filedialog.askdirectory(title="Pick the Jade Empire folder")
+        if chosen:
+            self.jade.set(chosen)
 
     def _build_tabs(self):
         self.tabs = ttk.Notebook(self)
@@ -2943,6 +3105,11 @@ class App(ttk.Frame):
                         self._say(line)
                     self.progress.config(value=100)
                     self.build_btn.config(state="normal")
+                elif kind == "installs":
+                    self._show_installs(*payload)
+                elif kind == "installs_failed":
+                    self._detecting = False
+                    self._say("could not look for your games: " + payload)
                 elif kind == "catalogue":
                     self._show_catalogue(payload)
                 elif kind == "part_thumb":

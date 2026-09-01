@@ -129,7 +129,11 @@ kmdlfun render     p_hk47 --install "<K1>" --textured --turntable 24 --out spin.
 
 ### The app
 
-Seven tabs sharing the folder settings, log and build button.
+Seven tabs sharing the log and build button. The folders live behind
+**Settings** rather than on screen: the app reads Steam's own library index at
+startup and fills them in, so a game on a second drive is found rather than
+silently missed. What is left at the top is one line saying which games it
+found, and it says so by name rather than by path.
 
 **Effects** — **bighead**, **smallhead**, **bobblehead**, **chibi**,
 **bigmitts**, each a uniform scale of a part with an adjustable intensity,
