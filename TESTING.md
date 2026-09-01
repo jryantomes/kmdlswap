@@ -203,7 +203,45 @@ vanilla NPC that talks uses `k_def_spawn01`.
       designed out of the generator. If he does not, the cause is elsewhere and
       worth knowing.
 
-## 15. The catalogue
+## 15. Does a lip file play without audio?
+
+Set up 2026-09-01. **This is the only thing in this project that has written
+into the game install**, so exactly what changed is recorded here.
+
+Mouth movement comes from a `.lip` file, not from the model or the dialog, and
+the engine finds it by the line's `VO_ResRef`. Every line in `rfk_broker.dlg`
+had that field empty, so there was nothing for a lip to be named after.
+
+**Changed in `Override/`:**
+
+| file | what |
+|---|---|
+| `rfk_broker.dlg.backup-before-lip-test` | **new** - byte copy of the dialog as it was (14,350 bytes, 19 Jul) |
+| `rfk_broker.dlg` | `EntryList[0].VO_ResRef` set from `''` to `rfk_brk_01`. One field, one entry; the other ten still have it empty |
+| `rfk_brk_01.lip` | **new** - 151 bytes, 3.90s, 27 keyframes. A byte copy of `nm35aacarth2002_` out of `lips/korr_m35aa_loc.mod` |
+
+Nothing else was touched. `rfk_broker.utc` also has today's date because of
+your own `ScriptSpawn` fix.
+
+Entry 0 is his opening line, *"Hold on. Before you run off..."*.
+
+- [ ] Talk to the broker. Does his mouth move on the **first** line and stay
+      still for the rest? That contrast is the result - it rules out anything
+      general about the model or the appearance.
+
+**What each outcome means.** Moving proves the engine plays a lip with no
+`.wav` behind it, and generating lip files becomes worth building - the tool
+already has the format. Not moving means playback needs the sound, and lip
+generation is only useful once there is audio, which is worth knowing before
+building it.
+
+If the timing looks wrong, that is expected and not the point: it is Carth's
+mouth shapes for a different sentence.
+
+**To undo:** delete `rfk_brk_01.lip` and rename the backup back over
+`rfk_broker.dlg`.
+
+## 16. The catalogue
 
 - [ ] `python tools/render_catalogue.py --install "<K1 root>"` - 233 models in
       about a minute. Spot-check a few faces are the right way round.
