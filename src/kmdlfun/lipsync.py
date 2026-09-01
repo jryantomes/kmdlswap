@@ -68,22 +68,26 @@ HEADER_SEARCH = 2048
 def duration_of(path) -> float | None:
     """How long an audio file actually plays for, or None if it cannot be told.
 
-    KOTOR does not ship honest audio headers, and there are two different
-    dishonesties. Voice lines carry a **fake WAV header with the real WAV
-    nested inside it**: `rfk_carth_a1.wav` opens with a header claiming 8-bit
-    22 kHz and a data chunk of zero, and 58 bytes in there is a second RIFF
-    that is the truth - 16-bit 32 kHz, 5.76 seconds. Reading the outer one
-    gives 16.72, which is wrong by a factor of three. Ambient sound does the
-    same with a 470-byte preamble.
+    Nothing here carries an honest header, and three different shapes turn up:
 
-    The other is a WAV header over MP3 data, which is what the shipped
-    `streamwaves` are. Nothing in the header is true - `af.wav` claims 384 kHz
-    - and timing it would need frame-by-frame decoding. That returns None,
-    because a wrong number here silently produces a lip of the wrong length
-    and a confident wrong answer is worse than no answer.
+    * **What a modder produces.** The community guide for getting audio into
+      KOTOR has you prepend a decoy header, so the real WAV ends up nested
+      inside it - `rfk_carth_a1.wav` opens claiming 8-bit 22 kHz with a data
+      chunk of zero, and 58 bytes in there is a second RIFF that is the truth:
+      16-bit 32 kHz, 5.76 seconds. Reading the outer one gives 16.72, wrong by
+      a factor of three. This is the shape that matters most, because it is
+      what the files being timed will actually be.
+    * **Shipped ambient sound**, which nests the same way behind a longer
+      470-byte preamble.
+    * **Shipped voice**, which is a WAV header over MP3 data. Nothing in it is
+      true - `af.wav` claims 384 kHz - and timing it needs frame-by-frame
+      decoding, so it returns None. SithCodec is the tool that strips these
+      properly; anything it has decoded reads here without special handling.
 
-    So: take the innermost RIFF, and only believe it if it describes something
-    a person could have recorded.
+    A wrong number is worse than none: it silently produces a lip of the wrong
+    length, which is the failure this exists to prevent. So take the innermost
+    RIFF, and believe it only if it describes something a person could have
+    recorded.
     """
     import struct
 

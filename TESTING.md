@@ -267,15 +267,15 @@ on disk. Your other 19 `rfk_*` files were not touched.
 
 If you record the lines, pass `--audio <folder>` and each lip is made exactly
 as long as its own recording - name the files after the line's `VO_ResRef`.
-KOTOR audio does not carry an honest header, and there are two different
-fakes. Voice lines are **a real WAV nested inside a decoy one**: your
-`rfk_carth_a1.wav` opens claiming 8-bit 22 kHz with a data chunk of zero, and
-58 bytes in there is a second RIFF that is the truth - 16-bit 32 kHz, 5.76
-seconds. Ambient sound does the same behind a 470-byte preamble. The shipped
-`streamwaves` are the other fake: a WAV header over MP3 data, where nothing in
-the header is true and `af.wav` claims 384 kHz. Those are refused rather than
-guessed at, because a confident wrong length silently produces a lip that does
-not match the voice.
+Audio headers here are not honest, in three different ways. **The one that
+matters for your own recordings** is the decoy the modding guide has you
+prepend: the real WAV ends up nested inside it, so `rfk_carth_a1.wav` opens
+claiming 8-bit 22 kHz with a data chunk of zero while 58 bytes in sits the
+truth - 16-bit 32 kHz, 5.76 seconds. Shipped ambient sound nests the same way
+behind a 470-byte preamble. Shipped *voice* is different again - a WAV header
+over MP3 - and is refused rather than guessed at, since a confident wrong
+length silently makes a lip that does not match. Run those through SithCodec
+first and they read like anything else.
 
 Without recordings, timing is estimated from word count at two and a half words
 a second, so a long line gets a long lip: `rfk_brokere01.lip` runs 13.6 seconds over 110 keyframes.
