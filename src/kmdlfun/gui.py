@@ -52,11 +52,13 @@ UPCOMING = (
     (
         "Lip files from a dialogue",
         "command line only",
-        "Give it a .dlg and it writes a .lip for every line, so an unvoiced "
-        "NPC's mouth moves while the subtitle is up. Shapes come from the "
-        "line's own text. It never edits your dialogue - lines that need a "
-        "VO_ResRef get one in a copy written beside the lips.",
-        r'.\.venv\Scripts\kmdlfun.exe lips "<your.dlg>" --out lips_out --assign --replies',
+        "Give it a .dlg and it writes a .lip for every line, so a mouth moves "
+        "while the subtitle is up. Shapes come from the line's own text. Point "
+        "--audio at a folder of recordings and each lip is made as long as its "
+        "own recording; lines without one fall back to an estimate. It never "
+        "edits your dialogue - lines that need a VO_ResRef get one in a copy "
+        "written beside the lips.",
+        r'.\.venv\Scripts\kmdlfun.exe lips "<your.dlg>" --out lips_out --assign --replies --audio "<vo folder>"',
     ),
     (
         "A mod other people can install",
