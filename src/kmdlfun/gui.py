@@ -73,8 +73,8 @@ UPCOMING = (
         "out of the node entirely - so the eight-byte wrapper shift was only "
         "the wrapper. Native reading is not worth it, because JadeBlender "
         "already converts Jade models to KOTOR ones in both directions. Bring "
-        "the result in as .glb on the Custom head tab, and check the scale: "
-        "Jade models are reported to be 10-11% smaller.",
+        "the result in as .glb on the Custom head tab, and check the scale. "
+        "Measured on 16 Jade heads against 105 of KOTOR's, a Jade head is 11-14% LARGER and wants scaling down - the opposite of what we were told, so confirm before trusting either number. It also arrives lying on its side.",
         "",
     ),
     (

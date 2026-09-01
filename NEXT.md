@@ -91,8 +91,11 @@ tangent looks identical in every viewer and wrong in game.
   What our parser was reading before it failed is a shared 52-byte transform
   prefix. Native support is a second reader *and* writer for an engine
   JadeBlender already converts in both directions, so the route is Blender, as
-  it is for NWN and SWTOR. One thing to measure first: Jade models are reported
-  10-11% smaller. [reports/JADE_FINDINGS.md](reports/JADE_FINDINGS.md)
+  it is for NWN and SWTOR. The scale claim is now measured and came out
+  *inverted*: 16 Jade heads against 105 of KOTOR's say a Jade head is 11-14%
+  **larger** and wants scaling down, not up. Worth confirming with the author
+  before either number is trusted, and nothing has been in front of the engine.
+  [reports/JADE_FINDINGS.md](reports/JADE_FINDINGS.md)
 - **Neverwinter Nights.** Container reads today; models are a second reader, and
   neverblender to `.glb` is the cheap path. NWN heads are KOTOR's contemporaries
   and built to comparable budgets, so unlike SWTOR the density problem mostly is
