@@ -225,15 +225,16 @@ your own `ScriptSpawn` fix.
 
 Entry 0 is his opening line, *"Hold on. Before you run off..."*.
 
-- [ ] Talk to the broker. Does his mouth move on the **first** line and stay
-      still for the rest? That contrast is the result - it rules out anything
-      general about the model or the appearance.
+- [x] **Confirmed in game, 2026-09-01: his mouth moved.**
 
-**What each outcome means.** Moving proves the engine plays a lip with no
-`.wav` behind it, and generating lip files becomes worth building - the tool
-already has the format. Not moving means playback needs the sound, and lip
-generation is only useful once there is audio, which is worth knowing before
-building it.
+**So the engine plays a lip file with no `.wav` behind it.** That was the open
+question and it could not be answered offline. Mouth movement does not need
+recorded audio - it needs a `.lip` and a `VO_ResRef` to hang it on.
+
+It also means the community's blocker does not apply here. The usual tool needs
+the CSLU toolkit to derive phonemes from a recording, and CSLU is effectively
+unobtainable; but with no audio to sync to, there is nothing to derive. A lip
+file is a duration and a list of mouth shapes, and PyKotor writes the format.
 
 If the timing looks wrong, that is expected and not the point: it is Carth's
 mouth shapes for a different sentence.

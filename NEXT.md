@@ -91,6 +91,11 @@ tangent looks identical in every viewer and wrong in game.
 
 ## Things that are true and easy to forget
 
+- **A lip file plays without audio.** Confirmed in game 2026-09-01. Mouth
+  movement comes from a `.lip` found by the line's `VO_ResRef`, and neither a
+  `.wav` nor the CSLU toolkit the community treats as mandatory is needed when
+  there is nothing to sync to.
+
 - **Vanilla is the oracle.** Grades, thresholds and budgets come from measuring
   shipped content, not from judgement. "Rough" means no worse than a head the
   game ships and works.
