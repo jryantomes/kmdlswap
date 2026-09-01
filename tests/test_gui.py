@@ -1008,3 +1008,72 @@ def test_a_name_the_engine_cannot_use_is_refused_before_building(app, tmp_path):
 
     assert "not a usable model name" in app.log.get("1.0", "end")
     assert not list(tmp_path.glob("*/*.mdl")), "nothing should have been written"
+
+
+def test_the_upcoming_tab_lists_what_is_coming(app):
+    """A roadmap in the app rather than in a file nobody opens.
+
+    The status on each line is the useful part: someone waiting for a feature
+    that already runs on the command line is waiting for nothing.
+    """
+    from kmdlfun.gui import UPCOMING
+
+    names = [app.tabs.tab(i, "text") for i in range(len(app.tabs.tabs()))]
+    assert "Upcoming" in names
+    assert names[-1] == "Upcoming", "it belongs at the end, after the working tabs"
+
+    titles = [t for t, _status in app.upcoming_rows]
+    assert len(titles) == len(UPCOMING)
+    assert any("Lip files" in t for t in titles), titles
+
+
+def test_the_lip_tool_is_listed_as_reachable_today(app):
+    """Its engine is built and tested; only the button is missing. Listing it
+    as merely 'planned' would send someone away from something that works."""
+    entry = next(row for row in UPCOMING_ROWS() if "Lip files" in row[0])
+    title, status, blurb, command = entry
+
+    assert status == "command line only"
+    assert command.startswith("kmdlfun lips")
+    assert "never edits your dialogue" in blurb
+
+
+def UPCOMING_ROWS():
+    from kmdlfun.gui import UPCOMING
+
+    return UPCOMING
+
+
+def test_upcoming_promises_no_buttons(app):
+    """It is a list, not a half-built feature. Nothing on it should look
+    clickable, or it becomes a source of bug reports."""
+    from tkinter import ttk
+
+    page = None
+    for i in range(len(app.tabs.tabs())):
+        if app.tabs.tab(i, "text") == "Upcoming":
+            page = app.tabs.nametowidget(app.tabs.tabs()[i])
+    assert page is not None
+
+    def buttons(widget):
+        found = []
+        for child in widget.winfo_children():
+            if isinstance(child, (ttk.Button, ttk.Checkbutton, ttk.Radiobutton)):
+                found.append(child)
+            found.extend(buttons(child))
+        return found
+
+    assert not buttons(page), "the Upcoming tab should not offer controls"
+
+    def entries(widget):
+        found = []
+        for child in widget.winfo_children():
+            if isinstance(child, ttk.Entry):
+                found.append(child)
+            found.extend(entries(child))
+        return found
+
+    for entry in entries(page):
+        assert str(entry.cget("state")) == "readonly", (
+            "the command lines are for copying, not typing into"
+        )
