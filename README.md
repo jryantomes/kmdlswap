@@ -129,7 +129,7 @@ kmdlfun render     p_hk47 --install "<K1>" --textured --turntable 24 --out spin.
 
 ### The app
 
-Six tabs sharing the folder settings, log and build button.
+Seven tabs sharing the folder settings, log and build button.
 
 **Effects** — **bighead**, **smallhead**, **bobblehead**, **chibi**,
 **bigmitts**, each a uniform scale of a part with an adjustable intensity,
@@ -149,6 +149,14 @@ member's row is their underwear — so a character copied from Carth and given n
 clothes spawns in `P_CarthBA`. Vanilla NPCs sidestep this by repeating one body
 across all nine slots, and the **Wearing** box offers the 117 outfits the game
 already dresses somebody in.
+
+**Character** — a body, a wardrobe and a head, each picked from its own grid of
+thumbnails. Nothing here writes geometry: a KOTOR humanoid is a base body, a
+clothed body per equipment slot and a row of `heads.2da`, so a new character is
+two table rows and a blueprint. 30 bodies, 117 outfits and 106 heads, and the
+pairings are read rather than guessed — every `modeltype B` row names both a
+`race` and a `normalhead`, so the tool can say which combinations the game
+already ships while still offering the ones it does not.
 
 **Custom head** — a mesh from outside the game into one node, with decimation,
 fitting, winding repair and cropping. A pack is checked before anything is

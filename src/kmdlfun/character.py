@@ -147,6 +147,68 @@ def create(install, out_dir, *, resref: str, kind: str = NPC,
     return ch
 
 
+def assemble(install, out_dir, *, resref: str, body: str, outfit=None,
+             head: str | None = None, kind: str = NPC, name: str | None = None,
+             like: str = "p_carthh", template: str = STOCK_TEMPLATE) -> Character:
+    """A character built from a body, an outfit and a head that already exist.
+
+    The cheap path, and the one most new characters want. `create` exists for a
+    head this tool has just built and has to register; this one assembles what
+    the game already ships, so it writes no geometry and touches `heads.2da`
+    only if the head is new. Two rows and a blueprint.
+
+    The three parts are independent on purpose. Nothing in the game pairs a
+    Twi'lek head with a Czerka uniform, and nothing stops it either - the
+    appearance row is just three references.
+    """
+    if kind not in KINDS:
+        raise CharacterError(f"{kind!r} is not one of {', '.join(KINDS)}")
+    if not body:
+        raise CharacterError("a character needs a body to hang its clothes on")
+
+    from . import twoda as k2da
+
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    ch = Character(kind=kind, resref=resref)
+    label = name or resref
+
+    reg = k2da.register_look(install, out_dir, label=label, body=body,
+                             outfit=outfit, head=head, like=like)
+    ch.appearance_row = reg.appearance_row
+    ch.files.extend(reg.files)
+    ch.notes.extend(reg.notes)
+
+    if kind == COMPANION:
+        portrait = _register_portrait(install, out_dir, resref,
+                                      reg.appearance_row)
+        if portrait is not None:
+            ch.portrait_row, path, note = portrait
+            if path not in ch.files:
+                ch.files.append(path)
+            ch.notes.append(note)
+
+    path, note = _blueprint(
+        install, out_dir, resref=resref, kind=kind, name=label,
+        appearance_id=reg.appearance_row, portrait_id=ch.portrait_row,
+        template=template,
+    )
+    ch.files.append(path)
+    ch.notes.append(note)
+
+    if kind in (TALKER, COMPANION):
+        ch.todo.append(
+            f"write {resref}.dlg - the blueprint points at it, but a "
+            f"conversation is writing rather than tooling"
+        )
+    if kind == COMPANION:
+        ch.todo.append(
+            "a companion still needs a recruit script, a party slot and "
+            "journal entries; those are yours"
+        )
+    return ch
+
+
 def _register_portrait(install, out_dir, resref, appearance_id):
     """Companions show a portrait in the party screen; NPCs do not have one."""
     from pykotor.resource.formats.twoda import bytes_2da

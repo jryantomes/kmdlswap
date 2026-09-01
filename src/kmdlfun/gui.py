@@ -44,6 +44,13 @@ ANYONE = "anyone"
 AUTO_NODE = "automatic"
 NOT_A_CHARACTER = "just a model"
 SAME_AS_HOST = "same body as the host"
+# The three things a humanoid is made of, in the order somebody picks them.
+# Not `PARTS`: that name already means the body parts of a mesh in `parts.py`,
+# and the two are nothing like each other.
+PART_KINDS = ("body", "outfit", "head")
+PART_TITLES = {"body": "Body", "outfit": "Wardrobe", "head": "Head"}
+SEEN_IN_GAME = "\u2713"          # this body already wears this in vanilla
+PREVIEW_SIZE = 260
 
 # What is coming, and honestly where each one is. "Command line only" means the
 # work is done and tested and only the button is missing - which is worth
@@ -210,6 +217,7 @@ class App(ttk.Frame):
         # Transplant first because it is what the tool is for. Effects last:
         # it was written first and sat in front for that reason alone.
         self._build_transplant_tab()
+        self._build_character_tab()
         self._build_head_tab()
         self._build_lips_tab()
         self._build_preview_tab()
@@ -616,6 +624,394 @@ class App(ttk.Frame):
                   "renders full of holes in game while looking fine in a viewer."),
             foreground="#666", wraplength=620,
         ).grid(row=6, column=0, columnspan=5, sticky="w", pady=(4, 0))
+
+    # ---- character tab -----------------------------------------------------
+
+    def _build_character_tab(self):
+        """A character assembled out of parts the game already ships.
+
+        No geometry is written here at all. A KOTOR humanoid is a base body, a
+        clothed body per equipment slot and a row of `heads.2da`, and all three
+        already exist - so a new character can be three table rows and a
+        blueprint. That is the cheapest kind there is, and it is most of what
+        anyone wants: the Transplant tab is for when no existing head will do.
+
+        The three pickers sit in their own notebook rather than side by side.
+        Three grids across this window is two faces each, and picking a face is
+        something the eye does at a glance or not at all.
+        """
+        from . import gallery as kgallery
+        from . import thumbs as kthumbs
+
+        page = ttk.Frame(self.tabs, padding=8)
+        self.tabs.add(page, text="Character")
+        page.columnconfigure(0, weight=1)
+        page.rowconfigure(1, weight=1)
+
+        self.part_pick = {k: tk.StringVar(value="") for k in PART_KINDS}
+        self.part_labels = {k: {} for k in PART_KINDS}
+        self.part_photos = {k: {} for k in PART_KINDS}
+        self.part_jobs = {k: 0 for k in PART_KINDS}
+        self.catalogue = None
+
+        # What is chosen, always on screen. Flipping between three tabs to
+        # remember what you picked is how a picker stops being one.
+        chosen = ttk.LabelFrame(page, text="This character", padding=8)
+        chosen.grid(row=0, column=0, sticky="ew")
+        chosen.columnconfigure(1, weight=1)
+        self.part_summary = {}
+        for i, key in enumerate(PART_KINDS):
+            ttk.Label(chosen, text=PART_TITLES[key]).grid(row=i, column=0,
+                                                          sticky="w", padx=(0, 8))
+            label = ttk.Label(chosen, text="nothing picked", foreground="#666")
+            label.grid(row=i, column=1, sticky="w")
+            self.part_summary[key] = label
+        self.character_preview = ttk.Label(chosen, text="")
+        self.character_preview.grid(row=0, column=2, rowspan=3, padx=(12, 0))
+        self.character_warn = ttk.Label(chosen, text="", foreground="#a35",
+                                        wraplength=520)
+        self.character_warn.grid(row=3, column=0, columnspan=3, sticky="w",
+                                 pady=(6, 0))
+
+        inner = ttk.Notebook(page)
+        inner.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
+        self.part_gallery = {}
+        for key in PART_KINDS:
+            frame = ttk.Frame(inner, padding=6)
+            inner.add(frame, text=PART_TITLES[key])
+            frame.columnconfigure(0, weight=1)
+            frame.rowconfigure(1, weight=1)
+
+            bar = ttk.Frame(frame)
+            bar.grid(row=0, column=0, sticky="ew")
+            ttk.Label(bar, text="Show").pack(side="left", padx=(0, 6))
+            var = tk.StringVar(value=ANYONE)
+            box = ttk.Combobox(bar, textvariable=var, width=12, state="readonly",
+                               values=[ANYONE, "male", "female", "droid"])
+            box.pack(side="left")
+            box.bind("<<ComboboxSelected>>",
+                     lambda _e, k=key: self._refresh_parts(k))
+            setattr(self, f"part_filter_{key}", var)
+            note = ttk.Label(bar, text="", foreground="#666")
+            note.pack(side="left", padx=(10, 0))
+            setattr(self, f"part_note_{key}", note)
+
+            grid = kgallery.Gallery(frame, cell=kthumbs.SIZE,
+                                    on_pick=lambda label, k=key:
+                                    self._on_part_pick(k, label))
+            grid.grid(row=1, column=0, sticky="nsew", pady=(6, 0))
+            self.part_gallery[key] = grid
+
+        who = ttk.Frame(page)
+        who.grid(row=2, column=0, sticky="w", pady=(8, 0))
+        ttk.Label(who, text="Called").pack(side="left", padx=(0, 6))
+        self.new_name = tk.StringVar(value="")
+        ttk.Entry(who, textvariable=self.new_name, width=20).pack(side="left")
+        ttk.Label(who, text="resref").pack(side="left", padx=(12, 6))
+        self.new_resref = tk.StringVar(value="")
+        ttk.Entry(who, textvariable=self.new_resref, width=16).pack(side="left")
+        self.new_kind = tk.StringVar(value="npc")
+        for text, value in (("NPC", "npc"), ("NPC that talks", "talker"),
+                            ("companion", "companion")):
+            ttk.Radiobutton(who, text=text, value=value,
+                            variable=self.new_kind).pack(side="left", padx=(10, 0))
+
+        ttk.Button(page, text="Create the character",
+                   command=self._character_start).grid(row=3, column=0,
+                                                       sticky="w", pady=(8, 0))
+        ttk.Label(
+            page,
+            text=("Nothing here writes geometry - it is two table rows and a "
+                  "blueprint, so it is the cheapest kind of character there is. "
+                  "A tick means the game already puts that part on this body; "
+                  "the rest are yours to try, which is the point of the tool."),
+            foreground="#666", wraplength=780,
+        ).grid(row=4, column=0, sticky="w", pady=(4, 0))
+
+    # ---- filling the pickers ----------------------------------------------
+
+    def _load_catalogue(self, install: str):
+        """Read what the install offers, off the Tk thread."""
+        if getattr(self, "_catalogue_for", None) == install:
+            return
+        self._catalogue_for = install
+
+        def work():
+            try:
+                from . import wardrobe as kwardrobe
+                from .library import ModelLibrary
+
+                self.events.put(("catalogue", kwardrobe.build(
+                    install, library=ModelLibrary(install))))
+            except Exception as exc:  # noqa: BLE001
+                self.events.put(("error", f"could not read the parts: {exc}"))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _show_catalogue(self, cat):
+        self.catalogue = cat
+        self._say(f"{len(cat.bodies)} bodies, {len(cat.outfits)} outfits and "
+                  f"{len(cat.heads)} heads to build a character from")
+        for key in PART_KINDS:
+            self._refresh_parts(key)
+
+    def _part_items(self, key: str):
+        """The parts on offer for one picker, best first."""
+        cat = self.catalogue
+        if cat is None:
+            return []
+        body = self.part_pick["body"].get()
+        if key == "body":
+            return list(cat.bodies)
+        if key == "outfit":
+            return cat.outfits_for(body or None)
+        return cat.heads_for(body or None)
+
+    def _refresh_parts(self, key: str):
+        from . import who as kwho
+
+        wanted = getattr(self, f"part_filter_{key}").get()
+        body = self.part_pick["body"].get()
+        items = self._part_items(key)
+        if wanted != ANYONE:
+            # Through the catalogue rather than the item, because an outfit is
+            # a body model and has a sex, but is not the kind of object that
+            # carries one.
+            items = [i for i in items
+                     if kwho.matches(self.catalogue.look_of(i), wanted)]
+
+        labels = {}
+        for item in items:
+            mark = ""
+            if key != "body" and body:
+                seen = self.catalogue.pairs_with(
+                    body, **{"head" if key == "head" else "outfit": item})
+                mark = f"{SEEN_IN_GAME} " if seen else ""
+            labels[f"{mark}{item.label}"] = item.model
+
+        self.part_labels[key] = labels
+        self.part_photos[key] = {k: v for k, v in self.part_photos[key].items()
+                                 if k in labels}
+        self.part_gallery[key].show(list(labels))
+        getattr(self, f"part_note_{key}").config(
+            text=f"{len(labels)} to choose from"
+            + (f", {SEEN_IN_GAME} = the game already pairs it with this body"
+               if key != "body" and body else ""))
+
+        chosen = self.part_pick[key].get()
+        for label, model in labels.items():
+            if model == chosen:
+                self.part_gallery[key].select(label)
+                break
+        self._draw_parts(key)
+
+    def _draw_parts(self, key: str):
+        """Faces and figures in the background, newest request wins."""
+        self.part_jobs[key] += 1
+        job = self.part_jobs[key]
+        path = self.install.get().strip()
+        wanted = dict(self.part_labels[key])
+        if not path or not wanted:
+            return
+
+        def work():
+            from pathlib import Path as _Path
+
+            from . import textures as ktextures
+            from . import thumbs as kthumbs
+            from .library import ModelLibrary
+
+            try:
+                lib = ModelLibrary(path)
+                look = ktextures.lookup_across([_Path(path)])
+                for label, model in wanted.items():
+                    if job != self.part_jobs[key]:
+                        return
+                    try:
+                        mdl, mdx = lib.read(model)
+                    except Exception:  # noqa: BLE001
+                        continue
+                    found = kthumbs.render(mdl, mdx, texture_lookup=look)
+                    if found is not None:
+                        self.events.put(
+                            ("part_thumb", (key, job, label, str(found))))
+            except Exception:  # noqa: BLE001
+                return
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _show_part_thumb(self, key: str, job: int, label: str, path: str):
+        if job != self.part_jobs[key] or label not in self.part_labels[key]:
+            return
+        try:
+            photo = tk.PhotoImage(file=path)
+        except tk.TclError:
+            return
+        self.part_photos[key][label] = photo
+        self.part_gallery[key].set_image(label, photo)
+
+    # ---- picking -----------------------------------------------------------
+
+    def _on_part_pick(self, key: str, label: str):
+        model = self.part_labels[key].get(label)
+        if not model:
+            return
+        self.part_pick[key].set(model)
+
+        # Picking a body re-sorts the other two and, if they are empty, fills
+        # them with what the game already puts on it - so somebody who only
+        # picks a body still ends up with a dressed character wearing a face.
+        if key == "body":
+            body = self.catalogue.body(model) if self.catalogue else None
+            if body is not None:
+                if not self.part_pick["outfit"].get() and body.outfits:
+                    self.part_pick["outfit"].set(body.outfits[0].model)
+                if not self.part_pick["head"].get() and body.heads:
+                    first = next((h for h in self.catalogue.heads
+                                  if h.row == body.heads[0]), None)
+                    if first is not None:
+                        self.part_pick["head"].set(first.model)
+            for other in ("outfit", "head"):
+                self._refresh_parts(other)
+
+        self._update_character()
+
+    def _update_character(self):
+        cat = self.catalogue
+        picked = {k: self.part_pick[k].get() for k in PART_KINDS}
+        for key in PART_KINDS:
+            self.part_summary[key].config(
+                text=picked[key] or "nothing picked",
+                foreground="#000" if picked[key] else "#666")
+
+        # Say plainly when a combination is one the game never ships. It is
+        # allowed - that is the whole point - but a Twi'lek head on a human
+        # body can sit wrong, and finding that out in game is a slow way.
+        odd = []
+        if cat is not None and picked["body"]:
+            if picked["head"] and not cat.pairs_with(picked["body"],
+                                                     head=cat.head(picked["head"])):
+                odd.append("head")
+            if picked["outfit"] and not cat.pairs_with(
+                    picked["body"], outfit=cat.outfit(picked["outfit"])):
+                odd.append("outfit")
+        self.character_warn.config(
+            text=("Nothing in the game pairs this " + " or ".join(odd)
+                  + f" with {picked['body']}. It will still build - check the "
+                    "preview for a neck that does not meet its collar."
+                  if odd else ""))
+        self._draw_character()
+
+    def _draw_character(self):
+        """The figure as the game will draw it: the outfit, wearing the head.
+
+        Not the base body. `race` is what the row declares, but what renders is
+        the equipment-slot model - which is exactly how a character copied from
+        Carth turned up in his underwear.
+        """
+        outfit = self.part_pick["outfit"].get()
+        head = self.part_pick["head"].get()
+        install = self.install.get().strip()
+        if not install or not outfit:
+            return
+        self._character_job = getattr(self, "_character_job", 0) + 1
+        job = self._character_job
+
+        def work():
+            from pathlib import Path as _Path
+
+            from kmdlswap import layout as kl
+
+            from . import render as krender
+            from . import textures as ktextures
+            from . import thumbs as kthumbs
+            from .library import ModelLibrary
+
+            try:
+                lib = ModelLibrary(install)
+                look = ktextures.lookup_across([_Path(install)])
+                body = kl.parse(*lib.read(outfit))
+                worn = kl.parse(*lib.read(head)) if head else None
+                scene = krender.character(body, worn, texture_lookup=look)
+                pixels = krender.render(scene, size=PREVIEW_SIZE, cull=True)
+                # Beside the thumbnails rather than in the output folder: it is
+                # a picture of a choice, not a build, and it would otherwise be
+                # swept into whatever gets installed.
+                out = _Path(kthumbs.cache_root()) / f"character_{job}.png"
+                out.parent.mkdir(parents=True, exist_ok=True)
+                krender.to_png(pixels, out)
+                if job == self._character_job:
+                    self.events.put(("character_drawn", (job, str(out))))
+            except Exception:  # noqa: BLE001
+                return          # a preview that will not draw is not an error
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _show_character(self, job: int, path: str):
+        if job != getattr(self, "_character_job", 0):
+            return
+        try:
+            photo = tk.PhotoImage(file=path)
+        except tk.TclError:
+            return
+        self._character_photo = photo       # Tk drops an unreferenced image
+        self.character_preview.config(image=photo)
+
+    # ---- writing it --------------------------------------------------------
+
+    def _character_start(self):
+        if self.worker and self.worker.is_alive():
+            return
+        picked = {k: self.part_pick[k].get() for k in PART_KINDS}
+        resref = self.new_resref.get().strip() or self.new_name.get().strip().lower()
+        if not picked["body"]:
+            self._say("pick a body first")
+            return
+        if not resref:
+            self._say("a character needs a resref - it is the filename the game "
+                      "spawns it by")
+            return
+
+        cfg = dict(
+            resref=resref,
+            name=self.new_name.get().strip() or resref,
+            kind=self.new_kind.get(),
+            body=picked["body"],
+            outfit=picked["outfit"] or None,
+            head=picked["head"] or None,
+        )
+        self.build_btn.config(state="disabled")
+        self._say(f"\n=== {cfg['name']}: {picked['body']}"
+                  + (f" in {picked['outfit']}" if picked["outfit"] else "")
+                  + (f" with {picked['head']}" if picked["head"] else "") + " ===")
+        self.worker = threading.Thread(
+            target=self._character_work,
+            args=(self.install.get().strip(), self.out_dir.get().strip(), cfg),
+            daemon=True)
+        self.worker.start()
+
+    def _character_work(self, install, out_dir, cfg):
+        try:
+            from pathlib import Path as _Path
+
+            from . import builds as kbuilds
+            from . import character as kchar
+
+            out = str(_Path(out_dir or ".") / f"character_{cfg['resref']}")
+            ch = kchar.assemble(install, out, **cfg)
+            lines = list(ch.notes)
+            lines.extend(f"still yours: {x}" for x in ch.todo)
+            kbuilds.adopt(out, {
+                "kind": "character",
+                "resref": cfg["resref"],
+                "body": cfg["body"],
+                "outfit": cfg["outfit"],
+                "head": cfg["head"],
+            })
+            lines.append("Kept as a build, so it installs from the Builds tab.")
+            self.events.put(("done_text", lines))
+        except Exception as exc:  # noqa: BLE001
+            self.events.put(("error", f"{type(exc).__name__}: {exc}"))
 
     # ---- lips tab ----------------------------------------------------------
 
@@ -2533,6 +2929,7 @@ class App(ttk.Frame):
                     self._kind_cache = cache
                     self._say(f"indexed {len(self.models)} character models")
                     self._load_wardrobe(scanned)
+                    self._load_catalogue(scanned)
                     self._refresh_donors()
                     self.build_btn.config(state="normal")
                 elif kind == "done_effect":
@@ -2543,6 +2940,12 @@ class App(ttk.Frame):
                         self._say(line)
                     self.progress.config(value=100)
                     self.build_btn.config(state="normal")
+                elif kind == "catalogue":
+                    self._show_catalogue(payload)
+                elif kind == "part_thumb":
+                    self._show_part_thumb(*payload)
+                elif kind == "character_drawn":
+                    self._show_character(*payload)
                 elif kind == "imported":
                     pack, lines = payload
                     self.pack_dir.set(pack)

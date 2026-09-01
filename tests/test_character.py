@@ -150,3 +150,113 @@ def test_the_spawn_scripts_are_ones_vanilla_actually_uses(install_path):
     assert kchar.DEFAULT_SCRIPTS["ScriptSpawn"] == "k_def_spawn01"
     assert kchar.HENCHMAN_SCRIPTS["ScriptSpawn"] == "k_hen_spawn01"
     assert "ambmob" not in str(kchar.DEFAULT_SCRIPTS)
+
+
+# --- assembled from parts already in the game -------------------------------
+#
+# The cheap path, and the one most new characters want: no geometry, no splice,
+# two rows and a blueprint. `create` is for a head this tool has just built and
+# has to register; this is for what the game already ships.
+
+
+def test_a_character_can_be_assembled_from_existing_parts(install_path, tmp_path):
+    from pykotor.resource.formats.twoda import read_2da
+
+    ch = kchar.assemble(install_path, tmp_path, resref="vex", name="Vex",
+                        kind=kchar.TALKER, body="N_CommM",
+                        outfit="N_CzerkaOff", head="p_carthh")
+
+    assert ch.appearance_row is not None
+    names = {p.name for p in ch.files}
+    assert "appearance.2da" in names
+    assert "vex.utc" in names
+
+    row = read_2da((tmp_path / "appearance.2da").read_bytes())
+    r = ch.appearance_row
+    assert row.get_cell(r, "race") == "N_CommM"
+    assert row.get_cell(r, "modela") == "N_CzerkaOff"
+
+
+def test_a_vanilla_head_reuses_its_row_rather_than_duplicating_it(install_path,
+                                                                  tmp_path):
+    """Adding a second row for a head the game already knows would work, and
+    would also grow the table every time somebody reused a vanilla face."""
+    ch = kchar.assemble(install_path, tmp_path, resref="vex", body="N_CommM",
+                        head="p_carthh")
+
+    assert "heads.2da" not in {p.name for p in ch.files}, (
+        "it rewrote a table it did not change"
+    )
+    assert any("already row" in n for n in ch.notes), ch.notes
+
+
+def test_a_head_this_tool_built_does_get_a_row(install_path, tmp_path):
+    ch = kchar.assemble(install_path, tmp_path, resref="vex", body="N_CommM",
+                        head="p_myownhead")
+
+    assert "heads.2da" in {p.name for p in ch.files}
+    assert any("added as row" in n for n in ch.notes), ch.notes
+
+
+def test_an_assembled_character_is_dressed(install_path, tmp_path):
+    """The Vex bug: a party member's row uses `modela` for their underwear, so
+    a character copied from one and given no clothes spawns in it."""
+    from pykotor.resource.formats.twoda import read_2da
+
+    ch = kchar.assemble(install_path, tmp_path, resref="vex", body="N_CommM",
+                        outfit="N_CzerkaOff", head="p_carthh")
+    table = read_2da((tmp_path / "appearance.2da").read_bytes())
+    worn = {table.get_cell(ch.appearance_row, f"model{s}") for s in "abcdefghi"}
+
+    assert worn == {"N_CzerkaOff"}
+    assert "P_CarthBA" not in worn
+
+
+def test_the_three_parts_are_independent(install_path, tmp_path):
+    """Nothing in the game pairs a Twi'lek head with a Czerka uniform, and
+    nothing should stop it either - the row is just three references."""
+    from pykotor.resource.formats.twoda import read_2da
+
+    ch = kchar.assemble(install_path, tmp_path, resref="odd", body="N_TwilekF",
+                        outfit="N_CzerkaOff", head="p_carthh")
+    table = read_2da((tmp_path / "appearance.2da").read_bytes())
+    r = ch.appearance_row
+
+    assert table.get_cell(r, "race") == "N_TwilekF"
+    assert table.get_cell(r, "modela") == "N_CzerkaOff"
+    assert table.get_cell(r, "normalhead") == "3"
+
+
+def test_a_character_needs_a_body(install_path, tmp_path):
+    with pytest.raises(kchar.CharacterError, match="body"):
+        kchar.assemble(install_path, tmp_path, resref="vex", body="")
+
+
+def test_an_assembled_companion_still_gets_its_portrait(install_path, tmp_path):
+    ch = kchar.assemble(install_path, tmp_path, resref="pal", body="N_CommM",
+                        head="p_carthh", kind=kchar.COMPANION)
+
+    assert ch.portrait_row is not None
+    assert "portraits.2da" in {p.name for p in ch.files}
+    assert any("recruit script" in x for x in ch.todo)
+
+
+def test_nothing_that_already_existed_is_touched(install_path, tmp_path):
+    """Rows are addressed by index. Changing one silently re-points every
+    creature, script and save that referenced it."""
+    from pykotor.resource.formats.twoda import read_2da
+
+    from kmdlfun import twoda as k2da
+
+    before = k2da._load(install_path, "appearance")
+    ch = kchar.assemble(install_path, tmp_path, resref="vex", body="N_CommM",
+                        outfit="N_CzerkaOff", head="p_carthh")
+    after = read_2da((tmp_path / "appearance.2da").read_bytes())
+
+    assert after.get_height() == before.get_height() + 1
+    assert ch.appearance_row == before.get_height()
+    for row in range(before.get_height()):
+        for column in ("label", "race", "modela", "normalhead"):
+            assert after.get_cell(row, column) == before.get_cell(row, column), (
+                f"row {row} {column} changed"
+            )
