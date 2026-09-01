@@ -1299,3 +1299,170 @@ def _a_glb():
                        [(0, 1, 2)],
                        uvs=[(0.0, 0.0), (1.0, 0.0), (0.0, 1.0)])
     return build_glb(doc, blob)
+
+
+# --- the character tab ------------------------------------------------------
+#
+# Pick a body, an outfit and a head. No geometry is written: a KOTOR humanoid
+# is a base body, a clothed body per equipment slot and a row of heads.2da, and
+# all three already exist for anything the game ships.
+
+
+@pytest.fixture
+def stocked(app, install_path):
+    """The tab with a real catalogue in it, loaded synchronously."""
+    from kmdlfun import wardrobe as kw
+    from kmdlfun.library import ModelLibrary
+
+    app.install.set(install_path)
+    app._show_catalogue(kw.build(install_path,
+                                 library=ModelLibrary(install_path)))
+    return app
+
+
+def test_the_tab_is_there_and_has_three_pickers(app):
+    from kmdlfun.gui import PART_KINDS
+
+    names = [app.tabs.tab(i, "text") for i in range(len(app.tabs.tabs()))]
+    assert "Character" in names
+    assert set(app.part_gallery) == set(PART_KINDS)
+
+
+def test_the_pickers_fill_from_the_install(stocked):
+    assert len(stocked.part_labels["body"]) > 20
+    assert len(stocked.part_labels["outfit"]) > 80
+    assert len(stocked.part_labels["head"]) > 90
+
+
+def test_picking_a_body_dresses_it_and_gives_it_a_face(stocked):
+    """Somebody who only picks a body should still end up with a character,
+    not a naked headless one."""
+    label = next(k for k, v in stocked.part_labels["body"].items()
+                 if v == "P_CarthBB")
+    stocked._on_part_pick("body", label)
+
+    assert stocked.part_pick["body"].get() == "P_CarthBB"
+    assert stocked.part_pick["outfit"].get(), "left undressed"
+    assert stocked.part_pick["head"].get(), "left headless"
+
+
+def test_what_the_game_already_pairs_is_marked_and_comes_first(stocked):
+    from kmdlfun.gui import SEEN_IN_GAME
+
+    label = next(k for k, v in stocked.part_labels["body"].items()
+                 if v == "P_CarthBB")
+    stocked._on_part_pick("body", label)
+
+    heads = list(stocked.part_labels["head"])
+    assert heads[0].startswith(SEEN_IN_GAME), heads[0]
+    assert any(not h.startswith(SEEN_IN_GAME) for h in heads), (
+        "everything was marked, so the mark says nothing"
+    )
+
+
+def test_a_combination_the_game_never_ships_is_still_offered(stocked):
+    """Forbidding those would forbid the reason to open the tool."""
+    body = next(k for k, v in stocked.part_labels["body"].items()
+                if v == "N_TwilekF")
+    stocked._on_part_pick("body", body)
+
+    assert "p_CarthH" in stocked.part_labels["head"].values()
+
+
+def test_an_odd_combination_says_so_rather_than_waiting_for_the_game(stocked):
+    body = next(k for k, v in stocked.part_labels["body"].items()
+                if v == "N_TwilekF")
+    stocked._on_part_pick("body", body)
+    head = next(k for k, v in stocked.part_labels["head"].items()
+                if v == "p_CarthH")
+    stocked._on_part_pick("head", head)
+
+    assert "Nothing in the game pairs" in stocked.character_warn.cget("text")
+
+
+def test_a_pairing_the_game_ships_is_not_warned_about(stocked):
+    body = next(k for k, v in stocked.part_labels["body"].items()
+                if v == "P_CarthBB")
+    stocked._on_part_pick("body", body)
+    head = next(k for k, v in stocked.part_labels["head"].items()
+                if v == "p_CarthH")
+    stocked._on_part_pick("head", head)
+
+    assert stocked.character_warn.cget("text") == ""
+
+
+def test_the_wardrobe_can_be_filtered_by_sex(stocked):
+    """An outfit is a body model and has a sex the same way a body does. This
+    is the filter that silently emptied before the catalogue classified them."""
+    stocked.part_filter_outfit.set("female")
+    stocked._refresh_parts("outfit")
+    female = len(stocked.part_labels["outfit"])
+
+    stocked.part_filter_outfit.set(ANYONE_LABEL())
+    stocked._refresh_parts("outfit")
+    everyone = len(stocked.part_labels["outfit"])
+
+    assert 0 < female < everyone
+
+
+def ANYONE_LABEL():
+    from kmdlfun.gui import ANYONE
+
+    return ANYONE
+
+
+def test_creating_needs_a_body_and_a_resref(stocked):
+    stocked.said = []
+    stocked._say = lambda text: stocked.said.append(text)
+
+    stocked.part_pick["body"].set("")
+    stocked._character_start()
+    assert any("body" in s for s in stocked.said)
+
+    stocked.part_pick["body"].set("N_CommM")
+    stocked.new_resref.set("")
+    stocked.new_name.set("")
+    stocked.said = []
+    stocked._character_start()
+    assert any("resref" in s for s in stocked.said)
+
+
+def test_creating_writes_the_rows_and_the_blueprint(stocked, tmp_path):
+    from kmdlfun import builds as kbuilds
+
+    stocked._character_work(stocked.install.get(), str(tmp_path), dict(
+        resref="vex", name="Vex", kind="talker",
+        body="N_CommM", outfit="N_CzerkaOff", head="p_carthh"))
+
+    kinds = {}
+    while True:
+        try:
+            kind, payload = stocked.events.get_nowait()
+        except Exception:
+            break
+        kinds.setdefault(kind, []).append(payload)
+    assert "error" not in kinds, kinds.get("error")
+
+    folder = tmp_path / "character_vex"
+    assert (folder / "appearance.2da").is_file()
+    assert (folder / "vex.utc").is_file()
+
+    build = kbuilds.load(folder)
+    assert build is not None and build.manifest["kind"] == "character"
+    assert build.manifest["body"] == "N_CommM"
+
+
+def test_the_character_workers_touch_no_tk_variable(app):
+    """Tkinter is not thread-safe, and a worker reading a Tk variable survives
+    only while the main loop happens to be spinning."""
+    import inspect
+
+    from kmdlfun import gui as kgui
+
+    body = inspect.getsource(kgui.App._character_work)
+    assert ".get()" not in body, body
+
+    # The drawing worker reads its inputs before the thread starts.
+    drawn = inspect.getsource(kgui.App._draw_character)
+    worker = drawn[drawn.index("def work()"):]
+    assert ".get()" not in worker, worker

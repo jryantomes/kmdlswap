@@ -142,6 +142,85 @@ def register_head(install, out_dir, head_resref: str, *, label: str,
     return reg
 
 
+def register_look(install, out_dir, *, label: str, body: str | None = None,
+                  outfit=None, head: str | None = None,
+                  like: str = "p_carthh") -> Registration:
+    """An appearance for a character assembled out of parts already in the game.
+
+    The cheapest kind of new character there is: no geometry is written, no
+    model is spliced, and `heads.2da` is only touched if the head is one this
+    tool built. A humanoid is `race` + a clothed body per equipment slot +
+    a row of `heads.2da`, and all three already exist for a hundred and thirty
+    combinations the game itself never ships.
+
+    `body` becomes `race`. `outfit` fills every clothing slot, so what the
+    character wears does not depend on what it is carrying. `head` may be a
+    vanilla head - in which case its existing row is reused rather than
+    duplicated - or a resref this tool has just written, which gets one.
+    """
+    out_dir = Path(out_dir)
+    reg = Registration(label=label)
+
+    heads = _load(install, HEADS)
+    head_row = None
+    head_is_new = False
+    if head:
+        head_row = find_head_row(heads, head)
+        if head_row is None:
+            head_row = heads.add_row(str(heads.get_height()), {"head": head})
+            head_is_new = True
+            reg.notes.append(f"heads.2da: {head} added as row {head_row}")
+        else:
+            # Adding a second row for a head the game already knows would work,
+            # and would also grow the table by one every time somebody reused
+            # a vanilla face.
+            reg.notes.append(f"heads.2da: {head} is already row {head_row}, reused")
+        reg.head_row = head_row
+
+    appearance = _load(install, APPEARANCE)
+    template = _appearance_using_head(appearance, heads, like)
+    if template is None:
+        template = find_appearance(appearance, like)
+    if template is None:
+        raise TwoDAError(
+            f"nothing in appearance.2da uses {like!r}, so there is nothing to "
+            f"copy the fifty columns nobody wants to fill from"
+        )
+
+    changes = {"label": label}
+    if head_row is not None:
+        changes["normalhead"] = str(head_row)
+    if body:
+        changes["race"] = body
+    new_row = _append_like(appearance, template, changes)
+    if head_row is not None and "backuphead" in appearance.get_headers():
+        appearance.set_cell(new_row, "backuphead", str(head_row))
+    reg.appearance_row = new_row
+
+    said = f"appearance.2da: row {new_row} {label!r}, copied from row {template}"
+    if body:
+        said += f", body {body}"
+    if head_row is not None:
+        said += f", head row {head_row}"
+    reg.notes.append(said)
+
+    note = dress(appearance, new_row, outfit)
+    if note:
+        reg.notes.append(f"appearance.2da: {note}")
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    # Only write the table that changed. Shipping an unmodified `heads.2da`
+    # would still overwrite whatever a person's other mods had put there.
+    written = [(APPEARANCE, appearance)]
+    if head_is_new:
+        written.append((HEADS, heads))
+    for name, table in written:
+        path = out_dir / f"{name}.2da"
+        _save(table, path)
+        reg.files.append(path)
+    return reg
+
+
 def register_creature(install, out_dir, model_resref: str, *, label: str,
                       texture: str | None = None,
                       like: str = "p_hk47") -> Registration:
@@ -184,6 +263,10 @@ class Outfit:
     texture: str
     rows: int = 0
     example: str = ""
+
+    @property
+    def label(self) -> str:
+        return f"{self.model}  ({self.example})" if self.example else self.model
 
     def __str__(self) -> str:
         worn = f" - {self.example}" if self.example else ""
@@ -242,8 +325,12 @@ def dress(table, row: int, outfit: Outfit | str | None = None) -> str | None:
     depends on what he is carrying. This does the same, using the body the row
     already names as its `race`.
     """
-    if isinstance(outfit, Outfit):
-        body, texture = outfit.model, outfit.texture or outfit.model
+    # Duck-typed rather than isinstance: a caller assembling a character hands
+    # over a catalogue entry, and requiring it to be this exact class is how
+    # two modules end up with two Outfits that are not each other.
+    if hasattr(outfit, "model"):
+        body = outfit.model
+        texture = getattr(outfit, "texture", "") or outfit.model
     else:
         body = (outfit or table.get_cell(row, "race")).strip()
         if not body:

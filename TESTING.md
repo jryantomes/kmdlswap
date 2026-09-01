@@ -382,6 +382,37 @@ the handover.
 - [ ] Check the texture that lands in the pack keeps its alpha if the source
       had any — that is what cost a ported Quarren its eyes.
 
+## 21. The Character tab
+
+Pick a **body**, a **wardrobe** and a **head**, each in its own grid with
+thumbnails. Nothing here writes geometry: a KOTOR humanoid is a base body, a
+clothed body per equipment slot and a row of `heads.2da`, and all three already
+exist. A new character is two table rows and a blueprint.
+
+30 bodies, 117 outfits, 106 heads — and none of the pairings are guessed. Every
+`modeltype B` row names both a `race` and a `normalhead`, so a tick means the
+game itself already puts that part on that body. Unticked combinations are
+offered anyway, because those are the reason to open the tool at all.
+
+- [ ] Pick only a body, e.g. `N_CommM`. The wardrobe and head should fill
+      themselves in with something the game already pairs with it, so you never
+      get a naked headless character by doing nothing.
+- [ ] Check the ticked entries sort to the front of the head and wardrobe grids
+      once a body is chosen, and that unticked ones are still listed.
+- [ ] Pick `N_TwilekF` with `p_CarthH`. It should warn that nothing in the game
+      pairs them — then build it anyway and see whether the neck meets the
+      collar. This is the combination the warning exists for.
+- [ ] Filter the wardrobe to female. It should shrink, not empty. (It emptied
+      before outfits were classified — an outfit is a body model and has a sex
+      the same way a body does.)
+- [ ] Create an NPC and install it from the Builds tab. Confirm in game that it
+      spawns clothed, with the head you picked.
+- [ ] Create one using a **vanilla** head and confirm no `heads.2da` is written
+      at all — the head already has a row, and adding a second would grow the
+      table every time somebody reused a face.
+- [ ] Compare against the Transplant tab: that one is for when no existing head
+      will do. If this tab covers what you wanted, it is the cheaper route.
+
 ---
 
 ## Housekeeping

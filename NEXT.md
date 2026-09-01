@@ -20,13 +20,16 @@ The engine constraint that shaped the early sessions is **gone**:
 
 ## What the tool does now
 
-Six tabs, all sharing the folder settings, log and build button.
+Seven tabs, all sharing the folder settings, log and build button.
 
 * **Effects** - uniform scales of a part (bighead and friends), previewed as a
   whole character rather than a headless body.
 * **Transplant** - move geometry between models. Donors are listed **as faces**,
   can be sorted by measured fit, filtered by male / female / droid, taken from
   KOTOR 2, and aimed at a single named node instead of whole-model pairing.
+* **Character** - body, wardrobe and head from three thumbnail grids, written
+  as two table rows and a blueprint. No geometry, so it is the cheap path; the
+  Transplant tab is for when no existing head will do.
 * **Custom head** - a mesh from outside the game into one node, with decimation,
   fitting, winding repair and cropping. **Import .glb** builds a pack from a
   sculpt or a Blender export and selects it.
