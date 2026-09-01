@@ -170,7 +170,9 @@ already ships while still offering the ones it does not.
 fitting, winding repair and cropping. A pack is checked before anything is
 built, and a failure names the check. **Import .glb** turns a sculpt, a scan or
 a Blender export into a pack and selects it, so anything that can reach glTF
-can reach KOTOR.
+can reach KOTOR. **From Jade Empire** does the same for that game's own models
+— 158 heads and 112 bodies, picked from a grid of faces, rotated upright and
+scaled on the way in.
 
 **Lips** — a `.lip` for every line of a dialogue, so an NPC nobody recorded
 still moves its mouth while the subtitle is up. Shapes come from the line's own
@@ -184,6 +186,26 @@ body**, before and after at one shared scale.
 
 **Builds** — named, kept folders with a manifest recording what went in, so a
 good result can be reproduced. Installing points at one of these.
+
+### Jade Empire
+
+Jade runs on the same engine lineage and shares almost nothing about its file
+layout: a 60-byte node header against KOTOR's 80, 28-byte faces against 32,
+controllers moved out of the node entirely. The splice engine will never touch
+a Jade model, and there is no reason it should — what Jade has that KOTOR does
+not is *geometry*, and geometry already had a route in.
+
+So a Jade head becomes a head pack, and from there it is the ordinary path:
+decimation, winding repair, the solidity check, the weight transfer. Reading
+the format is [somebody else's code](src/kmdlfun/vendor/jade/), vendored from
+JadeBlender under the GPL; everything on top of it is in `kmdlfun/jade.py`.
+
+Two corrections happen on the way in, both measured rather than assumed:
+a Jade model's height runs along X where KOTOR's runs along Z, and Jade models
+are about a sixth larger. Neither figure has been in front of the engine yet —
+see [reports/JADE_FINDINGS.md](reports/JADE_FINDINGS.md).
+
+Creating *characters* is still KOTOR only. Jade is a source of parts.
 
 ### What the models forced
 

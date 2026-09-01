@@ -227,6 +227,20 @@ def main(argv: list[str] | None = None) -> int:
                     help="force every lip to this length, for when the timing "
                          "is known but the files are not here")
 
+    jd = sub.add_parser("jade",
+                        help="turn a Jade Empire model into a head pack")
+    jd.add_argument("resref", nargs="?",
+                    help="the model to convert; omit to list what is there")
+    jd.add_argument("--install", help="the Jade Empire folder (found "
+                                      "automatically if left out)")
+    jd.add_argument("--out", help="pack folder to create")
+    jd.add_argument("--kind", choices=["head", "body", "all"], default="head",
+                    help="which models to list (default: heads)")
+    jd.add_argument("--scale", type=float,
+                    help="size correction; the measured default is 0.83, and "
+                         "it is a measurement rather than a fact - see "
+                         "reports/JADE_FINDINGS.md")
+
     sub.add_parser("gui", help="launch the desktop app")
 
     args = p.parse_args(argv)
@@ -253,6 +267,8 @@ def main(argv: list[str] | None = None) -> int:
             return _rank(args)
         if args.cmd == "lips":
             return _lips(args)
+        if args.cmd == "jade":
+            return _jade(args)
         if args.cmd == "gui":
             from .gui import run
 
@@ -858,6 +874,68 @@ def _rank(args) -> int:
                         "extra_parts": f.extra_parts, "blocked": f.blocked}
                        for f in fits], fh, indent=1)
         print(f"  wrote {args.json}")
+    return 0
+
+
+def _jade(args) -> int:
+    """Jade Empire geometry, out as a head pack.
+
+    Jade's file layout shares almost nothing with KOTOR's, so the splice engine
+    will never touch one of its models. What it can do is take the geometry,
+    which is the same route a sculpt or a Blender export comes in by.
+    """
+    from pathlib import Path as _Path
+
+    from . import installs, jade
+
+    install = args.install or installs.detect().get(installs.JADE)
+    if not install:
+        print("kmdlfun: no Jade Empire install found; pass --install",
+              file=sys.stderr)
+        return 1
+
+    kinds = (jade.HEAD, jade.BODY) if args.kind == "all" else (args.kind,)
+    try:
+        catalogue = jade.catalogue(install, kinds=kinds)
+    except jade.JadeError as exc:
+        print(f"kmdlfun: {exc}", file=sys.stderr)
+        return 1
+
+    if not args.resref:
+        print(f"{len(catalogue)} model(s) in {install}")
+        for entry in catalogue:
+            print(f"  {entry.kind:<5} {entry.resref}")
+        print("\nPass one of these and --out to convert it.")
+        return 0
+
+    wanted = args.resref.lower()
+    entry = next((e for e in catalogue if e.resref.lower() == wanted), None)
+    if entry is None:
+        print(f"kmdlfun: no model named {args.resref!r} in {install}",
+              file=sys.stderr)
+        return 1
+    if not args.out:
+        print("kmdlfun: --out is required to convert", file=sys.stderr)
+        return 1
+
+    scale = args.scale if args.scale is not None else jade.SCALE
+    try:
+        result = jade.to_pack(entry, _Path(args.out), scale=scale)
+    except jade.JadeError as exc:
+        print(f"kmdlfun: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"{entry.resref}  ({entry.kind})")
+    print(f"  vertices  {result['vertices']}")
+    print(f"  triangles {result['triangles']}")
+    print(f"  uvs       {result['uvs'] or 'NONE - it will render untextured'}")
+    print(f"  scale     x{scale} , rotated upright")
+    for note in result["notes"]:
+        print(f"  note: {note}")
+    print(f"\nwrote a head pack to {result['pack']}")
+    print("Build it with:  kmdlfun head " + str(result["pack"])
+          + " --install \"<K1 root>\" --host p_carthh --node Head "
+            "--decimate --fit")
     return 0
 
 

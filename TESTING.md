@@ -450,6 +450,36 @@ once-per-machine job.
       **Search every drive** can find it. Worth confirming once if you keep a
       copy on an external drive.
 
+## 23. Jade Empire heads on KOTOR bodies
+
+**From Jade Empire** on the Custom head tab. It reads the 1028 archives once
+(a moment), then shows a grid of faces — 158 heads or 112 bodies — and picking
+one writes a head pack into `<output>/packs/jade_<name>/` and selects it.
+
+Confirmed offline: `h_common01_` converts to 742 vertices and 1137 triangles
+with UVs, and builds onto `p_carthh` with weights transferred across all 16
+bones and placement within 0.013. **None of it has been in the game.**
+
+- [ ] Convert `h_common01_` and build it onto `p_carthh` with **Fit ticked**.
+      Fit is needed here and is not the shrink you saw on transplants — the
+      head arrives at 93% of the node's size, so fitting is a 0.98× nudge that
+      does the placement. Without it the build fails outright, saying the head
+      would float.
+- [ ] Look at it in the Preview tab before installing. The rotation was settled
+      by rendering rather than reasoning, and the first attempt produced a head
+      that was upright, correctly sized, and facing backwards — which no number
+      in the checks would have caught.
+- [ ] Install it and see it in game. **This is the one that matters**: the
+      0.83 scale is measured, disagrees in direction with the format author's
+      own figure, and has never been tested against the engine.
+- [ ] Try the **scale** box in the Jade window at 1.0 and at 0.7 and compare.
+      If 0.83 is wrong, this is how you find the number that is right.
+- [ ] Convert something with no UVs if you can find one. It should still build
+      and say plainly that it will render untextured.
+- [ ] Textures are **not** imported yet — Jade keeps them in its own `.txb`
+      format. A converted head wears the host's texture, which is why the first
+      one will look like Carth's skin on a Jade face.
+
 ---
 
 ## Housekeeping

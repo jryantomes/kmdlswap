@@ -730,6 +730,12 @@ class App(ttk.Frame):
         # anything through Blender - was the one thing the window could not do.
         ttk.Button(page, text="Import .glb", command=self._import_glb).grid(
             row=0, column=4, padx=(6, 0))
+        # Jade's file layout shares almost nothing with KOTOR's, so its models
+        # can never go through the splice engine. Their geometry can come in
+        # the same way a sculpt does, and from here it is the same path.
+        self.jade_btn = ttk.Button(page, text="From Jade Empire",
+                                   command=self._open_jade)
+        self.jade_btn.grid(row=0, column=5, padx=(6, 0))
 
         ttk.Label(page, text="Onto").grid(row=1, column=0, sticky="w", pady=(6, 0))
         self.head_host = tk.StringVar()
@@ -1928,6 +1934,175 @@ class App(ttk.Frame):
         self._donor_photos[label] = photo
         self.donor_tree.set_image(label, photo)
 
+    # ---- Jade Empire -------------------------------------------------------
+
+    def _open_jade(self):
+        """Pick a Jade model, convert it, and select the pack.
+
+        A window rather than a tab: this is one step on the way to a head, not
+        a place anybody stays.
+        """
+        install = self.jade.get().strip()
+        if not install:
+            self._say("no Jade Empire folder set - Settings > Folders, or "
+                      "Find my games")
+            return
+        if getattr(self, "_jade_window", None) is not None:
+            try:
+                self._jade_window.lift()
+                return
+            except tk.TclError:
+                pass
+
+        from . import gallery as kgallery
+        from . import thumbs as kthumbs
+
+        win = tk.Toplevel(self)
+        win.title("Jade Empire")
+        win.transient(self.winfo_toplevel())
+        win.columnconfigure(0, weight=1)
+        win.rowconfigure(1, weight=1)
+        self._jade_window = win
+
+        def closed():
+            self._jade_window = None
+            win.destroy()
+
+        win.protocol("WM_DELETE_WINDOW", closed)
+
+        bar = ttk.Frame(win, padding=(8, 8, 8, 0))
+        bar.grid(row=0, column=0, sticky="ew")
+        ttk.Label(bar, text="Show").pack(side="left", padx=(0, 6))
+        self.jade_kind = tk.StringVar(value="head")
+        kinds = ttk.Combobox(bar, textvariable=self.jade_kind, width=8,
+                             state="readonly", values=["head", "body"])
+        kinds.pack(side="left")
+        kinds.bind("<<ComboboxSelected>>", lambda _e: self._refresh_jade())
+        # The scale is a measurement, not a fact - it disagrees in direction
+        # with the format author's own figure - so it is a box, not a constant.
+        ttk.Label(bar, text="scale").pack(side="left", padx=(16, 4))
+        from . import jade as kjade
+
+        self.jade_scale = tk.DoubleVar(value=kjade.SCALE)
+        ttk.Spinbox(bar, from_=0.5, to=2.0, increment=0.01, width=6,
+                    textvariable=self.jade_scale).pack(side="left")
+        self.jade_note = ttk.Label(bar, text="", foreground="#666")
+        self.jade_note.pack(side="left", padx=(12, 0))
+
+        self.jade_gallery = kgallery.Gallery(
+            win, cell=kthumbs.SIZE,
+            on_pick=lambda label: self._convert_jade(label))
+        self.jade_gallery.grid(row=1, column=0, sticky="nsew", padx=8, pady=8)
+        self._jade_photos: dict[str, object] = {}
+        self._jade_labels: dict[str, object] = {}
+        self._jade_thumb_job = 0
+
+        ttk.Label(
+            win,
+            text=("Pick a face to convert it into a head pack and load it on the "
+                  "Custom head tab. Jade heads are rotated upright and scaled on "
+                  "the way in; the scale is measured rather than confirmed, so "
+                  "check the result before trusting it."),
+            foreground="#666", wraplength=560,
+        ).grid(row=2, column=0, sticky="w", padx=8, pady=(0, 8))
+
+        self._load_jade()
+
+    def _load_jade(self):
+        """Read the catalogue off the Tk thread; 1028 archives is not instant."""
+        install = self.jade.get().strip()
+        self.jade_note.config(text="reading the archives...")
+
+        def work():
+            try:
+                from . import jade as kjade
+
+                self.events.put(("jade_catalogue", kjade.catalogue(install)))
+            except Exception as exc:  # noqa: BLE001
+                self.events.put(("error", f"could not read Jade Empire: {exc}"))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _show_jade_catalogue(self, catalogue):
+        self._jade_catalogue = catalogue
+        self._refresh_jade()
+
+    def _refresh_jade(self):
+        if getattr(self, "_jade_window", None) is None:
+            return
+        wanted = self.jade_kind.get()
+        entries = [e for e in getattr(self, "_jade_catalogue", [])
+                   if e.kind == wanted]
+        self._jade_labels = {e.resref: e for e in entries}
+        self._jade_photos = {k: v for k, v in self._jade_photos.items()
+                             if k in self._jade_labels}
+        self.jade_gallery.show(list(self._jade_labels))
+        self.jade_note.config(text=f"{len(entries)} to choose from")
+        self._draw_jade()
+
+    def _draw_jade(self):
+        self._jade_thumb_job += 1
+        job = self._jade_thumb_job
+        entries = list(self._jade_labels.values())
+
+        def work():
+            from . import jade as kjade
+
+            for entry in entries:
+                if job != self._jade_thumb_job:
+                    return
+                found = kjade.thumbnail(entry)
+                if found is not None:
+                    self.events.put(("jade_thumb", (job, entry.resref,
+                                                    str(found))))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _show_jade_thumb(self, job: int, label: str, path: str):
+        if (job != self._jade_thumb_job
+                or getattr(self, "_jade_window", None) is None
+                or label not in self._jade_labels):
+            return
+        try:
+            photo = tk.PhotoImage(file=path)
+        except tk.TclError:
+            return
+        self._jade_photos[label] = photo
+        self.jade_gallery.set_image(label, photo)
+
+    def _convert_jade(self, label: str):
+        entry = self._jade_labels.get(label)
+        if entry is None or (self.worker and self.worker.is_alive()):
+            return
+        out = str(Path(self.out_dir.get().strip() or ".") / "packs"
+                  / f"jade_{entry.resref.strip('_')}")
+        scale = self.jade_scale.get()
+        self.build_btn.config(state="disabled")
+        self._say(f"\n=== converting {entry.resref} from Jade Empire ===")
+        self.worker = threading.Thread(
+            target=self._jade_work, args=(entry, out, scale), daemon=True)
+        self.worker.start()
+
+    def _jade_work(self, entry, out, scale):
+        try:
+            from . import jade as kjade
+
+            result = kjade.to_pack(entry, out, scale=scale)
+            lines = [
+                f"{result['resref']}",
+                f"  vertices  {result['vertices']}",
+                f"  triangles {result['triangles']}",
+                f"  uvs       {result['uvs'] or 'NONE - it will render untextured'}",
+                f"  scale     x{scale:.2f}, rotated upright",
+            ]
+            lines.extend(f"  note: {n}" for n in result["notes"])
+            lines.append(f"wrote a head pack to {result['pack']}")
+            lines.append("Build it onto a host with Fit ticked - the geometry "
+                         "arrives at Jade's origin, not the head node's.")
+            self.events.put(("imported", (out, lines)))
+        except Exception as exc:  # noqa: BLE001
+            self.events.put(("error", f"{type(exc).__name__}: {exc}"))
+
     def _import_glb(self):
         """Turn a .glb into a pack folder and select it, in one step.
 
@@ -3116,6 +3291,10 @@ class App(ttk.Frame):
                     self._show_part_thumb(*payload)
                 elif kind == "character_drawn":
                     self._show_character(*payload)
+                elif kind == "jade_catalogue":
+                    self._show_jade_catalogue(payload)
+                elif kind == "jade_thumb":
+                    self._show_jade_thumb(*payload)
                 elif kind == "imported":
                     pack, lines = payload
                     self.pack_dir.set(pack)
