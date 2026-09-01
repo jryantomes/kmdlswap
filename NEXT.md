@@ -43,6 +43,14 @@ the engine reads. `--register` then writes the `heads.2da` and `appearance.2da`
 rows that make the game offer it, appended to whatever is installed so other
 mods survive.
 
+How much a character needs depends on what it is for, and the three answers
+differ enough to be a choice rather than a default. A plain **NPC** edits no
+tables at all if it wears something already in the game - a blueprint and
+nothing else. An **NPC that talks** is the same, wired for conversation. A
+**companion** adds a portrait row, the henchman scripts and `NoPermDeath`. The
+`.dlg` and the recruit plumbing are reported as still the modder's rather than
+silently skipped.
+
 What is still missing for a *distributable* mod is patching rather than
 replacing: these tables are this install's, so handing them to someone else
 overwrites their mods. A HoloPatcher/TSLPatcher `changes.ini` is the answer and

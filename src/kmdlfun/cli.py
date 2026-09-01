@@ -69,6 +69,17 @@ def main(argv: list[str] | None = None) -> int:
                          "first pair anchors the alignment for the rest")
     tp.add_argument("--out", required=True, help="where builds are kept")
     tp.add_argument("--name", help="name this build; defaults to host-donor")
+    tp.add_argument("--as-character", metavar="RESREF",
+                    help="also write a creature blueprint so the model is "
+                         "somebody the game can place, not just a file")
+    tp.add_argument("--kind", choices=["npc", "talker", "companion"], default="npc",
+                    help="how much a character needs: an npc is a blueprint and "
+                         "nothing else, a talker is wired for conversation, a "
+                         "companion adds a portrait, henchman scripts and "
+                         "NoPermDeath (default: npc)")
+    tp.add_argument("--character-name", metavar="NAME",
+                    help="what it is called in game; a literal string, so no "
+                         "dialog.tlk patching")
     tp.add_argument("--register", nargs="?", const=True, metavar="LABEL",
                     help="also write the heads.2da and appearance.2da rows that "
                          "make the game offer this as a character. Needs "
@@ -728,7 +739,27 @@ def _transplant(args) -> int:
         ):
             print(f"  {line}")
 
-    if getattr(args, "register", None):
+    if getattr(args, "as_character", None):
+        from . import character as kchar
+
+        if not getattr(args, "save_as", None):
+            print("kmdlfun: --as-character needs --save-as, so the character has "
+                  "a model of its own to wear", file=sys.stderr)
+            return 1
+        try:
+            ch = kchar.create(
+                args.install, out_dir, resref=args.as_character, kind=args.kind,
+                name=args.character_name, model=written_as, like=args.host,
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"kmdlfun: {exc}", file=sys.stderr)
+            return 1
+        for line in ch.notes:
+            print(f"  {line}")
+        for line in ch.todo:
+            print(f"  still yours: {line}")
+
+    elif getattr(args, "register", None):
         from . import twoda as k2da
 
         if not getattr(args, "save_as", None):

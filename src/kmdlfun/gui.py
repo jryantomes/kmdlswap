@@ -42,6 +42,7 @@ WINDOW_W, WINDOW_H = 860, 980
 WHOLE_MODEL = "matching nodes (whole model)"
 ANYONE = "anyone"
 AUTO_NODE = "automatic"
+NOT_A_CHARACTER = "just a model"
 
 DEFAULT_INSTALLS = [
     r"E:\SteamLibrary\steamapps\common\swkotor",
@@ -76,6 +77,9 @@ class TransplantSettings:
     donor_node: str = ""
     # A new resref to save under, or "" to overwrite the host as before.
     save_as: str = ""
+    # "" for a bare model, or npc / talker / companion.
+    character_kind: str = ""
+    character_name: str = ""
 
 
 def guess_install() -> str:
@@ -343,7 +347,7 @@ class App(ttk.Frame):
         ttk.Checkbutton(
             page, text="Show every model, including bodies and ones that cannot pair",
             variable=self.show_all, command=self._refresh_donors,
-        ).grid(row=9, column=0, columnspan=5, sticky="w", pady=(8, 0))
+        ).grid(row=10, column=0, columnspan=5, sticky="w", pady=(8, 0))
 
         opts = ttk.Frame(page)
         opts.grid(row=5, column=0, columnspan=5, sticky="w", pady=(8, 0))
@@ -401,12 +405,33 @@ class App(ttk.Frame):
         ttk.Entry(saveas, textvariable=self.save_as, width=22).pack(side="left")
         ttk.Label(saveas, text="a new resref, e.g. p_myhead - blank replaces the host",
                   foreground="#666").pack(side="left", padx=(8, 0))
+
+        # How much a new character needs depends on what it is for, and the
+        # three answers are genuinely different: a plain NPC edits no tables at
+        # all, while a companion wants a portrait, henchman scripts and
+        # NoPermDeath. Learned from two mods rather than guessed.
+        who = ttk.Frame(page)
+        who.grid(row=8, column=0, columnspan=5, sticky="w", pady=(6, 0))
+        ttk.Label(who, text="Make it a").pack(side="left", padx=(0, 6))
+        self.character_kind = tk.StringVar(value=NOT_A_CHARACTER)
+        for label, value in ((NOT_A_CHARACTER, NOT_A_CHARACTER),
+                             ("NPC", "npc"),
+                             ("NPC that talks", "talker"),
+                             ("companion", "companion")):
+            ttk.Radiobutton(who, text=label, value=value,
+                            variable=self.character_kind,
+                            command=self._on_kind_change).pack(side="left", padx=(0, 10))
+        ttk.Label(who, text="called").pack(side="left", padx=(10, 4))
+        self.character_name = tk.StringVar(value="")
+        ttk.Entry(who, textvariable=self.character_name, width=18).pack(side="left")
+        self.character_note = ttk.Label(who, text="", foreground="#666")
+        self.character_note.pack(side="left", padx=(8, 0))
         ttk.Label(
             page,
             text=("Preview writes nothing - it draws the result on the Preview tab "
                   "and reports how solid the donor is. Under 76% reads as holes."),
             foreground="#666", wraplength=620,
-        ).grid(row=10, column=0, columnspan=5, sticky="w", pady=(4, 0))
+        ).grid(row=11, column=0, columnspan=5, sticky="w", pady=(4, 0))
 
     # ---- shared bottom -----------------------------------------------------
 
@@ -676,6 +701,16 @@ class App(ttk.Frame):
                   "not proof."),
             foreground="#a35", wraplength=600,
         ).grid(row=6, column=0, columnspan=3, sticky="w", pady=(4, 0))
+
+    def _on_kind_change(self):
+        kind = self.character_kind.get()
+        self.character_note.config(text={
+            NOT_A_CHARACTER: "",
+            "npc": "a blueprint only - no portrait, no conversation",
+            "talker": "wired for conversation; the .dlg is yours to write",
+            "companion": "adds a portrait row, henchman scripts and NoPermDeath; "
+                         "the recruit script is yours",
+        }.get(kind, ""))
 
     def _apply_framing(self):
         """Point the camera at the head, or at the whole figure."""
@@ -1784,6 +1819,9 @@ class App(ttk.Frame):
                 donor_node=("" if self.donor_node.get() == AUTO_NODE
                             else self.donor_node.get()),
                 save_as=self.save_as.get().strip(),
+                character_kind=("" if self.character_kind.get() == NOT_A_CHARACTER
+                                else self.character_kind.get()),
+                character_name=self.character_name.get().strip(),
             )
             self.worker = threading.Thread(
                 target=self._transplant_work,
@@ -1988,6 +2026,25 @@ class App(ttk.Frame):
                     mdl, mdx, cfg.donor_install, out,
                     host_install=cfg.install,
                 ))
+            if cfg.character_kind:
+                from . import character as kchar
+
+                if not cfg.save_as:
+                    lines.append("a character needs Save as filled in, so it has "
+                                 "a model of its own to wear - skipped")
+                else:
+                    try:
+                        ch = kchar.create(
+                            cfg.install, out, resref=cfg.save_as,
+                            kind=cfg.character_kind,
+                            name=cfg.character_name or cfg.save_as,
+                            model=written_as, like=host,
+                        )
+                        lines.extend(ch.notes)
+                        lines.extend(f"still yours: {x}" for x in ch.todo)
+                    except Exception as exc:  # noqa: BLE001
+                        lines.append(f"could not make it a character: {exc}")
+
             build = kbuilds.adopt(out, {
                 "kind": "transplant",
                 "host": {"model": host, "game": host_layout.game,
