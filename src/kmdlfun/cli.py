@@ -90,7 +90,13 @@ def main(argv: list[str] | None = None) -> int:
                          "than overwriting the host. The name inside the model "
                          "is changed to match, so it sits beside the originals "
                          "instead of replacing one")
-    tp.add_argument("--fit", action="store_true", help="scale the donor part to the host part's size")
+    tp.add_argument("--fit", action="store_true",
+                    help="scale the donor part down to the host part's size. "
+                         "Usually wrong for a head: a Bith fitted to Carth "
+                         "stands 0.242 tall and floats above the collar, where "
+                         "left alone it stands 0.400 and meets the neck. Use it "
+                         "when a donor is genuinely the wrong scale, not by "
+                         "default")
     tp.add_argument("--place", action="store_true",
                     help="move the donor onto the host part without resizing it, "
                          "so it keeps the size it was authored at. Use instead of "

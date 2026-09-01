@@ -1094,3 +1094,15 @@ def test_upcoming_promises_no_buttons(app):
         assert str(entry.cget("state")) == "readonly", (
             "the command lines are for copying, not typing into"
         )
+
+
+def test_a_donor_head_keeps_its_own_size_by_default(app):
+    """Shrinking a head to the host's box detaches it from the neck.
+
+    Measured on a Bith onto Carth: fitted it stands 0.242 tall and floats 0.019
+    above the collar; left alone it stands 0.400 and overlaps by 0.060. The
+    donor is the size it was authored at, and `to_host_space` was already
+    arguing this about a Quarren while the default did the opposite.
+    """
+    transplant_tab(app)
+    assert app.opt_fit.get() is False, "fitting should be opt-in"
