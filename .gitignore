@@ -25,6 +25,12 @@ dist/
 /out_probe2/
 /out_caps/
 /packs/
+# Build outputs. These carry whole `appearance.2da` and `heads.2da` tables
+# copied out of a person's own install, plus models derived from vanilla
+# geometry - none of which belongs in a repository. `out_broker*` was committed
+# by accident because the pattern list named specific folders rather than the
+# prefix every build actually uses.
+/out_*/
 
 # my own working files while patching
 /scratch_patch.py
