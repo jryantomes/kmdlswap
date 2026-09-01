@@ -413,6 +413,34 @@ offered anyway, because those are the reason to open the tool at all.
 - [ ] Compare against the Transplant tab: that one is for when no existing head
       will do. If this tab covers what you wanted, it is the cheaper route.
 
+## 22. Settings, and finding the games
+
+The Folders panel is gone from the top of the window. It is a one-line summary
+plus a **Settings** menu, and the games are detected at startup from Steam's
+own `libraryfolders.vdf` - which is what lets it find an install on a second
+drive, the case the old hardcoded list of three paths could never cover.
+
+Found paths are remembered in `~/.kmdlfun/installs.json`, so the search is a
+once-per-machine job.
+
+- [ ] Launch it. All three games should already be filled in, with **no log
+      output about it** - the status line is the whole report. Anything chatty
+      here defeats the point.
+- [ ] Check the status line reads `KOTOR: swkotor   KOTOR II: ...   output:
+      out_fun` - names, not paths.
+- [ ] Open **Settings > Folders...**, confirm the four boxes are there (KOTOR,
+      output, KOTOR II, Jade Empire) and that editing one updates the line
+      behind it.
+- [ ] Delete `~/.kmdlfun/installs.json` and relaunch. It should find everything
+      again from Steam, in well under a second.
+- [ ] Rename your KOTOR folder to something else and use **Find my games**. It
+      should still find it: identification is by `swkotor.exe`, not by name.
+- [ ] Point the KOTOR box at your **KOTOR II** folder by hand and relaunch.
+      Detection must not overwrite it - losing a path somebody typed is worse
+      than not helping.
+- [ ] Try **Search every drive** once, to see how long it takes on your
+      machine. It only runs when asked, and only when something is missing.
+
 ---
 
 ## Housekeeping
