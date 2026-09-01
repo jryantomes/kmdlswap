@@ -198,10 +198,11 @@ creature blueprints, 52 use that script and **none of them hold a
 conversation**; its company is `c_bantha`, `c_brith` and `c_dewback`. Every
 vanilla NPC that talks uses `k_def_spawn01`.
 
-- [ ] Change that one field to `k_def_spawn01` and see whether he stops
-      misbehaving. If he does, the diagnosis holds and the same mistake is now
-      designed out of the generator. If he does not, the cause is elsewhere and
-      worth knowing.
+- [x] **Confirmed in game, 2026-09-01: his head animates.** The diagnosis
+      holds - `k_def_ambmob` was making a conversational NPC run the wandering
+      -animal behaviour - and the same mistake is designed out of the
+      generator, which now uses `k_def_spawn01` for NPCs and `k_hen_spawn01`
+      for companions.
 
 ## 15. Does a lip file play without audio?
 
