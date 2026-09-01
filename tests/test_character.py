@@ -124,3 +124,29 @@ def test_a_model_gives_the_character_its_own_appearance(install_path, tmp_path):
     assert without.appearance_row is None
     assert blueprint(utc(with_model)).value("Appearance_Type") == \
         with_model.appearance_row
+
+
+def test_a_talking_npc_does_not_get_the_wandering_animal_spawn(install_path, tmp_path):
+    """`k_def_ambmob` is what `c_bantha` and `c_dewback` run.
+
+    Counted across all 205 vanilla creature blueprints: 52 use it and *none* of
+    those hold a conversation. An NPC given it stands in a dialogue running a
+    wander loop, which is what broken animation on a talking NPC looks like -
+    and it is the one field that differed on the mod this was first copied from.
+    """
+    for kind in (kchar.NPC, kchar.TALKER):
+        ch = kchar.create(install_path, tmp_path / kind, resref=f"n_{kind}",
+                          kind=kind)
+        spawn = str(blueprint(utc(ch)).value("ScriptSpawn"))
+        assert spawn == "k_def_spawn01", f"{kind} got {spawn}"
+
+    ch = kchar.create(install_path, tmp_path / "mate", resref="n_mate",
+                      kind=kchar.COMPANION)
+    assert str(blueprint(utc(ch)).value("ScriptSpawn")) == "k_hen_spawn01"
+
+
+def test_the_spawn_scripts_are_ones_vanilla_actually_uses(install_path):
+    """Not invented: every value here appears on a shipped blueprint."""
+    assert kchar.DEFAULT_SCRIPTS["ScriptSpawn"] == "k_def_spawn01"
+    assert kchar.HENCHMAN_SCRIPTS["ScriptSpawn"] == "k_hen_spawn01"
+    assert "ambmob" not in str(kchar.DEFAULT_SCRIPTS)
