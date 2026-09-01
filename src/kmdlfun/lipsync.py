@@ -57,18 +57,33 @@ LETTERS = {
 AUDIO_SUFFIXES = (".wav", ".mp3")
 
 
+# A real voice line is somewhere between a mumble and a monologue. A header
+# claiming 384 kHz is not describing PCM, it is decoration over something else.
+PLAUSIBLE_RATES = range(8000, 48001)
+# KOTOR's fake header is 58 bytes on voice lines and 0x1D6 on ambient sound, so
+# the real RIFF is never far in.
+HEADER_SEARCH = 2048
+
+
 def duration_of(path) -> float | None:
-    """How long an audio file actually plays for, or None if it cannot be read.
+    """How long an audio file actually plays for, or None if it cannot be told.
 
-    Not `wave.open`, which believes the header. KOTOR voice files routinely do
-    not: `rfk_carth_a1.wav` declares a RIFF size of 50 bytes and a data chunk of
-    **zero** in a 368 KB file, so the standard library reports 0.00 seconds and
-    a lip generated from that would never move. Its real length is 16.72
-    seconds, which is only visible by measuring the bytes that are there.
+    KOTOR does not ship honest audio headers, and there are two different
+    dishonesties. Voice lines carry a **fake WAV header with the real WAV
+    nested inside it**: `rfk_carth_a1.wav` opens with a header claiming 8-bit
+    22 kHz and a data chunk of zero, and 58 bytes in there is a second RIFF
+    that is the truth - 16-bit 32 kHz, 5.76 seconds. Reading the outer one
+    gives 16.72, which is wrong by a factor of three. Ambient sound does the
+    same with a 470-byte preamble.
 
-    So the declared size is used when it is sane and the remaining bytes when it
-    is not. Files with honest headers - the ones the game ships, and anything a
-    normal recorder writes - come out the same either way.
+    The other is a WAV header over MP3 data, which is what the shipped
+    `streamwaves` are. Nothing in the header is true - `af.wav` claims 384 kHz
+    - and timing it would need frame-by-frame decoding. That returns None,
+    because a wrong number here silently produces a lip of the wrong length
+    and a confident wrong answer is worse than no answer.
+
+    So: take the innermost RIFF, and only believe it if it describes something
+    a person could have recorded.
     """
     import struct
 
@@ -77,22 +92,33 @@ def duration_of(path) -> float | None:
         raw = path.read_bytes()
     except OSError:
         return None
-    if len(raw) < 44 or raw[:4] != b"RIFF":
-        # A real MP3 needs frame-by-frame decoding to time; not worth it here,
-        # and saying so beats guessing.
+    if len(raw) < 44:
         return None
 
-    pos, byte_rate = 12, 0
+    # The last RIFF near the front is the real one; anything before it is the
+    # wrapper KOTOR puts on.
+    start = -1
+    at = raw.find(b"RIFF")
+    while at != -1 and at < HEADER_SEARCH:
+        start = at
+        at = raw.find(b"RIFF", at + 4)
+    if start < 0:
+        return None
+
+    pos, byte_rate, rate = start + 12, 0, 0
     while pos + 8 <= len(raw):
         chunk = raw[pos:pos + 4]
         declared = struct.unpack_from("<I", raw, pos + 4)[0]
         body = pos + 8
         if chunk == b"fmt " and body + 16 <= len(raw):
+            rate = struct.unpack_from("<I", raw, body + 4)[0]
             byte_rate = struct.unpack_from("<I", raw, body + 8)[0]
         elif chunk == b"data":
+            if not byte_rate or rate not in PLAUSIBLE_RATES:
+                return None
             available = len(raw) - body
             size = declared if 0 < declared <= available else available
-            return (size / byte_rate) if byte_rate else None
+            return size / byte_rate
         if declared <= 0:
             break
         pos = body + declared + (declared & 1)

@@ -115,11 +115,17 @@ def test_shapes_are_ones_the_format_knows():
 
 
 def riff(data_bytes: int, *, declared_data: int | None = None,
-         declared_riff: int | None = None, byte_rate: int = 22050) -> bytes:
-    """A WAV, optionally with a header that lies about its own size."""
+         declared_riff: int | None = None, byte_rate: int = 22050,
+         rate: int | None = None) -> bytes:
+    """A WAV, optionally with a header that lies about its own size.
+
+    `rate` is separate from `byte_rate` on purpose: the reader refuses a
+    sample rate no recorder produces, which is how it spots a fake header, and
+    tying the two together in the fixture would hide that.
+    """
     import struct
 
-    fmt = struct.pack("<HHIIHH", 1, 1, byte_rate, byte_rate, 1, 8)
+    fmt = struct.pack("<HHIIHH", 1, 1, rate if rate else byte_rate, byte_rate, 1, 8)
     body = bytes(data_bytes)
     data_size = data_bytes if declared_data is None else declared_data
     chunks = (b"fmt " + struct.pack("<I", len(fmt)) + fmt
@@ -182,3 +188,57 @@ def test_a_lip_fills_the_recording(tmp_path):
         "it has to fill the time, not just declare it"
     )
     assert [k.shape.name for k in matched][-1] == "NEUTRAL"
+
+
+def kotor_wrapped(inner: bytes, preamble: int = 58) -> bytes:
+    """A real WAV behind KOTOR's fake header, the way voice lines ship.
+
+    The outer header claims 8-bit 22 kHz and a data chunk of zero; the truth is
+    the RIFF nested inside it.
+    """
+    import struct
+
+    fmt = struct.pack("<HHIIHH", 1, 1, 22050, 22050, 1, 8)
+    head = (b"RIFF" + struct.pack("<I", preamble - 8) + b"WAVE"
+            + b"fmt " + struct.pack("<I", len(fmt)) + fmt
+            + b"data" + struct.pack("<I", 0))
+    return head.ljust(preamble, b"\0") + inner
+
+
+def test_the_real_wav_inside_kotors_fake_header_is_the_one_read(tmp_path):
+    """`rfk_carth_a1.wav` reads as 16.72 seconds from its outer header and is
+    really 5.76. Believing the wrapper is wrong by a factor of three, and the
+    lip would run for three times as long as the voice."""
+    inner = riff(64000 * 4, byte_rate=64000, rate=32000)   # 4s of 16-bit 32k
+    path = tmp_path / "wrapped.wav"
+    path.write_bytes(kotor_wrapped(inner))
+
+    assert lipsync.duration_of(path) == pytest.approx(4.0, abs=0.01)
+
+
+def test_the_470_byte_preamble_is_handled_too(tmp_path):
+    """Ambient sound uses a longer wrapper - 0x1D6 - for the same trick."""
+    inner = riff(22050 * 2)
+    path = tmp_path / "ambient.wav"
+    path.write_bytes(kotor_wrapped(inner, preamble=470))
+
+    assert lipsync.duration_of(path) == pytest.approx(2.0, abs=0.01)
+
+
+def test_a_header_over_mp3_data_is_refused_rather_than_guessed(tmp_path):
+    """The shipped `streamwaves` are MP3 behind a WAV header, and nothing in
+    that header is true - `af.wav` claims 384 kHz. Timing it needs frame
+    decoding, and a confident wrong length is worse than none: it produces a
+    lip that silently does not match the voice."""
+    path = tmp_path / "fake.wav"
+    path.write_bytes(riff(500_000, byte_rate=768_000, rate=384_000))
+
+    assert lipsync.duration_of(path) is None
+
+
+def test_an_ordinary_recording_still_reads(tmp_path):
+    """Whatever a normal recorder writes must not be caught by any of this."""
+    for rate, byte_rate in ((22050, 44100), (44100, 88200), (48000, 96000)):
+        path = tmp_path / f"plain{rate}.wav"
+        path.write_bytes(riff(byte_rate * 3, byte_rate=byte_rate, rate=rate))
+        assert lipsync.duration_of(path) == pytest.approx(3.0, abs=0.01), rate
