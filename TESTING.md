@@ -261,9 +261,12 @@ Verified after copying: all 26 spoken lines have a `VO_ResRef` *and* a lip file
 on disk. Your other 19 `rfk_*` files were not touched.
 
 - [x] Installed and ready - just talk to him.
-- [ ] Does the mouth move on **every** line now, not just the first?
-- [ ] Does it stop when the line does, or hang open? Ending on a closed mouth
-      is the thing most likely to look wrong.
+- [x] **Confirmed in game, 2026-09-01: his lips move throughout the
+      conversation**, not just on the one line that had a borrowed lip.
+
+So the whole path works: shapes derived from a line's own text, a `VO_ResRef`
+assigned where there was none, and 26 generated files driving a conversation
+nobody recorded. Nothing here came from a phoneme engine or a recording.
 
 If you record the lines, pass `--audio <folder>` and each lip is made exactly
 as long as its own recording - name the files after the line's `VO_ResRef`.
