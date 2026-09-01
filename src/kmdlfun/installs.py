@@ -1,21 +1,30 @@
-"""Finding the games, so nobody has to type a path.
+r"""Finding the games, so nobody has to type a path.
 
 Until now the app carried three hardcoded folders per game and picked the first
 that existed. That works on the machine the list was written on and nowhere
 else, and it fails silently - an empty box that looks like the app is broken
 rather than like it has not looked hard enough.
 
-Three sources, cheapest first:
+Four sources, cheapest and most authoritative first:
+
+**Windows knows what is installed.** Anything with an installer writes an
+uninstall entry carrying `InstallLocation`, and that covers GOG, retail discs
+and the launchers alike - it is the one mechanism that does not care how the
+game got there. GOG Galaxy keeps its own list too, and the retail KOTOR disc
+still writes `BioWare\SW\KOTOR`, fifteen years on.
 
 **Steam says where its libraries are.** `libraryfolders.vdf` lists every
-library folder, including ones on other drives, which is the whole problem the
-hardcoded list could not solve. Reading it is a few lines and beats guessing.
+library folder, including ones on other drives.
 
-**GOG and retail go in a handful of known places.** Short list, quick to check.
+**GOG and retail go in a handful of known places.** Short list, quick to check,
+and the fallback for a game that was copied rather than installed.
 
 **Otherwise, look.** A shallow walk of each fixed drive, bounded in depth,
 because an unbounded search of a modern drive is a minute of disk churn nobody
 asked for.
+
+None of these are asked what game they hold. Every candidate path goes through
+`identify`, so a source only has to suggest somewhere to look.
 
 Identification never relies on the folder name. `chitin.key` says "an Aurora
 game" and nothing more - both KOTOR games have one - so the executable decides,
@@ -63,6 +72,32 @@ GAMES: tuple[Game, ...] = (
          ("Jade Empire", "Jade Empire Special Edition")),
 )
 
+# Subkeys to enumerate, and the value under each child holding a path. The
+# uninstall lists carry everything with an installer; the GOG list carries
+# what GOG Galaxy manages.
+REGISTRY_LISTS = (
+    (r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall", "InstallLocation"),
+    (r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
+     "InstallLocation"),
+    (r"SOFTWARE\GOG.com\Games", "path"),
+    (r"SOFTWARE\WOW6432Node\GOG.com\Games", "path"),
+)
+
+# Single keys the games themselves wrote. The retail KOTOR installer still
+# leaves `BioWare\SW\KOTOR` behind, and it is the only source that knows about
+# a disc install with no launcher at all.
+REGISTRY_DIRECT = (
+    (r"SOFTWARE\BioWare\SW\KOTOR", "path"),
+    (r"SOFTWARE\WOW6432Node\BioWare\SW\KOTOR", "path"),
+    (r"SOFTWARE\LucasArts\KotOR2", "path"),
+    (r"SOFTWARE\WOW6432Node\LucasArts\KotOR2", "path"),
+    (r"SOFTWARE\BioWare\Jade Empire", "path"),
+    (r"SOFTWARE\WOW6432Node\BioWare\Jade Empire", "path"),
+)
+
+# Epic writes one JSON manifest per installed game.
+EPIC_MANIFESTS = r"C:\ProgramData\Epic\EpicGamesLauncher\Data\Manifests"
+
 STEAM_ROOTS = (
     r"C:\Program Files (x86)\Steam",
     r"C:\Program Files\Steam",
@@ -103,6 +138,92 @@ def identify(folder) -> str | None:
         if any(exe.lower() in names for exe in game.exe):
             return game.key
     return None
+
+
+def registry_paths() -> list[tuple[Path, str]]:
+    """Every install location Windows has a record of.
+
+    Read-only, and it never asks the registry *which* game a folder holds -
+    `DisplayName` is localised, decorated with trademark symbols and sometimes
+    just wrong. The path is a suggestion; `identify` is the test.
+    """
+    if os.name != "nt":
+        return []
+    try:
+        import winreg
+    except ImportError:
+        return []
+
+    out: list[tuple[Path, str]] = []
+    seen: set[str] = set()
+
+    def add(raw, how: str):
+        if not raw or not isinstance(raw, str):
+            return
+        path = Path(raw.strip().strip('"'))
+        key = str(path).lower()
+        if key in seen:
+            return
+        seen.add(key)
+        out.append((path, how))
+
+    hives = ((winreg.HKEY_LOCAL_MACHINE, "HKLM"), (winreg.HKEY_CURRENT_USER, "HKCU"))
+    views = (winreg.KEY_WOW64_64KEY, winreg.KEY_WOW64_32KEY)
+
+    for hive, hive_name in hives:
+        for subkey, value_name in REGISTRY_LISTS:
+            for view in views:
+                try:
+                    parent = winreg.OpenKey(hive, subkey, 0,
+                                            winreg.KEY_READ | view)
+                except OSError:
+                    continue
+                with parent:
+                    index = 0
+                    while True:
+                        try:
+                            child_name = winreg.EnumKey(parent, index)
+                        except OSError:
+                            break
+                        index += 1
+                        try:
+                            with winreg.OpenKey(parent, child_name, 0,
+                                                winreg.KEY_READ | view) as child:
+                                value, _kind = winreg.QueryValueEx(child,
+                                                                   value_name)
+                        except OSError:
+                            continue
+                        add(value, f"{hive_name}\\{subkey}")
+
+        for subkey, value_name in REGISTRY_DIRECT:
+            for view in views:
+                try:
+                    with winreg.OpenKey(hive, subkey, 0,
+                                        winreg.KEY_READ | view) as key:
+                        value, _kind = winreg.QueryValueEx(key, value_name)
+                except OSError:
+                    continue
+                add(value, f"{hive_name}\\{subkey}")
+
+    return out
+
+
+def epic_paths() -> list[tuple[Path, str]]:
+    """Epic keeps one JSON manifest per installed game."""
+    folder = Path(EPIC_MANIFESTS)
+    if not folder.is_dir():
+        return []
+    out = []
+    for manifest in folder.glob("*.item"):
+        try:
+            data = json.loads(manifest.read_text(encoding="utf-8",
+                                                 errors="replace"))
+        except (OSError, ValueError):
+            continue
+        location = data.get("InstallLocation")
+        if location:
+            out.append((Path(location), "Epic manifest"))
+    return out
 
 
 def steam_libraries() -> list[Path]:
@@ -171,7 +292,17 @@ def look(*, deep: bool = False, progress=None) -> Found:
         if key:
             note(key, path, how)
 
-    # 1. Steam's own index.
+    # 1. What Windows and the launchers already record. This is the only
+    # mechanism that does not care how the game got there, so it goes first.
+    recorded = registry_paths() + epic_paths()
+    if recorded:
+        found.searched.append(f"{len(recorded)} recorded install locations")
+    for path, how in recorded:
+        if len(found.paths) == len(GAMES):
+            break
+        consider(path, how)
+
+    # 2. Steam's own index.
     for library in steam_libraries():
         found.searched.append(str(library))
         common = library / "steamapps" / "common"
@@ -190,7 +321,8 @@ def look(*, deep: bool = False, progress=None) -> Found:
         except (OSError, PermissionError):
             pass
 
-    # 2. The usual non-Steam places.
+    # 3. The usual non-Steam places, for a game that was copied
+    # rather than installed and so left no record anywhere.
     for root in OTHER_ROOTS:
         path = Path(root)
         if not path.is_dir():
@@ -207,7 +339,7 @@ def look(*, deep: bool = False, progress=None) -> Found:
     if len(found.paths) == len(GAMES) or not deep:
         return found
 
-    # 3. Look properly.
+    # 4. Look properly.
     for drive in drives():
         if len(found.paths) == len(GAMES):
             break

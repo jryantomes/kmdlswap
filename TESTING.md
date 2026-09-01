@@ -439,7 +439,16 @@ once-per-machine job.
       Detection must not overwrite it - losing a path somebody typed is worse
       than not helping.
 - [ ] Try **Search every drive** once, to see how long it takes on your
-      machine. It only runs when asked, and only when something is missing.
+      machine. It only runs when asked, and only for games still missing.
+- [ ] **Non-Steam installs.** Detection no longer depends on Steam: it reads
+      the Windows uninstall entries, GOG Galaxy's game list, Epic's manifests
+      and the `BioWare\SW\KOTOR` key the retail disc leaves behind. On this
+      machine that is 234 recorded install locations, of which exactly three
+      are games, all found in 0.02s. If you can get hold of a GOG or disc copy
+      of any of the three, that is the case worth checking.
+- [ ] A game **copied rather than installed** has no record anywhere, and only
+      **Search every drive** can find it. Worth confirming once if you keep a
+      copy on an external drive.
 
 ---
 

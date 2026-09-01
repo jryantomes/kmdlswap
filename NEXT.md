@@ -21,9 +21,11 @@ The engine constraint that shaped the early sessions is **gone**:
 ## What the tool does now
 
 Seven tabs, all sharing the log and build button. Folders sit behind a
-**Settings** menu; the games are found automatically from Steam's library index
-(and, on request, by searching every drive), remembered between runs, and
-identified by executable rather than by folder name - `chitin.key` only says
+**Settings** menu; the games are found automatically from Windows' record of
+what is installed (uninstall entries, GOG Galaxy, Epic manifests, the legacy
+BioWare key), then Steam's library index, then on request a walk of every
+drive; remembered between runs, and identified by executable rather than by
+folder name - `chitin.key` only says
 "an Aurora game", and both KOTOR games have one.
 
 * **Effects** - uniform scales of a part (bighead and friends), previewed as a
