@@ -1034,8 +1034,25 @@ def test_the_lip_tool_is_listed_as_reachable_today(app):
     title, status, blurb, command = entry
 
     assert status == "command line only"
-    assert command.startswith("kmdlfun lips")
+    assert "lips" in command
     assert "never edits your dialogue" in blurb
+
+    # Runnable as printed. A bare `kmdlfun ...` only works with the virtualenv
+    # activated, which is not the state anyone pasting from a tab is in - it
+    # comes back as "the term is not recognized" and looks like the tool is
+    # broken rather than the instruction being incomplete.
+    assert not command.startswith("kmdlfun"), command
+    assert command.startswith(".") and "kmdlfun" in command, command
+
+
+def test_every_command_on_the_tab_is_runnable_as_printed(app):
+    for title, _status, _blurb, command in UPCOMING_ROWS():
+        if not command:
+            continue
+        assert not command.startswith("kmdlfun"), f"{title}: assumes PATH"
+        assert not command.rstrip().endswith("\\"), (
+            f"{title}: a trailing separator before a space breaks the argument"
+        )
 
 
 def UPCOMING_ROWS():

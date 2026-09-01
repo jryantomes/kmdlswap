@@ -56,7 +56,7 @@ UPCOMING = (
         "NPC's mouth moves while the subtitle is up. Shapes come from the "
         "line's own text. It never edits your dialogue - lines that need a "
         "VO_ResRef get one in a copy written beside the lips.",
-        'kmdlfun lips "<your.dlg>" --out lips_out/ --assign --replies',
+        r'.\.venv\Scripts\kmdlfun.exe lips "<your.dlg>" --out lips_out --assign --replies',
     ),
     (
         "A mod other people can install",
@@ -81,7 +81,7 @@ UPCOMING = (
         "Both are readable through Blender and out as .glb, which this tool "
         "already imports. Native reading is a bigger job than it looks and "
         "probably not worth it.",
-        "kmdlfun import head.glb --out packs/myhead",
+        r".\.venv\Scripts\kmdlfun.exe import head.glb --out packs\myhead",
     ),
 )
 
@@ -495,7 +495,8 @@ class App(ttk.Frame):
             page,
             text="Planned work. Nothing here has a button yet - where a line "
                  "says “command line only”, the command underneath "
-                 "does it today.",
+                 "does it today. Run it from the project folder; the paths are "
+                 "written so nothing has to be activated first.",
             foreground="#666", wraplength=640,
         ).grid(row=0, column=0, sticky="w", pady=(0, 10))
 
