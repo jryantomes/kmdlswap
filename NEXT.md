@@ -20,7 +20,7 @@ The engine constraint that shaped the early sessions is **gone**:
 
 ## What the tool does now
 
-Five tabs, all sharing the folder settings, log and build button.
+Six tabs, all sharing the folder settings, log and build button.
 
 * **Effects** - uniform scales of a part (bighead and friends), previewed as a
   whole character rather than a headless body.
@@ -28,8 +28,11 @@ Five tabs, all sharing the folder settings, log and build button.
   can be sorted by measured fit, filtered by male / female / droid, taken from
   KOTOR 2, and aimed at a single named node instead of whole-model pairing.
 * **Custom head** - a mesh from outside the game into one node, with decimation,
-  fitting, winding repair and cropping. Was command-line only until this
-  session.
+  fitting, winding repair and cropping. **Import .glb** builds a pack from a
+  sculpt or a Blender export and selects it.
+* **Lips** - a `.lip` per line of a dialogue, so an unvoiced NPC still moves its
+  mouth. Timed from recordings where there are any, estimated where there are
+  not. Was command-line only until this session.
 * **Preview** - draws the result. A head model is drawn **on its body**, before
   and after at one shared scale.
 * **Builds** - named, kept folders with a manifest, and the only thing that

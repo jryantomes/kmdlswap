@@ -251,3 +251,21 @@ def test_geometry_with_no_head_is_told_apart_from_no_geometry(install_path):
             assert kinds[headless] == "other", f"{headless} has geometry to give"
     if "n_darthrevanh" in kinds:
         assert kinds["n_darthrevanh"] == "empty", "it draws nothing at all"
+
+
+def test_a_lips_build_describes_itself_by_its_dialogue(tmp_path):
+    """Not every build is a model. Falling through to the host field made a
+    lips run list as "?", which reads as a broken build rather than a
+    different kind of one."""
+    from kmdlfun import builds as kbuilds
+
+    folder = tmp_path / "lips_talk"
+    folder.mkdir()
+    (folder / "voe00.lip").write_bytes(b"lip")
+
+    build = kbuilds.adopt(folder, {"kind": "lips", "dialogue": "talk.dlg",
+                                   "lines": 26, "named": 26, "timed": 0})
+
+    assert "?" not in build.summary
+    assert "talk.dlg" in build.summary
+    assert "26" in build.summary

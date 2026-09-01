@@ -51,17 +51,6 @@ SAME_AS_HOST = "same body as the host"
 # today".
 UPCOMING = (
     (
-        "Lip files from a dialogue",
-        "command line only",
-        "Give it a .dlg and it writes a .lip for every line, so a mouth moves "
-        "while the subtitle is up. Shapes come from the line's own text. Point "
-        "--audio at a folder of recordings and each lip is made as long as its "
-        "own recording; lines without one fall back to an estimate. It never "
-        "edits your dialogue - lines that need a VO_ResRef get one in a copy "
-        "written beside the lips.",
-        r'.\.venv\Scripts\kmdlfun.exe lips "<your.dlg>" --out lips_out --assign --replies --audio "<vo folder>"',
-    ),
-    (
         "A mod other people can install",
         "planned",
         "Right now the 2DA files a build writes are yours - they carry your "
@@ -81,10 +70,10 @@ UPCOMING = (
     (
         "Neverwinter Nights and SWTOR heads",
         "use Blender for now",
-        "Both are readable through Blender and out as .glb, which this tool "
-        "already imports. Native reading is a bigger job than it looks and "
-        "probably not worth it.",
-        r".\.venv\Scripts\kmdlfun.exe import head.glb --out packs\myhead",
+        "Both are readable through Blender and out as .glb, which the Custom "
+        "head tab imports directly. Native reading is a bigger job than it "
+        "looks and probably not worth it.",
+        "",
     ),
 )
 
@@ -222,6 +211,7 @@ class App(ttk.Frame):
         # it was written first and sat in front for that reason alone.
         self._build_transplant_tab()
         self._build_head_tab()
+        self._build_lips_tab()
         self._build_preview_tab()
         self._build_builds_tab()
         self._build_effect_tab()
@@ -562,6 +552,11 @@ class App(ttk.Frame):
         ttk.Entry(page, textvariable=self.pack_dir).grid(
             row=0, column=1, columnspan=2, sticky="ew", padx=6)
         ttk.Button(page, text="Browse", command=self._pick_pack).grid(row=0, column=3)
+        # A .glb was command-line only, which meant the one route in for
+        # geometry the game never had - a sculpt, a scan, a generated head,
+        # anything through Blender - was the one thing the window could not do.
+        ttk.Button(page, text="Import .glb", command=self._import_glb).grid(
+            row=0, column=4, padx=(6, 0))
 
         ttk.Label(page, text="Onto").grid(row=1, column=0, sticky="w", pady=(6, 0))
         self.head_host = tk.StringVar()
@@ -574,10 +569,10 @@ class App(ttk.Frame):
                                           values=[], width=22)
         self.head_node_box.grid(row=1, column=2, sticky="ew", padx=6, pady=(6, 0))
         self.head_node_note = ttk.Label(page, text="", foreground="#666")
-        self.head_node_note.grid(row=2, column=0, columnspan=4, sticky="w", pady=(4, 0))
+        self.head_node_note.grid(row=2, column=0, columnspan=5, sticky="w", pady=(4, 0))
 
         opts = ttk.Frame(page)
-        opts.grid(row=3, column=0, columnspan=4, sticky="w", pady=(8, 0))
+        opts.grid(row=3, column=0, columnspan=5, sticky="w", pady=(8, 0))
         self.head_decimate = tk.BooleanVar(value=True)
         self.head_fit = tk.BooleanVar(value=True)
         self.head_repair = tk.BooleanVar(value=True)
@@ -599,10 +594,10 @@ class App(ttk.Frame):
             row=1, column=3, sticky="w", pady=(4, 0))
         ttk.Checkbutton(opts, text="Reshape: keep the host's topology and UVs",
                         variable=self.head_reshape).grid(
-            row=2, column=0, columnspan=4, sticky="w", pady=(4, 0))
+            row=2, column=0, columnspan=5, sticky="w", pady=(4, 0))
 
         crop = ttk.Frame(page)
-        crop.grid(row=4, column=0, columnspan=4, sticky="w", pady=(6, 0))
+        crop.grid(row=4, column=0, columnspan=5, sticky="w", pady=(6, 0))
         self.head_crop_on = tk.BooleanVar(value=False)
         ttk.Checkbutton(crop, text="Crop below", variable=self.head_crop_on).pack(
             side="left")
@@ -620,7 +615,160 @@ class App(ttk.Frame):
                   "built, and solidity below 77% is the one that matters - it "
                   "renders full of holes in game while looking fine in a viewer."),
             foreground="#666", wraplength=620,
+        ).grid(row=6, column=0, columnspan=5, sticky="w", pady=(4, 0))
+
+    # ---- lips tab ----------------------------------------------------------
+
+    def _build_lips_tab(self):
+        """A mouth for a conversation nobody recorded.
+
+        Confirmed in game twice: a `.lip` plays with no `.wav` behind it, and
+        26 generated files drove the broker's whole conversation. It was
+        command-line only, which is a poor place for the one feature here that
+        needs no model at all.
+        """
+        page = ttk.Frame(self.tabs, padding=8)
+        self.tabs.add(page, text="Lips")
+        page.columnconfigure(1, weight=1)
+
+        ttk.Label(page, text="Dialogue").grid(row=0, column=0, sticky="w")
+        self.dlg_path = tk.StringVar()
+        ttk.Entry(page, textvariable=self.dlg_path).grid(
+            row=0, column=1, columnspan=2, sticky="ew", padx=6)
+        ttk.Button(page, text="Browse", command=self._pick_dialogue).grid(
+            row=0, column=3)
+
+        # Optional, and the whole point is that it is optional. With recordings
+        # each lip is made exactly as long as its own line; without them the
+        # length is estimated from the word count, which is what made the
+        # broker work at all.
+        ttk.Label(page, text="Recordings").grid(row=1, column=0, sticky="w",
+                                                pady=(6, 0))
+        self.lip_audio = tk.StringVar()
+        ttk.Entry(page, textvariable=self.lip_audio).grid(
+            row=1, column=1, columnspan=2, sticky="ew", padx=6, pady=(6, 0))
+        ttk.Button(page, text="Browse", command=self._pick_lip_audio).grid(
+            row=1, column=3, pady=(6, 0))
+        ttk.Label(page, text="optional - a folder of .wav or .mp3 named after "
+                            "each line's VO_ResRef",
+                  foreground="#666").grid(row=2, column=1, columnspan=3,
+                                          sticky="w", padx=6)
+
+        opts = ttk.Frame(page)
+        opts.grid(row=3, column=0, columnspan=4, sticky="w", pady=(8, 0))
+        # On by default: every line of the broker's dialogue had an empty
+        # VO_ResRef, so with this off the tool would have written nothing and
+        # said so. A dialogue that already names its VOs is the exception.
+        self.lip_assign = tk.BooleanVar(value=True)
+        self.lip_replies = tk.BooleanVar(value=True)
+        ttk.Checkbutton(opts, text="Name the lines that have no VO_ResRef",
+                        variable=self.lip_assign).grid(row=0, column=0, sticky="w")
+        ttk.Checkbutton(opts, text="Include the player's replies",
+                        variable=self.lip_replies).grid(row=0, column=1,
+                                                        sticky="w", padx=(16, 0))
+
+        force = ttk.Frame(page)
+        force.grid(row=4, column=0, columnspan=4, sticky="w", pady=(6, 0))
+        self.lip_force_on = tk.BooleanVar(value=False)
+        ttk.Checkbutton(force, text="Force every line to",
+                        variable=self.lip_force_on).pack(side="left")
+        self.lip_seconds = tk.DoubleVar(value=3.0)
+        ttk.Spinbox(force, from_=0.5, to=60.0, increment=0.5, width=6,
+                    textvariable=self.lip_seconds).pack(side="left", padx=4)
+        ttk.Label(force, text="seconds - for when the timing is known but the "
+                             "recordings are not here",
+                  foreground="#666").pack(side="left")
+
+        ttk.Button(page, text="Write the lips", command=self._lips_start).grid(
+            row=5, column=0, sticky="w", pady=(10, 0))
+        ttk.Label(
+            page,
+            text=("Your dialogue is never edited. Lines given a VO_ResRef get one "
+                  "in a copy written beside the lips, and installing that copy is "
+                  "your call - the game will not use the new names until you do."),
+            foreground="#666", wraplength=620,
         ).grid(row=6, column=0, columnspan=4, sticky="w", pady=(4, 0))
+        ttk.Label(
+            page,
+            text=("Shipped voice lines are MP3 behind a WAV header and cannot be "
+                  "timed; those fall back to an estimate rather than a confident "
+                  "wrong length. Run them through SithCodec first."),
+            foreground="#a35", wraplength=620,
+        ).grid(row=7, column=0, columnspan=4, sticky="w", pady=(4, 0))
+
+    def _pick_dialogue(self):
+        chosen = filedialog.askopenfilename(
+            title="Choose a dialogue",
+            filetypes=[("Dialogue", "*.dlg"), ("All files", "*.*")])
+        if chosen:
+            self.dlg_path.set(chosen)
+
+    def _pick_lip_audio(self):
+        chosen = filedialog.askdirectory(title="Choose the folder of recordings")
+        if chosen:
+            self.lip_audio.set(chosen)
+
+    def _lips_start(self):
+        if self.worker and self.worker.is_alive():
+            return
+        source = self.dlg_path.get().strip()
+        if not source:
+            self._say("choose a dialogue file first")
+            return
+
+        # Read on the main thread and handed over as plain values, the way
+        # every other job here does - Tk variables are not thread-safe.
+        cfg = dict(
+            assign=self.lip_assign.get(),
+            replies=self.lip_replies.get(),
+            audio=self.lip_audio.get().strip() or None,
+            seconds=(self.lip_seconds.get() if self.lip_force_on.get() else None),
+        )
+        # Its own folder per dialogue, because a build is a folder and two
+        # conversations' lips landing in one would install as a single lump.
+        out = str(Path(self.out_dir.get().strip() or ".")
+                  / f"lips_{Path(source).stem}")
+        self.build_btn.config(state="disabled")
+        self._say(f"\n=== lips for {Path(source).name} ===")
+        self.worker = threading.Thread(
+            target=self._lips_work, args=(source, out, cfg), daemon=True)
+        self.worker.start()
+
+    def _lips_work(self, source, out, cfg):
+        try:
+            from . import dialogue as kdlg
+
+            def progress(n, total, vo):
+                # The dispatcher counts from zero, and this counts lines
+                # written, so hand back the index rather than the tally.
+                self.events.put(("progress", (n - 1, total, f"{vo}.lip")))
+
+            job = kdlg.run(source, out, progress=progress, **cfg)
+            lines = kdlg.summarise(job, audio=cfg["audio"])
+
+            if job.written:
+                from . import builds as kbuilds
+
+                kbuilds.adopt(out, {
+                    "kind": "lips",
+                    "dialogue": Path(source).name,
+                    "lines": job.written,
+                    "named": job.assigned,
+                    "timed": job.timed,
+                })
+                lines.append("Kept as a build, so it can be installed from the "
+                             "Builds tab.")
+                if job.dialogue_copy:
+                    lines.append(
+                        "Installing it copies the updated dialogue too - the "
+                        "lips are named after VO_ResRefs that only exist in "
+                        "that copy, so they are no use apart. If your Override "
+                        "already holds that dialogue it is reported as foreign "
+                        "and not replaced until you say so."
+                    )
+            self.events.put(("done_text", lines))
+        except Exception as exc:  # noqa: BLE001
+            self.events.put(("error", f"{type(exc).__name__}: {exc}"))
 
     # ---- builds tab --------------------------------------------------------
 
@@ -1218,6 +1366,45 @@ class App(ttk.Frame):
         # count as one; dropping this dict blanks every face.
         self._donor_photos[label] = photo
         self.donor_tree.set_image(label, photo)
+
+    def _import_glb(self):
+        """Turn a .glb into a pack folder and select it, in one step.
+
+        The pack lands beside the builds rather than beside the .glb, because
+        the source is usually somewhere temporary - a download, an export - and
+        the thing worth keeping is what this makes of it.
+        """
+        if self.worker and self.worker.is_alive():
+            return
+        chosen = filedialog.askopenfilename(
+            title="Choose a .glb",
+            filetypes=[("glTF binary", "*.glb"), ("All files", "*.*")])
+        if not chosen:
+            return
+
+        out = str(Path(self.out_dir.get().strip() or ".") / "packs"
+                  / Path(chosen).stem)
+        self.build_btn.config(state="disabled")
+        self._say(f"\n=== importing {Path(chosen).name} ===")
+        self.worker = threading.Thread(
+            target=self._import_work, args=(chosen, out), daemon=True)
+        self.worker.start()
+
+    def _import_work(self, source, out):
+        try:
+            from . import glbimport
+
+            result = glbimport.run(source, out)
+            lines = glbimport.summarise(result, source)
+            if not result.has_uvs:
+                lines.append("Without UVs the head builds but renders "
+                             "untextured. Re-export with a UV map.")
+            # Selecting it is the point: the next thing anyone does with a
+            # pack is build it, and retyping the path is the step that gets
+            # skipped and then blamed on the importer.
+            self.events.put(("imported", (out, lines)))
+        except Exception as exc:  # noqa: BLE001
+            self.events.put(("error", f"{type(exc).__name__}: {exc}"))
 
     def _pick_pack(self):
         chosen = filedialog.askdirectory(title="Choose a head pack folder")
@@ -2355,6 +2542,12 @@ class App(ttk.Frame):
                     for line in payload:
                         self._say(line)
                     self.progress.config(value=100)
+                    self.build_btn.config(state="normal")
+                elif kind == "imported":
+                    pack, lines = payload
+                    self.pack_dir.set(pack)
+                    for line in lines:
+                        self._say(line)
                     self.build_btn.config(state="normal")
                 elif kind == "wardrobe":
                     self._show_wardrobe(payload)

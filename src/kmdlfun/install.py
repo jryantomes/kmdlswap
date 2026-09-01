@@ -29,7 +29,12 @@ MANIFEST = ".kmdlfun_installed.json"
 # `.2da` is how the game learns a new model exists. It is also the one
 # extension here that a build *shares* with other mods, so installing one is
 # the case the foreign-file guard exists for.
-INSTALLABLE = {".mdl", ".mdx", ".tga", ".tpc", ".txi", ".2da"}
+#
+# `.lip` and `.dlg` come as a pair from the lips job and are no use apart: the
+# lips are named after `VO_ResRef`s that only exist in the updated dialogue.
+# A `.dlg` is the most likely thing here to already be somebody's, which is
+# again what the foreign-file guard is for - it will not be replaced silently.
+INSTALLABLE = {".mdl", ".mdx", ".tga", ".tpc", ".txi", ".2da", ".lip", ".dlg"}
 
 
 @dataclass

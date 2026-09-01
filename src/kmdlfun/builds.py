@@ -59,9 +59,15 @@ class Build:
     @property
     def summary(self) -> str:
         m = self.manifest
-        host = (m.get("host") or {}).get("model", "?")
-        donor = (m.get("donor") or {}).get("model")
-        what = f"{host} <- {donor}" if donor else host
+        # Not every build is a model. A lips run has no host to name, and
+        # falling through to "?" made it look like a broken one.
+        if m.get("kind") == "lips":
+            lines = m.get("lines", 0)
+            what = f"{m.get('dialogue', 'a dialogue')} - {lines} lip(s)"
+        else:
+            host = (m.get("host") or {}).get("model", "?")
+            donor = (m.get("donor") or {}).get("model")
+            what = f"{host} <- {donor}" if donor else host
         games = {(m.get("host") or {}).get("game"), (m.get("donor") or {}).get("game")}
         games.discard(None)
         cross = "  (K2 donor)" if len(games) > 1 else ""

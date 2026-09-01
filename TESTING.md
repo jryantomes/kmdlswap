@@ -330,6 +330,58 @@ has a **Wearing** box holding the 117 outfits the game already uses.
       clothing slots should not touch either, but the head and body are the
       same model at runtime.
 
+## 19. The Lips tab
+
+The engine behind this is already confirmed in game twice (§15, §16). What is
+new is that it has a tab instead of a command line, and that the `--assign`
+path no longer crashes — it wrote every lip and then died reaching for a
+variable the loop had overwritten, which is why the broker's VO_ResRefs had to
+be assigned in a separate step at the time.
+
+Output goes to a `lips/` folder inside your output folder. Nothing is installed
+and your dialogue is never edited.
+
+- [ ] Point it at `rfk_broker.dlg.backup-before-lip-test` — the copy with no
+      VO_ResRefs at all — with **Name the lines** ticked. Expect 26 lips plus
+      an updated `rfk_broker.dlg` beside them. This is the case that used to
+      crash.
+- [ ] Untick **Name the lines** and run the same file. Expect zero lips and a
+      line saying 26 were skipped, rather than silence.
+- [ ] Point it at the current `rfk_broker.dlg`, which already names its lines.
+      Expect 26 lips and *no* dialogue copy, because nothing changed.
+- [ ] Tick **Force every line to** 3 seconds and confirm every lip comes out
+      the same length. That is the control for the timing path.
+- [ ] Point **Recordings** at a folder holding `rfk_carth_a1.wav`. Only the
+      line whose VO_ResRef matches its name should be timed; the log should
+      say so and estimate the rest.
+- [ ] The run is kept as a build (`lips_<dialogue>/`), so install it from the
+      **Builds** tab rather than copying by hand, and confirm his mouth still
+      moves in game. Same result as §16, through the window this time.
+- [ ] Because your Override already holds `rfk_broker.dlg`, installing should
+      report it as **foreign** and refuse until you allow it. That guard is the
+      thing to watch here — it is the first time a `.dlg` has been installable
+      at all, and a dialogue is the most likely file to already be someone's.
+
+## 20. Importing a .glb from the window
+
+The Custom head tab has an **Import .glb** button. It writes a pack into
+`<output>/packs/<name>/` and then selects it, so the next click is Build.
+
+Nothing about the conversion changed — this is the same code the Tripo head
+came through, moved out of the CLI so both call it. What is worth checking is
+the handover.
+
+- [ ] Import any `.glb` and confirm the **Head pack** field fills itself in
+      with the folder it just wrote. That is the whole point of the button.
+- [ ] Build that pack onto `p_carthh` straight after, without touching the
+      path. Should behave exactly like a hand-made pack.
+- [ ] Import a `.glb` exported without a UV map. It should still write a pack
+      and say the head will be untextured, rather than failing or going quiet.
+- [ ] Import something that is not a `.glb` at all. The error belongs in the
+      log, not in a console nobody is looking at.
+- [ ] Check the texture that lands in the pack keeps its alpha if the source
+      had any — that is what cost a ported Quarren its eyes.
+
 ---
 
 ## Housekeeping

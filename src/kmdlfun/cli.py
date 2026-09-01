@@ -313,103 +313,20 @@ def _builds(args) -> int:
     return 0
 
 
-def _has_alpha(img) -> bool:
-    """Does this image carry anything in its alpha channel worth keeping?
-
-    Dropping alpha is what cost a ported Quarren its eyes, so a texture that
-    has one is written out as 32-bit. An all-opaque channel carries nothing and
-    is not worth the extra bytes.
-    """
-    if img.mode not in ("RGBA", "LA", "PA") and "transparency" not in img.info:
-        return False
-    lo, _ = img.convert("RGBA").getchannel("A").getextrema()
-    return lo < 255
-
-
 def _import(args) -> int:
     """Read a .glb and write a head pack beside it."""
-    from pathlib import Path as _Path
+    from . import glbimport
 
-    from kmdlswap import obj as kobj
-
-    from . import gltf, headpack
-
-    source = _Path(args.file)
-    if not source.is_file():
-        print(f"kmdlfun: no such file {source}", file=sys.stderr)
-        return 1
     try:
-        imported = gltf.read_glb(source)
-    except gltf.GltfError as exc:
+        result = glbimport.run(args.file, args.out, name=args.name,
+                               texture_size=args.texture_size)
+    except glbimport.ImportError_ as exc:
         print(f"kmdlfun: {exc}", file=sys.stderr)
         return 1
 
-    print(f"{source.name}")
-    print(f"  vertices  {len(imported.positions)}")
-    print(f"  triangles {len(imported.faces)}")
-    print(f"  normals   {'yes' if imported.normals else 'no (will be computed)'}")
-    print(f"  uvs       {'yes' if imported.uvs else 'NO - the head will be untextured'}")
-    print(f"  texture   {imported.image_mime or 'none embedded'}"
-          + (f", {len(imported.image)} bytes" if imported.image else ""))
-    for note in imported.notes:
-        print(f"  note: {note}")
-
-    out = _Path(args.out)
-    out.mkdir(parents=True, exist_ok=True)
-
-    kobj.write_obj(
-        out / "head.obj",
-        imported.positions,
-        imported.faces,
-        uvs=imported.uvs or None,
-        normals=imported.normals or None,
-        name=out.name,
-    )
-
-    texture_name = None
-    if imported.image:
-        try:
-            from PIL import Image
-        except ImportError:
-            print("  texture: Pillow is not installed, so it was not converted",
-                  file=sys.stderr)
-        else:
-            import io
-
-            with Image.open(io.BytesIO(imported.image)) as img:
-                # Keep alpha. Dropping it is what cost a ported Quarren its
-                # eyes: its texture is RGBA, the RGB conversion threw the
-                # channel away, and the eyes rendered as flat grey while the
-                # rest of the face looked right. The MDL and MDX were
-                # byte-identical either way - the texture file was the whole
-                # difference.
-                img = img.convert("RGBA" if _has_alpha(img) else "RGB")
-                if args.texture_size:
-                    n = args.texture_size
-                    if img.size != (n, n):
-                        print(f"  texture: {img.size[0]}x{img.size[1]} -> {n}x{n}")
-                        img = img.resize((n, n), Image.LANCZOS)
-                # The resref is the filename, and it has to fit a 16-character
-                # field, so keep it short and predictable.
-                texture_name = out.name.lower()[:14] + "01"
-                img.save(out / f"{texture_name}.tga")
-
-    headpack.write_template(out, name=args.name or out.name)
-    manifest = out / headpack.MANIFEST_NAME
-    import json
-
-    data = json.loads(manifest.read_text(encoding="utf-8"))
-    # glTF is Y-up with -Z forward; after the Y-up conversion that lands on +Y,
-    # which is where KOTOR characters look.
-    data["up"] = "y"
-    data["facing"] = "+y"
-    data["notes"] = f"imported from {source.name}"
-    manifest.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-
-    print(f"\nwrote {out}/head.obj"
-          + (f", {texture_name}.tga" if texture_name else "")
-          + f" and {headpack.MANIFEST_NAME}")
-    print("Check it with:  kmdlfun head " + str(out)
+    for line in glbimport.summarise(result, args.file):
+        print(line)
+    print("Check it with:  kmdlfun head " + str(result.pack)
           + " --install \"<K1 root>\" --host p_carthh --node Head --decimate --fit")
     return 0
 
@@ -951,94 +868,19 @@ def _lips(args) -> int:
     updated copy is written next to the lips and installing it is a separate
     decision.
     """
-    from pathlib import Path
+    from . import dialogue as kdlg
 
-    from pykotor.resource.formats.gff import bytes_gff, read_gff
-
-    from . import lipsync
-
-    source = Path(args.dialogue)
-    if not source.is_file():
-        print(f"kmdlfun: no such dialogue {source}", file=sys.stderr)
+    try:
+        job = kdlg.run(args.dialogue, args.out, prefix=args.prefix,
+                       assign=args.assign, replies=args.replies,
+                       audio=args.audio, seconds=args.seconds)
+    except kdlg.DialogueError as exc:
+        print(f"kmdlfun: {exc}", file=sys.stderr)
         return 1
-    out_dir = Path(args.out)
-    out_dir.mkdir(parents=True, exist_ok=True)
 
-    gff = read_gff(source.read_bytes())
-    root = gff.root
-    prefix = (args.prefix or source.stem)[:11]
-
-    lists = ["EntryList"] + (["ReplyList"] if args.replies else [])
-    written = assigned = skipped = timed = estimated = 0
-    unreadable: list[str] = []
-    resref_type = None
-
-    for listname in lists:
-        if not root.exists(listname):
-            continue
-        items = root.get_list(listname)
-        for i in range(len(items)):
-            item = items.at(i)
-            if not item.exists("Text"):
-                continue
-            text = str(item.value("Text")).strip()
-            if not text:
-                continue
-            vo = str(item.value("VO_ResRef")) if item.exists("VO_ResRef") else ""
-            if not vo:
-                if not args.assign:
-                    skipped += 1
-                    continue
-                if resref_type is None:
-                    resref_type = type(item.value("VO_ResRef"))
-                vo = f"{prefix}{'r' if listname == 'ReplyList' else 'e'}{i:02d}"
-                item.set_resref("VO_ResRef", resref_type(vo))
-                assigned += 1
-            seconds, source = args.seconds, "given"
-            if seconds is None and args.audio:
-                recording = lipsync.find_audio(args.audio, vo)
-                if recording is not None:
-                    seconds = lipsync.duration_of(recording)
-                    if seconds:
-                        source = recording.name
-                        timed += 1
-                    else:
-                        unreadable.append(recording.name)
-            if seconds is None:
-                source = "estimated"
-                estimated += 1
-
-            size = lipsync.write(text, out_dir / f"{vo}.lip", seconds=seconds)
-            written += 1
-            if written <= 4:
-                one_line = " ".join(text.split())[:40]
-                length = seconds if seconds else lipsync.estimate_length(text)
-                print(f"  {vo}.lip  {size:>4}B  {length:5.2f}s  {source:<18} "
-                      f"{one_line}")
-
-    if written > 4:
-        print(f"  ... and {written - 4} more")
-    print(f"\n{written} lip file(s) written to {out_dir}")
-    if timed:
-        print(f"{timed} lip(s) matched to a recording's real length")
-    if estimated:
-        print(f"{estimated} estimated from the word count"
-              + (" (pass --audio to use the recordings)" if not args.audio else
-                 " - no recording found for those"))
-    if unreadable:
-        print(f"could not read a length from: {', '.join(unreadable[:4])}"
-              + (" ..." if len(unreadable) > 4 else ""))
-    if skipped:
-        print(f"{skipped} line(s) have no VO_ResRef and were skipped; "
-              f"--assign gives them one")
-    if assigned:
-        copy = out_dir / source.name
-        copy.write_bytes(bytes_gff(gff))
-        print(f"{assigned} line(s) given a VO_ResRef; updated dialogue written "
-              f"to {copy}")
-        print("The original was not touched. Install the copy to use it.")
+    for line in kdlg.summarise(job, audio=args.audio):
+        print(line)
     return 0
-
 
 
 if __name__ == "__main__":
