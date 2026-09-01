@@ -267,10 +267,15 @@ on disk. Your other 19 `rfk_*` files were not touched.
 
 If you record the lines, pass `--audio <folder>` and each lip is made exactly
 as long as its own recording - name the files after the line's `VO_ResRef`.
-Worth knowing: KOTOR voice files often lie about their own length. Your
-`rfk_carth_a1.wav` declares a data chunk of **zero** in a 368 KB file, so the
-standard library calls it 0.00 seconds; its real length is 16.72, which is what
-this reads.
+KOTOR audio does not carry an honest header, and there are two different
+fakes. Voice lines are **a real WAV nested inside a decoy one**: your
+`rfk_carth_a1.wav` opens claiming 8-bit 22 kHz with a data chunk of zero, and
+58 bytes in there is a second RIFF that is the truth - 16-bit 32 kHz, 5.76
+seconds. Ambient sound does the same behind a 470-byte preamble. The shipped
+`streamwaves` are the other fake: a WAV header over MP3 data, where nothing in
+the header is true and `af.wav` claims 384 kHz. Those are refused rather than
+guessed at, because a confident wrong length silently produces a lip that does
+not match the voice.
 
 Without recordings, timing is estimated from word count at two and a half words
 a second, so a long line gets a long lip: `rfk_brokere01.lip` runs 13.6 seconds over 110 keyframes.
