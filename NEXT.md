@@ -96,6 +96,10 @@ tangent looks identical in every viewer and wrong in game.
 
 ## Things that are true and easy to forget
 
+- **A whole new character works.** Confirmed in game 2026-09-01: model,
+  `heads.2da` row, `appearance.2da` row and blueprint, replacing an existing
+  NPC who kept his conversation. `--with-texture` matters whenever the donor is
+  a different species, or the geometry arrives wearing the host's texture.
 - **Generated lips work.** Confirmed in game 2026-09-01: a whole conversation
   driven by lip files derived from the text of each line, with no recording and
   no phoneme engine behind any of it.

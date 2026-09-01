@@ -179,6 +179,19 @@ Open the Transplant tab and pick a host.
 All new, and the part with the most riding on it: this is the difference
 between replacing a vanilla character and adding one.
 
+- [x] **The whole chain works, 2026-09-01.** `rfk_broker` was replaced with a
+      new character: new model, new `heads.2da` row, new `appearance.2da` row,
+      new blueprint. He spawned, kept his conversation, and his lips moved.
+
+      Two things learned by doing it. **The build has to be installed** - the
+      first attempt looked like a failure and was simply five files still
+      sitting in the output folder, which the chain diagnosis found in seconds
+      by walking utc -> appearance -> heads -> model against what was actually
+      in Override. And **`--with-texture` is not optional** when the donor is a
+      different species: without it the model keeps the *host's* texture name,
+      so Bith geometry came out wearing Carth's hair smeared over the skull. It
+      read as a broken model and was a correct model with the wrong texture.
+
 - [ ] **Save as.** Build with `Save as: p_myhead` and confirm the folder holds
       `p_myhead.mdl/.mdx` and *not* `p_carthh.mdl`. Install it and check Carth
       is still Carth - the whole point is that nothing was replaced.
