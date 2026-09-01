@@ -242,7 +242,24 @@ mouth shapes for a different sentence.
 **To undo:** delete `rfk_brk_01.lip` and rename the backup back over
 `rfk_broker.dlg`.
 
-## 16. The catalogue
+## 16. Generated lips
+
+Built on the result above. `kmdlfun lips <dlg> --out <dir> --assign --replies`
+writes a `.lip` per line and, where a line had no `VO_ResRef`, an updated copy
+of the dialogue beside them. **The original dialogue is never edited.**
+
+- [ ] Run it on `rfk_broker.dlg`, copy the whole output folder into Override -
+      lips *and* the updated dialogue, since the lips are useless without the
+      resrefs that name them - and talk to him.
+- [ ] Does the mouth move on **every** line now, not just the first?
+- [ ] Does it stop when the line does, or hang open? Ending on a closed mouth
+      is the thing most likely to look wrong.
+
+Timing is estimated from word count at two and a half words a second. If lines
+consistently finish moving too early or too late, that number is the one to
+change.
+
+## 17. The catalogue
 
 - [ ] `python tools/render_catalogue.py --install "<K1 root>"` - 233 models in
       about a minute. Spot-check a few faces are the right way round.

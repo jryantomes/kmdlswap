@@ -56,8 +56,13 @@ replacing: these tables are this install's, so handing them to someone else
 overwrites their mods. A HoloPatcher/TSLPatcher `changes.ini` is the answer and
 is not written yet.
 
-Command line covers the same ground, plus `kmdlfun rank`, `import`, `render`
-and `builds`.
+Command line covers the same ground, plus `kmdlfun rank`, `import`, `render`,
+`builds` and `lips`.
+
+**`kmdlfun lips`** gives an unvoiced dialogue moving mouths: a `.lip` per line,
+shapes taken from the line's own text at the density vanilla uses. It never
+edits the dialogue in place - if lines need a `VO_ResRef` it writes an updated
+copy beside the lips.
 
 ## What has never been seen running
 

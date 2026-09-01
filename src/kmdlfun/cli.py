@@ -200,6 +200,18 @@ def main(argv: list[str] | None = None) -> int:
                     help="say what the number does not, for each donor")
     rk.add_argument("--json", help="also write the full ranking here")
 
+    lp = sub.add_parser("lips", help="make mouths move for an unvoiced dialogue")
+    lp.add_argument("dialogue", help="a .dlg file")
+    lp.add_argument("--out", required=True, help="where to write the .lip files")
+    lp.add_argument("--prefix", help="resref stem for lines that have no "
+                                     "VO_ResRef yet (default: the dialogue's name)")
+    lp.add_argument("--assign", action="store_true",
+                    help="give lines that have no VO_ResRef one, and write the "
+                         "updated dialogue alongside the lips. Without this, "
+                         "only lines that already name a VO get a lip")
+    lp.add_argument("--replies", action="store_true",
+                    help="also do the player's lines")
+
     sub.add_parser("gui", help="launch the desktop app")
 
     args = p.parse_args(argv)
@@ -224,6 +236,8 @@ def main(argv: list[str] | None = None) -> int:
             return _builds(args)
         if args.cmd == "rank":
             return _rank(args)
+        if args.cmd == "lips":
+            return _lips(args)
         if args.cmd == "gui":
             from .gui import run
 
@@ -913,6 +927,77 @@ def _rank(args) -> int:
                        for f in fits], fh, indent=1)
         print(f"  wrote {args.json}")
     return 0
+
+
+def _lips(args) -> int:
+    """A lip file per line, so an unvoiced NPC still moves its mouth.
+
+    The dialogue is never edited in place: if lines need a VO_ResRef, the
+    updated copy is written next to the lips and installing it is a separate
+    decision.
+    """
+    from pathlib import Path
+
+    from pykotor.resource.formats.gff import bytes_gff, read_gff
+
+    from . import lipsync
+
+    source = Path(args.dialogue)
+    if not source.is_file():
+        print(f"kmdlfun: no such dialogue {source}", file=sys.stderr)
+        return 1
+    out_dir = Path(args.out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    gff = read_gff(source.read_bytes())
+    root = gff.root
+    prefix = (args.prefix or source.stem)[:11]
+
+    lists = ["EntryList"] + (["ReplyList"] if args.replies else [])
+    written = assigned = skipped = 0
+    resref_type = None
+
+    for listname in lists:
+        if not root.exists(listname):
+            continue
+        items = root.get_list(listname)
+        for i in range(len(items)):
+            item = items.at(i)
+            if not item.exists("Text"):
+                continue
+            text = str(item.value("Text")).strip()
+            if not text:
+                continue
+            vo = str(item.value("VO_ResRef")) if item.exists("VO_ResRef") else ""
+            if not vo:
+                if not args.assign:
+                    skipped += 1
+                    continue
+                if resref_type is None:
+                    resref_type = type(item.value("VO_ResRef"))
+                vo = f"{prefix}{'r' if listname == 'ReplyList' else 'e'}{i:02d}"
+                item.set_resref("VO_ResRef", resref_type(vo))
+                assigned += 1
+            size = lipsync.write(text, out_dir / f"{vo}.lip")
+            written += 1
+            if written <= 4:
+                one_line = " ".join(text.split())[:52]
+                print(f"  {vo}.lip  {size:>4}B  {one_line}")
+
+    if written > 4:
+        print(f"  ... and {written - 4} more")
+    print(f"\n{written} lip file(s) written to {out_dir}")
+    if skipped:
+        print(f"{skipped} line(s) have no VO_ResRef and were skipped; "
+              f"--assign gives them one")
+    if assigned:
+        copy = out_dir / source.name
+        copy.write_bytes(bytes_gff(gff))
+        print(f"{assigned} line(s) given a VO_ResRef; updated dialogue written "
+              f"to {copy}")
+        print("The original was not touched. Install the copy to use it.")
+    return 0
+
 
 
 if __name__ == "__main__":
