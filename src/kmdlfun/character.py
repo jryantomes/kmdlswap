@@ -37,17 +37,26 @@ TALKER = "talker"
 COMPANION = "companion"
 KINDS = (NPC, TALKER, COMPANION)
 
-# What the game falls back on when a blueprint does not say otherwise.
+# The spawn script decides how a creature behaves once it exists, and picking
+# the wrong one is not a subtle mistake: `k_def_ambmob` is the ambient-mobile
+# script, used by 52 vanilla blueprints of which **none** hold a conversation.
+# Its examples are `c_bantha`, `c_brith`, `c_dewback` - it is what wandering
+# animals run. An NPC given it stands in a conversation running a wander loop,
+# which reads as broken animation.
+#
+# Every vanilla NPC that talks uses `k_def_spawn01`, or `k_hen_spawn01` if it
+# is a party member. Counted across all 205 shipped creature blueprints.
 DEFAULT_SCRIPTS = {
     "ScriptDialogue": "k_def_dialogue01",
-    "ScriptSpawn": "k_def_ambmob",
+    "ScriptSpawn": "k_def_spawn01",
     "ScriptHeartbeat": "k_def_heartbt01",
     "ScriptAttacked": "k_def_attacked01",
 }
-# Companions run the henchman set instead; `rfk_broker` uses the first and
-# `hkrfkjr` the second, which is how the difference was found.
+# Companions run the henchman set instead; `rfk_broker` uses the default one
+# and `hkrfkjr` this one, which is how the difference was found.
 HENCHMAN_SCRIPTS = {
     "ScriptDialogue": "k_hen_dialogue01",
+    "ScriptSpawn": "k_hen_spawn01",
     "ScriptHeartbeat": "k_hen_heartbt01",
 }
 
