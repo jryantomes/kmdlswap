@@ -462,7 +462,7 @@ def test_a_texture_with_alpha_keeps_it_through_import(tmp_path):
     """
     from PIL import Image
 
-    from kmdlfun.cli import _has_alpha
+    from kmdlfun.glbimport import has_alpha as _has_alpha
 
     opaque = Image.new("RGBA", (4, 4), (10, 20, 30, 255))
     assert not _has_alpha(opaque), "an all-opaque alpha channel carries nothing"

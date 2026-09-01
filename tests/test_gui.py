@@ -1024,25 +1024,16 @@ def test_the_upcoming_tab_lists_what_is_coming(app):
 
     titles = [t for t, _status in app.upcoming_rows]
     assert len(titles) == len(UPCOMING)
-    assert any("Lip files" in t for t in titles), titles
 
 
-def test_the_lip_tool_is_listed_as_reachable_today(app):
-    """Its engine is built and tested; only the button is missing. Listing it
-    as merely 'planned' would send someone away from something that works."""
-    entry = next(row for row in UPCOMING_ROWS() if "Lip files" in row[0])
-    title, status, blurb, command = entry
+def test_a_feature_with_a_tab_is_off_the_upcoming_list(app):
+    """It graduated. Leaving it listed sends someone to the command line for
+    something that now has a button, which is how a roadmap starts lying."""
+    tabs = [app.tabs.tab(i, "text") for i in range(len(app.tabs.tabs()))]
+    assert "Lips" in tabs
 
-    assert status == "command line only"
-    assert "lips" in command
-    assert "never edits your dialogue" in blurb
-
-    # Runnable as printed. A bare `kmdlfun ...` only works with the virtualenv
-    # activated, which is not the state anyone pasting from a tab is in - it
-    # comes back as "the term is not recognized" and looks like the tool is
-    # broken rather than the instruction being incomplete.
-    assert not command.startswith("kmdlfun"), command
-    assert command.startswith(".") and "kmdlfun" in command, command
+    titles = [row[0] for row in UPCOMING_ROWS()]
+    assert not any("Lip files" in t for t in titles), titles
 
 
 def test_every_command_on_the_tab_is_runnable_as_printed(app):
@@ -1106,3 +1097,205 @@ def test_a_donor_head_keeps_its_own_size_by_default(app):
     """
     transplant_tab(app)
     assert app.opt_fit.get() is False, "fitting should be opt-in"
+
+
+# --- the lips tab -----------------------------------------------------------
+#
+# Confirmed in game on 2026-09-01: a .lip plays with no recording behind it,
+# and 26 generated files drove the broker's conversation from end to end. The
+# engine was proven before the button existed; these are about the button.
+
+
+def test_the_lips_tab_needs_no_model(app):
+    """The one feature here that is about a conversation rather than a mesh.
+    It must not be gated behind scanning an install."""
+    app.dlg_path.set("")
+    app._say = lambda text: app.__dict__.setdefault("said", []).append(text)
+    app._lips_start()
+
+    assert any("choose a dialogue" in s for s in app.said)
+
+
+def test_the_lips_worker_touches_no_tk_variable(app, tmp_path):
+    """The bug this whole module exists for. A worker reading a Tk variable
+    survives only while the main loop happens to be spinning."""
+    import inspect
+
+    from kmdlfun import gui as kgui
+
+    body = inspect.getsource(kgui.App._lips_work)
+    assert "self.lip_" not in body, body
+    assert "self.dlg_path" not in body, body
+    assert ".get()" not in body, body
+
+
+def test_the_lips_tab_hands_over_plain_values(app, tmp_path):
+    """Everything the worker needs is read on the main thread and passed."""
+    source = tmp_path / "talk.dlg"
+    source.write_bytes(_a_dialogue(["A line to say.", "And another."]))
+    app.dlg_path.set(str(source))
+    app.out_dir.set(str(tmp_path / "out"))
+    app.lip_assign.set(True)
+    app.lip_replies.set(False)
+    app.lip_force_on.set(False)
+
+    app._lips_start()
+    app.worker.join(timeout=30)
+    assert not app.worker.is_alive()
+
+    kinds = _drain(app)
+    assert "error" not in kinds, kinds.get("error")
+    written = list((tmp_path / "out" / "lips_talk").glob("*.lip"))
+    assert len(written) == 2
+
+
+def test_a_lips_run_is_kept_as_a_build(app, tmp_path):
+    """So it installs through the same guarded path as everything else, rather
+    than being a folder the modder copies by hand."""
+    from kmdlfun import builds as kbuilds
+
+    source = tmp_path / "talk.dlg"
+    source.write_bytes(_a_dialogue(["A line to say.", "And another."]))
+    app.dlg_path.set(str(source))
+    app.out_dir.set(str(tmp_path / "out"))
+    app.lip_force_on.set(False)
+
+    app._lips_start()
+    app.worker.join(timeout=30)
+    _drain(app)
+
+    build = kbuilds.load(tmp_path / "out" / "lips_talk")
+    assert build is not None, "not adopted"
+    assert build.manifest["kind"] == "lips"
+    assert build.manifest["lines"] == 2
+    assert build.manifest["dialogue"] == "talk.dlg"
+
+
+def test_forcing_a_length_reaches_the_job(app, tmp_path):
+    from pykotor.resource.formats.lip import read_lip
+
+    source = tmp_path / "talk.dlg"
+    source.write_bytes(_a_dialogue(["Short."]))
+    app.dlg_path.set(str(source))
+    app.out_dir.set(str(tmp_path / "out"))
+    app.lip_force_on.set(True)
+    app.lip_seconds.set(6.5)
+
+    app._lips_start()
+    app.worker.join(timeout=30)
+    _drain(app)
+
+    lip = next((tmp_path / "out" / "lips_talk").glob("*.lip"))
+    assert read_lip(lip.read_bytes()).length == pytest.approx(6.5)
+
+
+def test_the_progress_it_reports_knows_its_own_total(app, tmp_path):
+    """A bar counting towards zero divides by a guard and sits at 100%."""
+    source = tmp_path / "talk.dlg"
+    source.write_bytes(_a_dialogue(["One.", "Two.", "Three."]))
+    app.dlg_path.set(str(source))
+    app.out_dir.set(str(tmp_path / "out"))
+    app.lip_force_on.set(False)
+
+    app._lips_start()
+    app.worker.join(timeout=30)
+
+    seen = _drain(app)
+    totals = {payload[1] for payload in seen.get("progress", [])}
+    assert totals == {3}, totals
+
+
+def _a_dialogue(texts):
+    from pykotor.common.language import LocalizedString
+    from pykotor.common.misc import ResRef
+    from pykotor.resource.formats.gff import GFF, GFFList, bytes_gff
+
+    gff = GFF()
+    items = gff.root.set_list("EntryList", GFFList())
+    for i, text in enumerate(texts):
+        struct = items.add(i)
+        struct.set_locstring("Text", LocalizedString.from_english(text))
+        struct.set_resref("VO_ResRef", ResRef(""))
+    return bytes_gff(gff)
+
+
+def _drain(app):
+    import queue as _queue
+
+    seen: dict = {}
+    while True:
+        try:
+            kind, payload = app.events.get_nowait()
+        except _queue.Empty:
+            return seen
+        seen.setdefault(kind, []).append(payload)
+
+
+# --- importing a .glb -------------------------------------------------------
+#
+# The route in for geometry the game never had. Confirmed in game: a
+# Tripo-generated head on Carth turns with the neck and opens its mouth. It was
+# command-line only, which meant the window could not do the thing the project
+# was originally built to do.
+
+
+def test_the_custom_head_tab_offers_an_import(app):
+    from tkinter import ttk
+
+    page = None
+    for i in range(len(app.tabs.tabs())):
+        if app.tabs.tab(i, "text") == "Custom head":
+            page = app.tabs.nametowidget(app.tabs.tabs()[i])
+    assert page is not None
+
+    labels = [w.cget("text") for w in page.winfo_children()
+              if isinstance(w, ttk.Button)]
+    assert any("glb" in text.lower() for text in labels), labels
+
+
+def test_importing_selects_the_pack_it_just_made(app, tmp_path):
+    """The next thing anyone does with a pack is build it. Leaving the path to
+    be retyped is the step that gets skipped and then blamed on the importer."""
+    source = tmp_path / "head.glb"
+    source.write_bytes(_a_glb())
+    out = str(tmp_path / "pack")
+
+    app.pack_dir.set("")
+    app._import_work(str(source), out)
+    from pathlib import Path
+
+    kind, payload = app.events.get_nowait()
+    assert kind == "imported", payload
+    pack, lines = payload
+    assert pack == out
+    assert (Path(out) / "head.obj").is_file()
+    assert any("vertices" in line for line in lines)
+
+
+def test_a_bad_file_reaches_the_log_rather_than_the_console(app, tmp_path):
+    bad = tmp_path / "bad.glb"
+    bad.write_bytes(b"not a glb at all" * 8)
+
+    app._import_work(str(bad), str(tmp_path / "pack"))
+
+    kind, payload = app.events.get_nowait()
+    assert kind == "error", payload
+
+
+def test_the_import_worker_touches_no_tk_variable(app):
+    import inspect
+
+    from kmdlfun import gui as kgui
+
+    body = inspect.getsource(kgui.App._import_work)
+    assert ".get()" not in body, body
+    assert "self.pack_dir" not in body, body
+
+
+def _a_glb():
+    from test_gltf import build_glb, simple
+
+    doc, blob = simple([(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+                       [(0, 1, 2)],
+                       uvs=[(0.0, 0.0), (1.0, 0.0), (0.0, 1.0)])
+    return build_glb(doc, blob)

@@ -129,7 +129,7 @@ kmdlfun render     p_hk47 --install "<K1>" --textured --turntable 24 --out spin.
 
 ### The app
 
-Five tabs sharing the folder settings, log and build button.
+Six tabs sharing the folder settings, log and build button.
 
 **Effects** — **bighead**, **smallhead**, **bobblehead**, **chibi**,
 **bigmitts**, each a uniform scale of a part with an adjustable intensity,
@@ -143,9 +143,24 @@ at a **single named node** when whole-model pairing finds nothing — which is
 what a unified body like HK-47 always did, since it shares exactly one node name
 with any head model.
 
+It also decides what a new character *wears*. An appearance row carries a body
+model per equipment slot and the game uses the unequipped one, which on a party
+member's row is their underwear — so a character copied from Carth and given no
+clothes spawns in `P_CarthBA`. Vanilla NPCs sidestep this by repeating one body
+across all nine slots, and the **Wearing** box offers the 117 outfits the game
+already dresses somebody in.
+
 **Custom head** — a mesh from outside the game into one node, with decimation,
 fitting, winding repair and cropping. A pack is checked before anything is
-built, and a failure names the check.
+built, and a failure names the check. **Import .glb** turns a sculpt, a scan or
+a Blender export into a pack and selects it, so anything that can reach glTF
+can reach KOTOR.
+
+**Lips** — a `.lip` for every line of a dialogue, so an NPC nobody recorded
+still moves its mouth while the subtitle is up. Shapes come from the line's own
+text; point it at a folder of recordings and each lip is made exactly as long
+as its own line. Your dialogue is never edited — lines that need a `VO_ResRef`
+get one in a copy written beside the lips.
 
 **Preview** — draws the result out of the built MDL/MDX bytes, so it checks the
 output rather than re-displaying the input. A head model is drawn **on its

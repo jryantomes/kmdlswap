@@ -81,3 +81,53 @@ def test_reinstalling_our_own_file_is_not_a_clash(fake_game):
     p = kinstall.plan(game, build)
     assert not p.foreign
     assert len(p.ours) == 3
+
+
+# --- lips ------------------------------------------------------------------
+#
+# A lips run is a build like any other, so the same guarded copy applies to it.
+
+
+def test_a_lip_and_its_dialogue_can_be_installed(tmp_path):
+    """They are no use apart: the lips are named after VO_ResRefs that exist
+    only in the updated dialogue, so shipping one without the other installs
+    files the engine will never look for."""
+    from kmdlfun import install as kinstall
+
+    src = tmp_path / "build"
+    src.mkdir()
+    (src / "vo_e00.lip").write_bytes(b"lip")
+    (src / "talk.dlg").write_bytes(b"dlg")
+    game = tmp_path / "game"
+    (game / "Override").mkdir(parents=True)
+
+    assert kinstall.plan(game, src).total == 2
+    kinstall.apply(game, src)
+
+    assert (game / "Override" / "vo_e00.lip").is_file()
+    assert (game / "Override" / "talk.dlg").is_file()
+
+
+def test_a_dialogue_somebody_else_put_there_is_not_replaced_silently(tmp_path):
+    """A `.dlg` is the most likely file here to already be someone's, which is
+    exactly the case the foreign-file guard exists for."""
+    import pytest as _pytest
+
+    from kmdlfun import install as kinstall
+
+    src = tmp_path / "build"
+    src.mkdir()
+    (src / "talk.dlg").write_bytes(b"ours")
+    game = tmp_path / "game"
+    override = game / "Override"
+    override.mkdir(parents=True)
+    (override / "talk.dlg").write_bytes(b"theirs")
+
+    assert [f.name for f in kinstall.plan(game, src).foreign] == ["talk.dlg"]
+
+    with _pytest.raises(PermissionError):
+        kinstall.apply(game, src)
+    assert (override / "talk.dlg").read_bytes() == b"theirs", "it was clobbered"
+
+    kinstall.apply(game, src, allow_foreign=True)
+    assert (override / "talk.dlg").read_bytes() == b"ours", "asked for, refused"
