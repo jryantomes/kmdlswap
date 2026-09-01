@@ -55,71 +55,89 @@ Jade also adds node classes KOTOR has no bit for: `gob`, `collision`, `sphere`,
 `capsule`, `weapon_trail`, `dangly_bone`, and a `controllers` bit at `0x40000`.
 KOTOR's `saber` bit (`0x800`) is Jade's `weapon_trail`.
 
+## Where the models live
+
+Worth stating plainly, because two wrong answers came first and both looked
+right:
+
+| place | what is actually in it |
+|---|---|
+| `data/<area>/*.rim` | **the character models** - 100 archives across 52 area folders |
+| `data/*.rim` (928) | area geometry, `a010_*` and friends |
+| `data/artcreatures.bif` | visual effects: 1163 of its 1164 models are `v_*` |
+| `data/bips/*.mod` | animations, keyed by numeric resref |
+| `data/mmenu-a.rim` | menu assets, `AEG*` |
+| `override/` | whatever has been extracted there - 32 models on this install |
+
+Scanning `data/*.rim` and not `data/**/*.rim` finds 1735 models and one head.
+Scanning recursively finds 7113 models, **499 head entries resolving to 158
+distinct heads**, and 456 bodies. The per-area RIMs are where everything is,
+which matches the community wiki: NPC models sit in the area folders that use
+them, so the same head appears in several archives.
+
 ## Scale: measured, and it goes the other way
 
 Reported by the addon's author, 2026-09-02: *Jade models are around 10-11%
 smaller than their KOTOR equivalents and need scaling up by roughly that much.*
 
-**Measured here on 2026-09-02, that is backwards.** Jade heads are *larger*
-than KOTOR heads, by close to the same 11%.
+**Measured on 158 Jade heads against 105 of KOTOR's, that is backwards.** Jade
+heads are *larger*, and want scaling **down**.
 
-| | Jade median | KOTOR median | KOTOR / Jade |
+| dimension | Jade median | KOTOR median | KOTOR / Jade |
 |---|---|---|---|
-| longest dimension, geometry as stored | 0.3086 | 0.2734 | **0.886** (−11.4%) |
-| longest dimension, × the header's `model.scale` | 0.3174 | 0.2734 | **0.861** (−13.9%) |
-| middle | 0.2306 | 0.2353 | 1.020 |
-| shortest | 0.1953 | 0.1638 | 0.839 |
+| longest | 0.3210 | 0.2734 | **0.852** (−14.8%) |
+| middle | 0.2408 | 0.2353 | 0.977 (−2.3%) |
+| shortest | 0.1953 | 0.1638 | 0.839 (−16.1%) |
+| longest × header `model.scale` | 0.3298 | 0.2734 | 0.829 (−17.1%) |
 
-So a Jade head arriving in KOTOR wants scaling **down** by 11-14%, not up.
+### There is no single factor
 
-The magnitude agreeing this closely while the sign disagrees is worth raising
-with the author rather than quietly overriding: it reads like the same
-measurement described from the other end, or an inverted convention somewhere.
-**Ask before trusting either number.**
+The middle dimension is within 2% while the other two differ by 15%. A uniform
+scale would move all three together, so **one number cannot make a Jade head
+into a KOTOR-proportioned one** - they are shaped differently, longer and wider
+front-to-back but similar across. Anyone applying a single multiplier is
+choosing which axis to be right about.
+
+That is the part most worth taking back to the author. The direction disagrees
+with what we were told, and the premise - that a single percentage exists -
+looks shaky too. **Confirm before trusting any of it**, including this.
 
 ### How it was measured
 
-16 heads against 105. Both sides are the axis-aligned box of every *drawn*
-vertex, in world space, with node transforms accumulated from the model root -
-KOTOR through this project's own scene builder, the one the previews use.
+The axis-aligned box of every *drawn* vertex, in world space, with node
+transforms accumulated from the model root; KOTOR through this project's own
+scene builder, the one the previews use. Four things had to be right, and each
+was wrong first:
 
-Three things had to be got right, and each was wrong first:
-
-- **World space, not local.** Combining each mesh node's raw vertices without
-  its rest transform is meaningless once a model has more than one mesh. It
-  reported Carth's head as 3.24 tall and 0.16 wide. Jade heads are a single
-  mesh and so came out right *by accident*, which is exactly the accident that
-  makes a wrong number look plausible.
+- **The sample.** The first pass measured 16 heads from `override/`, because a
+  `glob` where an `rglob` was needed hid the 100 area archives. Ten times the
+  data moved the answer from −11% to −15% - same direction, different number,
+  which is exactly the sort of correction a small sample cannot warn you about.
+- **World space, not local.** Combining mesh nodes' raw vertices without their
+  rest transforms reported Carth's head as 3.24 tall and 0.16 wide. Jade heads
+  are usually a single mesh and so came out right *by accident*, which is how
+  that error survives.
 - **Sorted extents, not axis order.** Jade heads are longest along X where
-  KOTOR's are longest along Z, so matching axis 0 to axis 0 compares a width
-  against a height. Sorting each model's three extents largest-first is
-  rotation-invariant.
+  KOTOR's are longest along Z, so axis 0 against axis 0 compares a width to a
+  height. Sorting each model's extents largest-first is rotation-invariant.
 - **Heads, confirmed by eye.** `reports/jade_vs_kotor_head.png` draws
-  `H_Common01_` beside `p_carthh` through the same renderer. Both are heads -
-  the Jade one has ears and a cranium and is simply lying on its side. Had it
-  been a bust with shoulders it would have measured larger for a reason with
-  nothing to do with engine scale, and no amount of median-taking would have
-  shown that.
+  `H_Common01_` beside `p_carthh` through the same renderer. Both are heads;
+  the Jade one is simply on its side. A bust with shoulders would have measured
+  larger for a reason having nothing to do with engine scale.
 
-Node scales are all 1.0, so ignoring them is safe. `model.scale` in the header
-is not: it is 1.045 on most heads and 0.75 on `H_Girl01GH_`, which reads like a
-real runtime scale. Whether the engine applies it is the one open question in
-these numbers, and it moves the answer from −11% to −14% without changing its
-direction.
+Node scales are all 1.0. `model.scale` in the header is not: 1.045 on 109 of
+the 158, 1.0 on 38, and 0.75, 0.77 or 1.7 on the rest, which reads like a real
+runtime scale. Whether the engine applies it moves the answer from −15% to
+−17% without changing its direction.
 
-### What is not established
+### What is still not established
 
-- **16 heads.** That is every head this install has as a loose file. They are
-  not in the RIMs (area geometry), not in `artcreatures.bif` (1163 of its 1164
-  models are `v_*` effects despite the name), and not in `data/bips/*.mod`
-  (animations, numeric resrefs). `override/` is where this install keeps its
-  character models, and its files are dated the same day as the install.
-- **No bodies.** Jade's `C_*` models here are creatures - `c_tentacle_` is 14
-  units long - with no humanoid equivalent to put beside a KOTOR body. If
-  "models are smaller" was about whole characters rather than heads, that is
-  untested.
+- **No bodies compared.** 456 `N_*` bodies exist and were not measured against
+  KOTOR's; if "models are smaller" meant whole characters rather than heads,
+  that remains untested.
 - **Nothing in game.** No converted head has been put in front of the engine,
-  which is the only test that has ever settled a scale question in this project.
+  which is the only thing that has ever settled a scale question in this
+  project.
 
 ## Heads arrive rotated
 
