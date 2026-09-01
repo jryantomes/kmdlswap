@@ -1607,3 +1607,64 @@ def test_the_detection_worker_touches_no_tk_variable(app):
     body = inspect.getsource(kgui.App._detect_installs)
     worker = body[body.index("def work()"):]
     assert ".get()" not in worker, worker
+
+
+# --- Jade Empire ------------------------------------------------------------
+#
+# Jade's file layout shares almost nothing with KOTOR's, so its models can never
+# go through the splice engine. Their geometry comes in the way a sculpt does.
+
+
+def test_the_custom_head_tab_offers_jade(app):
+    from tkinter import ttk
+
+    page = None
+    for i in range(len(app.tabs.tabs())):
+        if app.tabs.tab(i, "text") == "Custom head":
+            page = app.tabs.nametowidget(app.tabs.tabs()[i])
+    labels = [w.cget("text") for w in page.winfo_children()
+              if isinstance(w, ttk.Button)]
+
+    assert any("Jade" in text for text in labels), labels
+
+
+def test_asking_for_jade_without_an_install_says_so(app):
+    app.jade.set("")
+    app.said = []
+    app._say = lambda text: app.said.append(text)
+    app._open_jade()
+
+    assert any("Jade Empire folder" in s for s in app.said)
+    assert getattr(app, "_jade_window", None) is None
+
+
+def test_converting_a_jade_model_writes_a_pack_and_selects_it(app, tmp_path):
+    from kmdlfun import installs, jade as kjade
+
+    where = installs.detect().get(installs.JADE)
+    if not where:
+        pytest.skip("no Jade Empire install")
+
+    from pathlib import Path
+
+    entry = next(e for e in kjade.catalogue(where)
+                 if e.resref.lower() == "h_common01_")
+    out = str(tmp_path / "pack")
+    app._jade_work(entry, out, kjade.SCALE)
+
+    kind, payload = app.events.get_nowait()
+    assert kind == "imported", payload
+    pack, lines = payload
+    assert pack == out
+    assert (Path(out) / "head.obj").is_file()
+    assert any("triangles" in line for line in lines)
+
+
+def test_the_jade_workers_touch_no_tk_variable(app):
+    import inspect
+
+    from kmdlfun import gui as kgui
+
+    assert ".get()" not in inspect.getsource(kgui.App._jade_work)
+    body = inspect.getsource(kgui.App._draw_jade)
+    assert ".get()" not in body[body.index("def work()"):]

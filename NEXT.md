@@ -38,7 +38,8 @@ folder name - `chitin.key` only says
   Transplant tab is for when no existing head will do.
 * **Custom head** - a mesh from outside the game into one node, with decimation,
   fitting, winding repair and cropping. **Import .glb** builds a pack from a
-  sculpt or a Blender export and selects it.
+  sculpt or a Blender export and selects it; **From Jade Empire** does the same
+  for that game's 158 heads and 112 bodies, picked from a grid of faces.
 * **Lips** - a `.lip` per line of a dialogue, so an unvoiced NPC still moves its
   mouth. Timed from recordings where there are any, estimated where there are
   not. Was command-line only until this session.
