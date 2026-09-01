@@ -174,7 +174,36 @@ Open the Transplant tab and pick a host.
       action that writes into the game - check it does not touch anything of
       yours.
 
-## 13. The catalogue
+## 13. Making a new character
+
+All new, and the part with the most riding on it: this is the difference
+between replacing a vanilla character and adding one.
+
+- [ ] **Save as.** Build with `Save as: p_myhead` and confirm the folder holds
+      `p_myhead.mdl/.mdx` and *not* `p_carthh.mdl`. Install it and check Carth
+      is still Carth - the whole point is that nothing was replaced.
+- [ ] **Make it a: NPC.** No tables should be written, just a `.utc`.
+- [ ] **Make it a: NPC that talks.** Then write the `.dlg` and see whether the
+      conversation starts.
+- [ ] **Make it a: companion.** Check the portrait row appears; the recruit
+      script is still yours, so this one cannot be finished by the tool alone.
+- [ ] Installing now touches `appearance.2da`, which is **yours**. The install
+      planner should report it as *foreign* and ask before replacing it. Say no
+      once and confirm it does not write.
+
+## 14. The broker's animation — a specific hypothesis
+
+`rfk_broker.utc` has `ScriptSpawn = k_def_ambmob`. Across all 205 vanilla
+creature blueprints, 52 use that script and **none of them hold a
+conversation**; its company is `c_bantha`, `c_brith` and `c_dewback`. Every
+vanilla NPC that talks uses `k_def_spawn01`.
+
+- [ ] Change that one field to `k_def_spawn01` and see whether he stops
+      misbehaving. If he does, the diagnosis holds and the same mistake is now
+      designed out of the generator. If he does not, the cause is elsewhere and
+      worth knowing.
+
+## 15. The catalogue
 
 - [ ] `python tools/render_catalogue.py --install "<K1 root>"` - 233 models in
       about a minute. Spot-check a few faces are the right way round.
