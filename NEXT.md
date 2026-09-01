@@ -96,6 +96,9 @@ tangent looks identical in every viewer and wrong in game.
 
 ## Things that are true and easy to forget
 
+- **Generated lips work.** Confirmed in game 2026-09-01: a whole conversation
+  driven by lip files derived from the text of each line, with no recording and
+  no phoneme engine behind any of it.
 - **A lip file plays without audio.** Confirmed in game 2026-09-01. Mouth
   movement comes from a `.lip` found by the line's `VO_ResRef`, and neither a
   `.wav` nor the CSLU toolkit the community treats as mandatory is needed when
