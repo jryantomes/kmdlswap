@@ -84,12 +84,15 @@ tangent looks identical in every viewer and wrong in game.
 
 - **In-game verification.** See above. A problem found there outranks
   everything below it.
-- **Jade Empire.** Closest of the other engines by a distance: its wrapper is
-  KOTOR's with eight bytes inserted, fully understood, and our parser gets
-  through the wrapper *and* the model header before failing in the node walk.
-  Whether that is another fixed-offset shift or a real restructure is unmeasured
-  and answerable in about half an hour.
-  [reports/OTHER_ENGINES_FINDINGS.md](reports/OTHER_ENGINES_FINDINGS.md)
+- **Jade Empire.** *Answered, 2026-09-02, and the answer is not to build it.*
+  The structures really are different sizes - a 60-byte node header against
+  KOTOR's 80, a 28-byte face record against 32, controllers moved out of the
+  node entirely - so the eight-byte wrapper shift was only ever the wrapper.
+  What our parser was reading before it failed is a shared 52-byte transform
+  prefix. Native support is a second reader *and* writer for an engine
+  JadeBlender already converts in both directions, so the route is Blender, as
+  it is for NWN and SWTOR. One thing to measure first: Jade models are reported
+  10-11% smaller. [reports/JADE_FINDINGS.md](reports/JADE_FINDINGS.md)
 - **Neverwinter Nights.** Container reads today; models are a second reader, and
   neverblender to `.glb` is the cheap path. NWN heads are KOTOR's contemporaries
   and built to comparable budgets, so unlike SWTOR the density problem mostly is

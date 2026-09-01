@@ -329,3 +329,16 @@ unmodified round-trip is then identity by construction.
 PyKotor remains useful as a format reference and cross-check oracle.
 
 Design & implementation plan: [`docs/BYTE_SURGICAL_DESIGN.md`](docs/BYTE_SURGICAL_DESIGN.md).
+
+## Licence
+
+GPL-3.0-or-later. The full text is in `LICENSE`.
+
+The choice is deliberate rather than incidental. The nearest prior art for this
+work — KotorBlender and the JadeBlender fork that reads Jade Empire models — is
+GPL, and matching it means their code can be borrowed rather than only their
+findings. File-format facts are not copyrightable and were never the
+constraint; being able to lift an implementation is.
+
+None of that touches the game's own data. This repository carries no BioWare
+assets, and a build's output is yours and stays on your disk.

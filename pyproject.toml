@@ -6,6 +6,8 @@ build-backend = "setuptools.build_meta"
 name = "kmdlswap"
 version = "0.0.1"
 description = "Scoped tool to swap the geometry of a single mesh node in a vanilla KOTOR 1 model"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
     "pykotor>=2.3.12",
