@@ -38,3 +38,6 @@ dist/
 # Generated lip files
 /lips_out/
 /lips_check/
+
+# Personal Claude Code permissions - machine-local, not the project's business
+.claude/settings.local.json
