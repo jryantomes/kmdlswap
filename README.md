@@ -130,9 +130,13 @@ kmdlfun render     p_hk47 --install "<K1>" --textured --turntable 24 --out spin.
 ### The app
 
 Seven tabs sharing the log and build button. The folders live behind
-**Settings** rather than on screen: the app reads Steam's own library index at
-startup and fills them in, so a game on a second drive is found rather than
-silently missed. What is left at the top is one line saying which games it
+**Settings** rather than on screen: the app finds the games itself at startup, from
+Windows' own record of what is installed — uninstall entries, GOG Galaxy's
+list, Epic's manifests and the `BioWare\SW\KOTOR` key the retail disc still
+writes — then Steam's library index, then, on request, a walk of every drive.
+Nothing is trusted by name: every candidate is checked for the right
+executable, so a Steam install, a GOG one and a folder copied off an old
+machine all resolve the same way. What is left at the top is one line saying which games it
 found, and it says so by name rather than by path.
 
 **Effects** — **bighead**, **smallhead**, **bobblehead**, **chibi**,
