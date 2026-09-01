@@ -28,3 +28,7 @@ dist/
 
 # my own working files while patching
 /scratch_patch.py
+
+# Generated lip files
+/lips_out/
+/lips_check/
