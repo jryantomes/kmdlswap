@@ -74,7 +74,7 @@ UPCOMING = (
         "the wrapper. Native reading is not worth it, because JadeBlender "
         "already converts Jade models to KOTOR ones in both directions. Bring "
         "the result in as .glb on the Custom head tab, and check the scale. "
-        "Measured on 158 Jade heads against 105 of KOTOR's, a Jade head is 15-17% LARGER and wants scaling down - the opposite of what we were told. And no single factor fits: its middle dimension matches KOTOR within 2% while the other two are out by 15%, so the heads are shaped differently rather than merely scaled. It also arrives lying on its side.",
+        "Measured on 270 Jade models against 200 of KOTOR's, Jade is LARGER and wants scaling DOWN by about a sixth - multiply by 0.83, the opposite of what we were told, so confirm it. Bodies give the tightest figure: height and depth agree to 0.4%. Heads also arrive lying on their side, because Jade's height axis is X where KOTOR's is Z.",
         "",
     ),
     (

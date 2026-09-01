@@ -80,27 +80,42 @@ them, so the same head appears in several archives.
 Reported by the addon's author, 2026-09-02: *Jade models are around 10-11%
 smaller than their KOTOR equivalents and need scaling up by roughly that much.*
 
-**Measured on 158 Jade heads against 105 of KOTOR's, that is backwards.** Jade
-heads are *larger*, and want scaling **down**.
+**Measured on 158 Jade heads and 112 Jade bodies against 105 KOTOR heads and 95
+KOTOR bodies, that is backwards.** Jade models are *larger* and want scaling
+**down**, by about a sixth.
 
-| dimension | Jade median | KOTOR median | KOTOR / Jade |
+| | height | depth | across |
 |---|---|---|---|
-| longest | 0.3210 | 0.2734 | **0.852** (−14.8%) |
-| middle | 0.2408 | 0.2353 | 0.977 (−2.3%) |
-| shortest | 0.1953 | 0.1638 | 0.839 (−16.1%) |
-| longest × header `model.scale` | 0.3298 | 0.2734 | 0.829 (−17.1%) |
+| **bodies**, KOTOR / Jade | **0.830** | **0.827** | 0.715 |
+| **heads**, KOTOR / Jade | **0.858** | 0.994 | 0.831 |
 
-### There is no single factor
+Bodies are the measurement to trust: height and depth agree to within 0.4% on
+207 models, which is what a real uniform scale looks like. In absolute terms a
+Jade body stands **1.846** where a KOTOR body stands **1.533**.
 
-The middle dimension is within 2% while the other two differ by 15%. A uniform
-scale would move all three together, so **one number cannot make a Jade head
-into a KOTOR-proportioned one** - they are shaped differently, longer and wider
-front-to-back but similar across. Anyone applying a single multiplier is
-choosing which axis to be right about.
+**Working figure: multiply Jade geometry by ≈0.83 to bring it into KOTOR**, or
+≈1.20 going the other way. Not 1.10.
 
-That is the part most worth taking back to the author. The direction disagrees
-with what we were told, and the premise - that a single percentage exists -
-looks shaky too. **Confirm before trusting any of it**, including this.
+### The axes had to be matched by meaning first
+
+An earlier pass here sorted each model's three extents largest-first, concluded
+that "no single factor fits", and was wrong to. Sorting was a stopgap for not
+knowing the axis convention, and for bodies it is actively misleading: a figure
+with its arms out has an arm span longer than its height, so "the longest
+extent" silently means different things for different models.
+
+Once the convention is known the picture is clean. **Jade's height runs along
+X; KOTOR's along Z.** Jade body X extents sit at 1.85 with almost no spread
+while their Z extents range from 1.5 to 5.2 - the wide ones being capes,
+weapons and outstretched arms. Comparing height to height and depth to depth
+gives the agreement above; the `across` column is the pose-dependent one and
+should be ignored in both rows.
+
+Heads are the noisier of the two. Their height and across agree at 0.83-0.86,
+but depth comes out at 0.994 - Jade heads are taller and broader than KOTOR's
+while being the same front-to-back. That is a real difference in proportion on
+top of the difference in size, and it is why a converted Jade head may still
+look slightly wrong after a uniform scale.
 
 ### How it was measured
 
@@ -111,33 +126,29 @@ was wrong first:
 
 - **The sample.** The first pass measured 16 heads from `override/`, because a
   `glob` where an `rglob` was needed hid the 100 area archives. Ten times the
-  data moved the answer from −11% to −15% - same direction, different number,
-  which is exactly the sort of correction a small sample cannot warn you about.
+  data moved the answer by four points - the sort of correction a small sample
+  cannot warn you about.
 - **World space, not local.** Combining mesh nodes' raw vertices without their
   rest transforms reported Carth's head as 3.24 tall and 0.16 wide. Jade heads
   are usually a single mesh and so came out right *by accident*, which is how
   that error survives.
-- **Sorted extents, not axis order.** Jade heads are longest along X where
-  KOTOR's are longest along Z, so axis 0 against axis 0 compares a width to a
-  height. Sorting each model's extents largest-first is rotation-invariant.
+- **Axes matched by meaning.** As above.
 - **Heads, confirmed by eye.** `reports/jade_vs_kotor_head.png` draws
   `H_Common01_` beside `p_carthh` through the same renderer. Both are heads;
   the Jade one is simply on its side. A bust with shoulders would have measured
-  larger for a reason having nothing to do with engine scale.
+  larger for reasons having nothing to do with engine scale.
 
-Node scales are all 1.0. `model.scale` in the header is not: 1.045 on 109 of
-the 158, 1.0 on 38, and 0.75, 0.77 or 1.7 on the rest, which reads like a real
-runtime scale. Whether the engine applies it moves the answer from −15% to
-−17% without changing its direction.
+Node scales are all 1.0. `model.scale` in the header is not: 1.045 on most
+models, 1.0 on many, and 0.75-1.7 on a handful, which reads like a real runtime
+scale. Applying it moves the body factor from 0.830 to about 0.79 without
+changing the direction.
 
 ### What is still not established
 
-- **No bodies compared.** 456 `N_*` bodies exist and were not measured against
-  KOTOR's; if "models are smaller" meant whole characters rather than heads,
-  that remains untested.
-- **Nothing in game.** No converted head has been put in front of the engine,
-  which is the only thing that has ever settled a scale question in this
-  project.
+**Nothing has been in front of the engine.** That is the only thing that has
+ever settled a scale question in this project, and it is worth saying that the
+direction here disagrees with the person who has actually built a converter.
+Take 0.83 as the measurement, not as the answer, and ask him what he measured.
 
 ## Heads arrive rotated
 
