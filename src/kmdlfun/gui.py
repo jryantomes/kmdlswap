@@ -44,6 +44,47 @@ ANYONE = "anyone"
 AUTO_NODE = "automatic"
 NOT_A_CHARACTER = "just a model"
 
+# What is coming, and honestly where each one is. "Command line only" means the
+# work is done and tested and only the button is missing - which is worth
+# saying, because it is the difference between "wait" and "here is how to do it
+# today".
+UPCOMING = (
+    (
+        "Lip files from a dialogue",
+        "command line only",
+        "Give it a .dlg and it writes a .lip for every line, so an unvoiced "
+        "NPC's mouth moves while the subtitle is up. Shapes come from the "
+        "line's own text. It never edits your dialogue - lines that need a "
+        "VO_ResRef get one in a copy written beside the lips.",
+        'kmdlfun lips "<your.dlg>" --out lips_out/ --assign --replies',
+    ),
+    (
+        "A mod other people can install",
+        "planned",
+        "Right now the 2DA files a build writes are yours - they carry your "
+        "install's rows, so handing them to someone else overwrites their "
+        "mods. A HoloPatcher changes.ini would merge instead of replace.",
+        "",
+    ),
+    (
+        "Jade Empire models",
+        "being investigated",
+        "Its file wrapper is KOTOR's with eight bytes inserted, and the reader "
+        "already gets through the wrapper and the model header before it "
+        "stops. Whether the node structures are another fixed shift or a real "
+        "difference is the open question.",
+        "",
+    ),
+    (
+        "Neverwinter Nights and SWTOR heads",
+        "use Blender for now",
+        "Both are readable through Blender and out as .glb, which this tool "
+        "already imports. Native reading is a bigger job than it looks and "
+        "probably not worth it.",
+        "kmdlfun import head.glb --out packs/myhead",
+    ),
+)
+
 DEFAULT_INSTALLS = [
     r"E:\SteamLibrary\steamapps\common\swkotor",
     r"C:\Program Files (x86)\Steam\steamapps\common\swkotor",
@@ -180,6 +221,7 @@ class App(ttk.Frame):
         self._build_preview_tab()
         self._build_builds_tab()
         self._build_effect_tab()
+        self._build_upcoming_tab()
 
     # ---- effects tab -------------------------------------------------------
 
@@ -434,6 +476,43 @@ class App(ttk.Frame):
         ).grid(row=11, column=0, columnspan=5, sticky="w", pady=(4, 0))
 
     # ---- shared bottom -----------------------------------------------------
+
+    # ---- upcoming tab ------------------------------------------------------
+
+    def _build_upcoming_tab(self):
+        """What is coming, and what already works somewhere else.
+
+        A roadmap in the app rather than in a file nobody opens. The status on
+        each line is the useful part: several of these are finished and only
+        missing a button, and someone waiting for a feature that already runs
+        on the command line is waiting for nothing.
+        """
+        page = ttk.Frame(self.tabs, padding=12)
+        self.tabs.add(page, text="Upcoming")
+        page.columnconfigure(0, weight=1)
+
+        ttk.Label(
+            page,
+            text="Planned work. Nothing here has a button yet - where a line "
+                 "says “command line only”, the command underneath "
+                 "does it today.",
+            foreground="#666", wraplength=640,
+        ).grid(row=0, column=0, sticky="w", pady=(0, 10))
+
+        self.upcoming_rows = []
+        for i, (title, status, blurb, command) in enumerate(UPCOMING, start=1):
+            box = ttk.LabelFrame(page, text=f"{title}   -   {status}", padding=8)
+            box.grid(row=i, column=0, sticky="ew", pady=(0, 8))
+            box.columnconfigure(0, weight=1)
+            ttk.Label(box, text=blurb, wraplength=620, foreground="#333").grid(
+                row=0, column=0, sticky="w"
+            )
+            if command:
+                entry = ttk.Entry(box)
+                entry.insert(0, command)
+                entry.configure(state="readonly")
+                entry.grid(row=1, column=0, sticky="ew", pady=(6, 0))
+            self.upcoming_rows.append((title, status))
 
     # ---- custom head tab ---------------------------------------------------
 
