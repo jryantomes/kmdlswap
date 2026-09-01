@@ -403,7 +403,12 @@ class App(ttk.Frame):
         self.opt_reshape = tk.BooleanVar(value=False)
         self.opt_texture = tk.BooleanVar(value=True)
         self.opt_hide = tk.BooleanVar(value=True)
-        self.opt_fit = tk.BooleanVar(value=True)
+        # Off by default: a donor head is the size it is meant to be, and
+        # shrinking it to the host's box detaches it from the neck. Measured on
+        # a Bith onto Carth - fitted it stands 0.242 tall and floats 0.019 above
+        # the collar, left alone it stands 0.400 and meets it. `to_host_space`
+        # made this argument about a Quarren long before the default agreed.
+        self.opt_fit = tk.BooleanVar(value=False)
         ttk.Checkbutton(
             opts, text="Take donor's texture", variable=self.opt_texture
         ).grid(row=0, column=0, sticky="w", padx=(0, 14))
@@ -411,7 +416,8 @@ class App(ttk.Frame):
             opts, text="Hide parts the donor lacks", variable=self.opt_hide
         ).grid(row=0, column=1, sticky="w", padx=(0, 14))
         ttk.Checkbutton(
-            opts, text="Fit donor to host's size (off: keep the donor's own size)",
+            opts, text="Shrink donor to the host's size (usually wrong - "
+                       "a head is the size it is meant to be)",
             variable=self.opt_fit,
         ).grid(row=1, column=0, sticky="w", padx=(0, 14), pady=(4, 0))
         ttk.Checkbutton(
