@@ -67,11 +67,14 @@ UPCOMING = (
     ),
     (
         "Jade Empire models",
-        "being investigated",
-        "Its file wrapper is KOTOR's with eight bytes inserted, and the reader "
-        "already gets through the wrapper and the model header before it "
-        "stops. Whether the node structures are another fixed shift or a real "
-        "difference is the open question.",
+        "use Blender for now",
+        "Answered rather than pending: the structures really are different "
+        "sizes - a 60-byte node header against KOTOR's 80, controllers moved "
+        "out of the node entirely - so the eight-byte wrapper shift was only "
+        "the wrapper. Native reading is not worth it, because JadeBlender "
+        "already converts Jade models to KOTOR ones in both directions. Bring "
+        "the result in as .glb on the Custom head tab, and check the scale: "
+        "Jade models are reported to be 10-11% smaller.",
         "",
     ),
     (
