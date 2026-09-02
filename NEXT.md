@@ -91,20 +91,29 @@ tangent looks identical in every viewer and wrong in game.
 
 - **In-game verification.** See above. A problem found there outranks
   everything below it.
-- **Jade Empire.** *Answered, 2026-09-02, and the answer is not to build it.*
+- **Jade Empire.** *Answered and partly built, 2026-09-02.* Its geometry comes
+  in as head packs - 158 heads and 112 bodies, with textures - and the reader
+  is JadeBlender's, vendored. What is *not* built is native writing, and should
+  not be:
   The structures really are different sizes - a 60-byte node header against
   KOTOR's 80, a 28-byte face record against 32, controllers moved out of the
   node entirely - so the eight-byte wrapper shift was only ever the wrapper.
   What our parser was reading before it failed is a shared 52-byte transform
   prefix. Native support is a second reader *and* writer for an engine
   JadeBlender already converts in both directions, so the route is Blender, as
-  it is for NWN and SWTOR. The scale claim is now measured on 270 Jade models
+  it is for NWN and SWTOR if a whole model is wanted rather than a head. The
+  scale claim is now measured on 270 Jade models
   against 200 of KOTOR's and came out *inverted*: Jade is **larger** and wants
   multiplying by **0.83**, not 1.10. Bodies give the tight figure - height and
   depth agree to 0.4% - once the axes are matched by meaning rather than
   sorted, Jade's height running along X where KOTOR's runs along Z. Worth
   confirming with the author, and nothing has been in front of the engine.
   [reports/JADE_FINDINGS.md](reports/JADE_FINDINGS.md)
+- **Jade, still open.** Bodies are catalogued but have no route in - only heads
+  become packs. Jade carries a per-model `scale` in its header that the
+  importer ignores, which is why `h_bling02_` and `h_girl01gh_` fail the size
+  check. And creating characters is KOTOR-only; all three games is the stated
+  goal.
 - **Neverwinter Nights.** Container reads today; models are a second reader, and
   neverblender to `.glb` is the cheap path. NWN heads are KOTOR's contemporaries
   and built to comparable budgets, so unlike SWTOR the density problem mostly is
