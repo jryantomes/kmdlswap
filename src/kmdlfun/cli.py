@@ -234,8 +234,10 @@ def main(argv: list[str] | None = None) -> int:
     jd.add_argument("--install", help="the Jade Empire folder (found "
                                       "automatically if left out)")
     jd.add_argument("--out", help="pack folder to create")
-    jd.add_argument("--kind", choices=["head", "body", "all"], default="head",
-                    help="which models to list (default: heads)")
+    jd.add_argument("--kind", choices=["head", "body", "mask", "all"],
+                    default="head",
+                    help="which models to list (default: heads). Masks are "
+                         "open shells and will not pass the head checks")
     jd.add_argument("--no-texture", action="store_true",
                     help="skip the texture; the head then wears the host's")
     jd.add_argument("--scale", type=float,
@@ -896,7 +898,8 @@ def _jade(args) -> int:
               file=sys.stderr)
         return 1
 
-    kinds = (jade.HEAD, jade.BODY) if args.kind == "all" else (args.kind,)
+    kinds = ((jade.HEAD, jade.BODY, jade.MASK) if args.kind == "all"
+             else (args.kind,))
     try:
         catalogue = jade.catalogue(install, kinds=kinds)
     except jade.JadeError as exc:

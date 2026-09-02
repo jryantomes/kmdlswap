@@ -32,6 +32,11 @@ from kmdlswap.obj import ObjMesh
 # --- thresholds, from the vanilla corpus -----------------------------------
 
 MAX_COMPONENTS_OK = 2          # vanilla's worst
+# How far an island has to sit from the rest before it is debris rather than a
+# part. Measured on Jade's heads, where hats, topknots and ears reach past the
+# face but never further than a tenth of the head from it; a stray fragment
+# sits whole model-widths away, so anything between the two works.
+DETACHED = 0.25
 MAX_COMPONENTS_WARN = 4
 BOUNDARY_OK = 0.062            # vanilla's worst
 BOUNDARY_WARN = 0.15
@@ -102,9 +107,12 @@ def loose_islands(mesh: ObjMesh) -> int:
     plus two eyes plus teeth, all inside the head.
 
     So the question worth asking is not how many islands there are but whether
-    any of them is somewhere the head is not. An island wholly inside the main
-    island's bounding box is a feature; one hanging outside it is the failure
-    this check was written for.
+    any of them is somewhere the head is not - and the honest measure of that
+    is the *gap*, not a bounding box. An earlier version here asked whether an
+    island sat inside the largest one's box, which misreads a hat, a topknot or
+    an ear that reaches past the face: measured across Jade's heads, every such
+    island touches the head, the widest gap being a tenth of its size, while
+    the loose fragments this check exists for sit whole model-widths away.
     """
     weld = _weld(mesh.positions)
     adjacency = collections.defaultdict(set)
@@ -140,15 +148,47 @@ def loose_islands(mesh: ObjMesh) -> int:
 
     groups.sort(key=len, reverse=True)
     lo, hi = box(groups[0])
-    slack = max(hi[i] - lo[i] for i in range(3)) * 0.02
+    size = max(hi[i] - lo[i] for i in range(3))
+    if size <= 0:
+        return 0
+    slack = size * 0.02
 
     loose = 0
     for group in groups[1:]:
         glo, ghi = box(group)
-        if any(glo[i] < lo[i] - slack or ghi[i] > hi[i] + slack
-               for i in range(3)):
+        inside = all(glo[i] >= lo[i] - slack and ghi[i] <= hi[i] + slack
+                     for i in range(3))
+        if inside:
+            continue
+        # Only the ones that reach outside are worth measuring, which keeps
+        # this cheap: eyes and teeth never get here.
+        if _gap(group, mesh, lo, hi) > size * DETACHED:
             loose += 1
     return loose
+
+
+def _gap(group, mesh, lo, hi) -> float:
+    """How far the nearest part of an island is from the main island's box.
+
+    Distance to the *box* rather than to the nearest vertex, because vertices
+    are a poor stand-in for a surface: a hat sitting on a head overlaps it
+    while their corners are a long way apart, and on a coarse mesh that reads
+    as a gap where there is none.
+    """
+    best = float("inf")
+    for i in group:
+        p = mesh.positions[i]
+        d = 0.0
+        for axis in range(3):
+            if p[axis] < lo[axis]:
+                d += (lo[axis] - p[axis]) ** 2
+            elif p[axis] > hi[axis]:
+                d += (p[axis] - hi[axis]) ** 2
+        if d < best:
+            best = d
+            if best == 0.0:
+                return 0.0
+    return best ** 0.5
 
 
 def topology(mesh: ObjMesh):

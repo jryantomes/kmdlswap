@@ -364,3 +364,41 @@ def test_a_textured_jade_head_builds_and_the_texture_travels(a_head, tmp_path,
     written = tmp_path / "built"
     headbuild.write(result, written, "p_carthh")
     assert list(written.glob("*.tga")), sorted(p.name for p in written.iterdir())
+
+
+# --- what is actually a head ------------------------------------------------
+
+
+def test_masks_are_not_counted_as_heads(catalogue):
+    """`H_` covers more than faces. `H_Mask*` are open shells of 78 to 185
+    triangles that cannot pass a check asking whether a surface is closed or
+    faces outward, because they are not meant to be either, and `H_Decap01` is
+    a severed stump. Calling them heads turns ten sensible refusals into ten
+    apparent failures."""
+    masks = [e for e in catalogue if e.kind == jade.MASK]
+    heads = [e for e in catalogue if e.kind == jade.HEAD]
+
+    assert len(masks) >= 9, [e.resref for e in masks]
+    assert all("mask" in e.resref.lower() or "decap" in e.resref.lower()
+               for e in masks)
+    assert not any("mask" in e.resref.lower() for e in heads)
+    assert len(heads) > 140
+
+
+def test_kind_of_reads_the_prefix_and_the_rest():
+    assert jade.kind_of("H_Common01_") == jade.HEAD
+    assert jade.kind_of("H_Mask03_") == jade.MASK
+    assert jade.kind_of("h_decap01_") == jade.MASK
+    assert jade.kind_of("N_Bandit_") == jade.BODY
+    assert jade.kind_of("a010_01") == jade.OTHER
+
+
+def test_a_mask_still_converts(catalogue, tmp_path):
+    """Offering it is right even though it will not pass the head checks -
+    somebody may want a mask, and refusing to convert it helps nobody."""
+    mask = next(e for e in catalogue if e.kind == jade.MASK
+                and "mask" in e.resref.lower())
+    result = jade.to_pack(mask, tmp_path / "pack")
+
+    assert result["triangles"] > 0
+    assert (result["pack"] / "head.obj").is_file()

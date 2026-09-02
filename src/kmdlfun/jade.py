@@ -64,7 +64,15 @@ RIM_KEY_SIZE = 32
 
 HEAD = "head"
 BODY = "body"
+MASK = "mask"
 OTHER = "other"
+
+# `H_` covers more than faces. `H_Mask*` are masks - open shells of 78 to 185
+# triangles that cannot pass a check asking whether a surface is closed or
+# faces outward, because they are not meant to be either. `H_Decap*` is a
+# severed stump. Both are worth offering and neither is a head, and calling
+# them one turns nine sensible refusals into nine apparent failures.
+NOT_A_FACE = ("mask", "decap")
 
 
 class JadeError(RuntimeError):
@@ -131,7 +139,8 @@ def kind_of(resref: str) -> str:
     """
     upper = resref.upper()
     if upper.startswith("H_"):
-        return HEAD
+        rest = upper[2:].lower()
+        return MASK if rest.startswith(NOT_A_FACE) else HEAD
     if upper.startswith("N_"):
         return BODY
     return OTHER
@@ -163,7 +172,7 @@ def _rim_entries(archive: Path):
             yield resref, restype, offset, size
 
 
-def catalogue(install, *, kinds=(HEAD, BODY)) -> list[Entry]:
+def catalogue(install, *, kinds=(HEAD, BODY, MASK)) -> list[Entry]:
     """Every model in the install, deduplicated.
 
     The models live in the per-area RIMs under `data/<area>/`, not in the

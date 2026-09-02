@@ -150,6 +150,31 @@ ever settled a scale question in this project, and it is worth saying that the
 direction here disagrees with the person who has actually built a converter.
 Take 0.83 as the measurement, not as the answer, and ask him what he measured.
 
+## The per-model `scale` should be ignored
+
+Jade's model header carries a `scale`: 1.045 on most heads, 1.0 on many, and
+0.75 or 1.7 on a handful. It looked like the explanation for the heads that
+come out the wrong size, and it is not - applying it makes **every** one of
+them worse:
+
+| head | span against Carth's head node | `model.scale` | with it applied |
+|---|---|---|---|
+| `h_girl01_` | 94% | 0.750 | 70% |
+| `h_judge01_` | 125% | 1.045 | 131% |
+| `h_minstr01_` | 141% | 1.045 | 147% |
+| `h_trogr01_` | 344% | 1.700 | 584% |
+| `h_common01_` | 93% | 1.045 | 97% |
+
+Ignoring it leaves ordinary heads at 93-94% of the node, which is right. So
+whatever that field is for, it is not a size the importer should apply, and the
+question is closed.
+
+The heads that *are* the wrong size are the wrong **shape**, not the wrong
+scale: `h_judge01_` and `h_minstr01_` wear hats, `h_girl01_` is wider than she
+is tall because of her pigtails, and `h_trogr01_` is a troglodyte. Fitting
+scales by the tightest axis, so a head that is wide for its height gets shrunk
+to fit the width and ends up too short.
+
 ## Heads arrive rotated
 
 A second difference, not mentioned in the original note and visible in the
@@ -161,6 +186,44 @@ the rotation.
 Anything converting a Jade head onto a KOTOR body has to correct for that, and
 a head that arrives 90 degrees out is a more obvious failure than one that
 arrives 11% wrong - which is some comfort.
+
+## The whole corpus, not three examples
+
+Three heads were checked by hand and all three worked, which says almost
+nothing about a hundred and fifty. `tools/jade_sweep.py` converts every one and
+builds it onto Carth, and [reports/JADE_SWEEP.md](JADE_SWEEP.md) is what came
+back: **136 of 148 build, and all 148 carry a texture.**
+
+The sweep paid for itself twice over.
+
+**Ten of the 158 are not heads.** `H_Mask01`-`09` are masks - open shells of 78
+to 185 triangles - and `H_Decap01` is a severed stump of 40. They cannot pass a
+check asking whether a surface is closed or faces outward, because they are not
+meant to be either, and counting them as failed heads was ten sensible refusals
+dressed up as breakage. They are their own kind now, still offered.
+
+**The `one piece` check was wrong about hats.** It asked whether an island sat
+inside the largest one's bounding box, which misreads a topknot or an ear that
+reaches past the face. Measured across these heads, every such island *touches*
+- the widest gap is a tenth of the head - while the loose fragments the check
+exists for sit whole model-widths away. Asking about the gap instead fixed
+seven heads and left the original fragment test failing correctly.
+
+### What still does not build, and why it is not a bug
+
+**Six fail on size**, and all six are the wrong *shape* rather than the wrong
+scale: `h_judge01_` and `h_minstr01_` wear hats, `h_girl01_` is wider than she
+is tall because of her pigtails, `h_trogr01_` and `h_trogr05_` are
+troglodytes at 344% and 240% of a human head. Fitting scales by the tightest
+axis, so a head that is wide for its height is shrunk to fit its width and
+ends up too short. A fit that matched *height* and let width overflow would
+take most of these, and is a change to weigh rather than make quietly.
+
+**Six fail on solidity** - under 76% of the surface facing outward, against
+vanilla's worst of 77%. Winding repair runs first and gets them to about 4%
+disagreement, so this is not a winding fault: the geometry genuinely folds back
+on itself, which on `h_piratf01_` and `h_old05_` is layered hair. These are the
+ones where a person should look at the preview and decide.
 
 ## What this means for the tool
 
