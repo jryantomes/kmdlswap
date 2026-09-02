@@ -111,3 +111,51 @@ def test_the_summary_reads_the_same_in_both_places(glb, tmp_path):
     assert any("vertices" in line for line in lines)
     assert any("triangles" in line for line in lines)
     assert any(str(result.pack) in line for line in lines)
+
+
+# --- which way is up --------------------------------------------------------
+#
+# Tested on a real head off the internet: the Lee Perry-Smith scan, 17,684
+# triangles, which needed three corrections none of which could be read off the
+# file. Two heuristics were written to guess them and both were withdrawn.
+
+
+def test_the_gltf_convention_is_what_is_written(glb, tmp_path):
+    """Y-up and `+y` facing, as glTF declares. Usually right, and the manifest
+    is where somebody corrects it when it is not."""
+    import json
+
+    from kmdlfun import glbimport, headpack
+
+    result = glbimport.run(glb(), tmp_path / "pack")
+    data = json.loads((result["pack"] if isinstance(result, dict)
+                       else result.pack) .joinpath(headpack.MANIFEST_NAME)
+                      .read_text())
+
+    assert data["up"] == glbimport.UP == "y"
+    assert data["facing"] == glbimport.FACING == "+y"
+
+
+def test_the_import_says_it_is_assuming_rather_than_knowing(glb, tmp_path):
+    """A silent assumption is the one nobody checks in the preview."""
+    from kmdlfun import glbimport
+
+    result = glbimport.run(glb(), tmp_path / "pack")
+    said = " ".join(result.notes)
+
+    assert "assuming" in said
+    assert "Preview" in said
+
+
+def test_nothing_tries_to_guess_the_orientation():
+    """Both guesses were tried against this project's two corpora of heads,
+    passed, and failed on the first real file.
+
+    "The longest extent is up" fails on a bust, whose shoulders are wider than
+    it is tall. "The furthest point from the vertical axis is the nose" picks
+    the ear on any scan with ears. A heuristic that is right on the models you
+    have and wrong on the next one is worse than none."""
+    from kmdlfun import glbimport
+
+    assert not hasattr(glbimport, "up_axis")
+    assert not hasattr(glbimport, "facing_axis")

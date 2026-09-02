@@ -20,7 +20,10 @@ The engine constraint that shaped the early sessions is **gone**:
 
 ## What the tool does now
 
-Seven tabs, all sharing the log and build button. Folders sit behind a
+Seven tabs, all sharing the log and build button, in **basic** mode by default
+- which hides the Transplant tab and the per-build options, both of which ask
+questions a beginner cannot answer. `Settings > Mode > Advanced` shows
+everything and is remembered in `~/.kmdlfun/prefs.json`. Folders sit behind a
 **Settings** menu; the games are found automatically from Windows' record of
 what is installed (uninstall entries, GOG Galaxy, Epic manifests, the legacy
 BioWare key), then Steam's library index, then on request a walk of every

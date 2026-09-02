@@ -16,7 +16,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 # glTF is Y-up with -Z forward; after the Y-up conversion that lands on +Y,
-# which is where KOTOR characters look.
+# which is where KOTOR characters look. A convention rather than a guarantee,
+# and the manifest is where somebody corrects it.
 UP = "y"
 FACING = "+y"
 DEFAULT_TEXTURE = 512
@@ -101,6 +102,18 @@ def run(file, out, *, name: str | None = None,
     data["up"] = UP
     data["facing"] = FACING
     data["notes"] = f"imported from {source.name}"
+    # Which way a model is up and which way it looks cannot be read off its
+    # geometry, and both guesses have been tried and withdrawn. "The longest
+    # extent is up" holds for every KOTOR and Jade head and fails on the first
+    # real file, a bust whose shoulders are wider than it is tall; "the point
+    # furthest from the vertical axis is the nose" picks the ear on any scan
+    # with ears. glTF declares Y-up, that is usually true, and the preview is
+    # where a wrong guess is caught.
+    result.notes.append(
+        "assuming glTF's Y-up, facing +y. Look at the Preview tab - a head "
+        "that arrives backwards or on its side needs `facing` or `up` changed "
+        "in the pack's manifest"
+    )
     manifest.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     result.files.append(manifest)
 

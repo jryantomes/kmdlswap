@@ -32,6 +32,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from . import effects as keffects
+from . import prefs as kprefs
 from . import roster
 from . import viewport as kviewport
 from .library import build
@@ -163,10 +164,17 @@ class App(ttk.Frame):
         self.donor_labels: dict[str, str] = {}
         self.host_labels: dict[str, str] = {}
 
+        # Anything only an experienced modder needs, collected as it is built
+        # and hidden together. See `_advanced`.
+        self._advanced_widgets: list = []
+        self._advanced_tabs: list = []
+        self.mode = tk.StringVar(value=kprefs.mode())
+
         self._build_paths()
         self._build_tabs()
         self._build_log()
         self._build_actions()
+        self._apply_mode(announce=True)
 
         self.after(100, self._drain)
         self._on_effect_change()
@@ -205,11 +213,71 @@ class App(ttk.Frame):
         # like the app is broken.
         self.after(10, self._detect_installs)
 
+    def _advanced(self, widget):
+        """Mark a control as one a beginner does not need on screen.
+
+        Hidden with `grid_remove`, which keeps every layout option, so showing
+        it again puts it back where it was rather than at the end of its row.
+        Returns the widget so it can be wrapped around a call inline.
+        """
+        self._advanced_widgets.append(widget)
+        return widget
+
+    def _advanced_tab(self, page, label: str):
+        """A whole tab that belongs to advanced mode.
+
+        Shown and hidden through the tab's own `state`, not `hide()` and
+        `add()`: hiding that way is easy and *un*-hiding appends the tab to the
+        end, so a notebook would quietly reorder itself every time somebody
+        changed the setting. Setting the state leaves it where it was.
+        """
+        self._advanced_tabs.append((page, label))
+        return page
+
+    def _apply_mode(self, *, announce: bool = False):
+        basic = self.mode.get() != kprefs.ADVANCED
+
+        for widget in self._advanced_widgets:
+            try:
+                if basic:
+                    widget.grid_remove()
+                else:
+                    widget.grid()
+            except tk.TclError:
+                continue                # a destroyed window is not an error
+
+        for page, _label in self._advanced_tabs:
+            try:
+                self.tabs.tab(page, state="hidden" if basic else "normal")
+            except tk.TclError:
+                continue
+
+        if announce and basic:
+            self._note("Basic mode. Settings > Mode > Advanced shows the "
+                       "transplant tab and the per-build options.")
+
+    def _on_mode_change(self):
+        # Written only when somebody chooses, never on the way up. Persisting
+        # from `_apply_mode` would mean every launch - and every test that
+        # builds a window - rewrote the preference it had just read.
+        self._apply_mode()
+        kprefs.remember(kprefs.MODE, self.mode.get())
+        self._say(f"{self.mode.get()} mode")
+
     def _build_menu(self):
         master = self.winfo_toplevel()
         menubar = tk.Menu(master)
 
         settings = tk.Menu(menubar, tearoff=0)
+        mode = tk.Menu(settings, tearoff=0)
+        mode.add_radiobutton(label="Basic - the usual way in",
+                             value=kprefs.BASIC, variable=self.mode,
+                             command=self._on_mode_change)
+        mode.add_radiobutton(label="Advanced - every control",
+                             value=kprefs.ADVANCED, variable=self.mode,
+                             command=self._on_mode_change)
+        settings.add_cascade(label="Mode", menu=mode)
+        settings.add_separator()
         settings.add_command(label="Folders...", command=self._open_settings)
         settings.add_command(label="Find my games",
                              command=lambda: self._detect_installs(deep=False,
@@ -237,6 +305,8 @@ class App(ttk.Frame):
             bits.append(f"{label}: {Path(value).name if value else 'not set'}")
         out = self.out_dir.get().strip()
         bits.append(f"output: {Path(out).name if out else 'not set'}")
+        if getattr(self, "mode", None) is not None:
+            bits.append(f"{self.mode.get()} mode")
         self.where.config(text="   ".join(bits),
                           foreground="#666" if self.install.get().strip()
                           else "#a35")
@@ -451,6 +521,7 @@ class App(ttk.Frame):
     def _build_transplant_tab(self):
         page = ttk.Frame(self.tabs, padding=8)
         self.tabs.add(page, text="Transplant")
+        self._advanced_tab(page, "Transplant")
         page.columnconfigure(1, weight=1)
         page.columnconfigure(3, weight=1)
 
@@ -680,6 +751,7 @@ class App(ttk.Frame):
         """
         page = ttk.Frame(self.tabs, padding=12)
         self.tabs.add(page, text="Upcoming")
+        self._advanced_tab(page, "Upcoming")
         page.columnconfigure(0, weight=1)
 
         ttk.Label(
@@ -747,10 +819,11 @@ class App(ttk.Frame):
         self.head_node_box = ttk.Combobox(page, textvariable=self.head_node,
                                           values=[], width=22)
         self.head_node_box.grid(row=1, column=2, sticky="ew", padx=6, pady=(6, 0))
+        self._advanced(self.head_node_box)
         self.head_node_note = ttk.Label(page, text="", foreground="#666")
         self.head_node_note.grid(row=2, column=0, columnspan=5, sticky="w", pady=(4, 0))
 
-        opts = ttk.Frame(page)
+        opts = self._advanced(ttk.Frame(page))
         opts.grid(row=3, column=0, columnspan=5, sticky="w", pady=(8, 0))
         self.head_decimate = tk.BooleanVar(value=True)
         self.head_fit = tk.BooleanVar(value=True)
@@ -775,7 +848,7 @@ class App(ttk.Frame):
                         variable=self.head_reshape).grid(
             row=2, column=0, columnspan=5, sticky="w", pady=(4, 0))
 
-        crop = ttk.Frame(page)
+        crop = self._advanced(ttk.Frame(page))
         crop.grid(row=4, column=0, columnspan=5, sticky="w", pady=(6, 0))
         self.head_crop_on = tk.BooleanVar(value=False)
         ttk.Checkbutton(crop, text="Crop below", variable=self.head_crop_on).pack(
@@ -1234,7 +1307,7 @@ class App(ttk.Frame):
                         variable=self.lip_replies).grid(row=0, column=1,
                                                         sticky="w", padx=(16, 0))
 
-        force = ttk.Frame(page)
+        force = self._advanced(ttk.Frame(page))
         force.grid(row=4, column=0, columnspan=4, sticky="w", pady=(6, 0))
         self.lip_force_on = tk.BooleanVar(value=False)
         ttk.Checkbutton(force, text="Force every line to",
@@ -2681,6 +2754,19 @@ class App(ttk.Frame):
         line = next((s.strip() for s in reversed(text.splitlines()) if s.strip()), "")
         if line:
             self.status.config(text=line[:150])
+
+    def _note(self, text: str):
+        """A hint, in the log but not in the status line.
+
+        `_say` doubles as the status line, which is right for the result of
+        something somebody asked for and wrong for a passive remark: a note
+        about the current mode should not sit where "preview only: 1/1 would
+        transfer" belongs.
+        """
+        self.log.configure(state="normal")
+        self.log.insert("end", text + "\n")
+        self.log.see("end")
+        self.log.configure(state="disabled")
 
     def _say(self, text: str):
         self.log.configure(state="normal")

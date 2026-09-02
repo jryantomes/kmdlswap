@@ -529,6 +529,72 @@ that is not this one.
       slow enough to be annoying, say so — the folder layout was chosen to
       avoid exactly that and it is worth knowing if it did not.
 
+## 25. Basic and advanced mode
+
+The window opens in **basic** mode. It hides the Transplant tab, the Upcoming
+tab, the Custom head options block (decimate, fit, repair, hide, reshape), the
+crop row, the head-node box and the Lips forced-length row. `Settings ▸ Mode ▸
+Advanced` shows everything and is remembered in `~/.kmdlfun/prefs.json`.
+
+Hidden is not switched off: the defaults behind those controls still apply, and
+they are the ones the app's own routes rely on.
+
+- [ ] **You will land in basic mode on the next launch** and the Transplant tab
+      will be missing. That is the feature, not a fault — switch to Advanced
+      once and it stays.
+- [ ] Switch to Advanced and back. Transplant should return to the **front**
+      of the tabs and Upcoming to the end, not both appended — a notebook that
+      reorders itself when you change a setting is worse than one with a tab
+      missing.
+- [ ] In basic mode, import a Jade head and build it. The whole path should
+      work without the hidden options, because their defaults are right.
+- [ ] Sit somebody who has never modded in front of basic mode and see how far
+      they get on the Character tab without asking you. That is the only test
+      of this that means anything, and it is the one I cannot run.
+
+## 26. A real head off the internet
+
+Tested end to end on the Lee Perry-Smith scan (CC-BY, Infinite Realities) from
+the three.js repository: 9,279 vertices, 17,684 triangles, with its colour map
+as a separate file. It built onto Carth and it looks like a person.
+
+It took three corrections, and **none of them could be worked out from the
+file**:
+
+1. It is a **bust** - head, neck and shoulders - so its bounding box is far
+   wider than a head node and fitting shrank it to 57%. **Crop below 0.45**
+   removes the shoulders. That option exists for exactly this and this is the
+   first time it has been needed.
+2. It **faces away**. `facing` had to become `-y` in the pack's manifest.
+3. Its 17,684 triangles need decimating to 690, which the importer now sets
+   automatically because the pack is over budget.
+
+- [ ] Repeat it: `kmdlfun import <a .glb> --out packs/x`, then build with crop
+      and fit. Any CC-licensed head scan will do.
+- [ ] **Look at the Preview tab before building.** Two of the three corrections
+      above are only visible there - a head that arrives backwards or lying
+      down is not something any check can catch, because a bounding box is the
+      same whichever way it faces.
+- [ ] If a `.glb` has no embedded texture, drop a single `.tga` into the pack
+      folder yourself. Its filename becomes the resref.
+- [ ] Try a bare head rather than a bust and confirm it needs no crop.
+
+### Why the app does not guess `up` and `facing`
+
+Both were tried during this test and both were withdrawn, which is worth
+knowing before anybody tries again:
+
+- *"The longest extent is up"* holds for every KOTOR head and every Jade head -
+  two whole corpora - and fails on the first real file, because a bust's
+  shoulders are wider than it is tall.
+- *"The point furthest from the vertical axis at mid-height is the nose"* gives
+  the right answer on a KOTOR head and a Jade head, and picks the **ear** on
+  any scan with ears.
+
+glTF declares Y-up, that is usually right, and the preview is where a wrong
+guess gets caught. A heuristic that is right on the models you already have and
+wrong on the next one is worse than no heuristic.
+
 ---
 
 ## Housekeeping

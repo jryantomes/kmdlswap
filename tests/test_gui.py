@@ -1692,3 +1692,122 @@ def test_an_unknown_size_changes_nothing(app):
     app.head_decimate.set(True)
     app._suggest_budget(0)
     assert app.head_decimate.get()
+
+
+# --- basic and advanced -----------------------------------------------------
+#
+# The window grew fifteen controls on the Transplant tab alone, every one of
+# them a question somebody new to modding cannot answer. Basic mode hides the
+# parts that assume you already know the format; the Character tab reaches the
+# same place without asking any of them.
+
+
+def visible_tabs(app):
+    return [app.tabs.tab(i, "text") for i in app.tabs.tabs()
+            if app.tabs.tab(i, "state") != "hidden"]
+
+
+def test_basic_mode_hides_the_tabs_that_ask_hard_questions(app):
+    from kmdlfun import prefs
+
+    app.mode.set(prefs.BASIC)
+    app._apply_mode()
+    shown = visible_tabs(app)
+
+    assert "Transplant" not in shown, "it asks for a target node by name"
+    assert "Upcoming" not in shown, "a roadmap is noise when you want a character"
+    # And the way in is still there.
+    assert "Character" in shown
+    assert "Custom head" in shown
+    assert "Builds" in shown
+
+
+def test_advanced_mode_brings_them_back_in_the_same_order(app):
+    """Un-hiding by re-adding appends the tab, so a notebook would quietly
+    reorder itself every time somebody changed the setting."""
+    from kmdlfun import prefs
+
+    app.mode.set(prefs.ADVANCED)
+    app._apply_mode()
+    shown = visible_tabs(app)
+
+    assert shown[0] == "Transplant", shown
+    assert shown[-1] == "Upcoming", shown
+    assert shown.index("Character") == 1
+
+
+def test_the_dense_options_hide_and_come_back(app):
+    from kmdlfun import prefs
+
+    assert app._advanced_widgets, "nothing was marked as advanced"
+
+    # `grid_info()` rather than `winfo_ismapped()`: a test root is never
+    # mapped, so nothing is ever "mapped" and the check would pass in basic
+    # mode for the wrong reason and fail in advanced for another.
+    app.mode.set(prefs.BASIC)
+    app._apply_mode()
+    assert not any(w.grid_info() for w in app._advanced_widgets)
+
+    app.mode.set(prefs.ADVANCED)
+    app._apply_mode()
+    assert all(w.grid_info() for w in app._advanced_widgets)
+
+
+def test_hiding_a_control_does_not_lose_its_setting(app):
+    """Decimation and fit still apply in basic mode - they are hidden, not
+    switched off, and their defaults are what the app itself relies on."""
+    from kmdlfun import prefs
+
+    app.head_fit.set(True)
+    app.head_repair.set(True)
+    app.mode.set(prefs.BASIC)
+    app._apply_mode()
+
+    assert app.head_fit.get() is True
+    assert app.head_repair.get() is True
+
+
+def test_the_mode_is_offered_in_the_menu(app):
+    labels = []
+    menu = app.settings_menu
+    for i in range(menu.index("end") + 1):
+        try:
+            labels.append(menu.entrycget(i, "label"))
+        except Exception:
+            labels.append(None)
+
+    assert "Mode" in labels
+
+
+def test_the_status_line_says_which_mode(app):
+    from kmdlfun import prefs
+
+    app.mode.set(prefs.BASIC)
+    app._say_where()
+    assert "basic" in app.where.cget("text")
+
+    app.mode.set(prefs.ADVANCED)
+    app._say_where()
+    assert "advanced" in app.where.cget("text")
+
+
+def test_a_passive_hint_does_not_overwrite_the_status_line(app):
+    """`_say` doubles as the status line, which is right for the result of
+    something somebody asked for and wrong for a remark about the mode."""
+    app.status.config(text="Ready")
+    app._note("just a hint")
+
+    assert app.status.cget("text") == "Ready"
+    assert "just a hint" in app.log.get("1.0", "end")
+
+
+def test_startup_does_not_rewrite_the_preference(app):
+    """Every launch, and every test that builds a window, would otherwise
+    rewrite the preference it had just read."""
+    import inspect
+
+    from kmdlfun import gui as kgui
+
+    body = inspect.getsource(kgui.App._apply_mode)
+    assert "remember" not in body, body
+    assert "remember" in inspect.getsource(kgui.App._on_mode_change)
