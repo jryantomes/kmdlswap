@@ -368,6 +368,34 @@ PyKotor remains useful as a format reference and cross-check oracle.
 
 Design & implementation plan: [`docs/BYTE_SURGICAL_DESIGN.md`](docs/BYTE_SURGICAL_DESIGN.md).
 
+## A standalone build
+
+```
+python tools/build_app.py
+```
+
+Produces `dist/kmdlfun/` — about 77 MB, 35 MB zipped — which runs on a Windows
+machine with no Python on it at all. Zip the folder and hand it over; there is
+nothing to install.
+
+It is a folder rather than a single `.exe` deliberately. A one-file build
+unpacks itself into a temporary directory on every launch, and with numpy and
+Tk inside that is several seconds of nothing visible happening, which reads as
+a hang and would be the first thing anybody reported as a bug.
+
+The size is almost entirely other people's libraries: numpy and its BLAS, then
+Pillow, then pykotor — which is the one out of proportion to its use, since it
+is there for four file formats (2DA, GFF, LIP, TPC) and brings five transitive
+packages with it. Replacing it with readers of our own is the only real way to
+make this smaller, and everything else in the bundle is load-bearing.
+
+`kmdlfun.exe --selftest` exercises every bundled dependency and writes the
+result beside the executable. That check matters more than it sounds: a bundled
+app fails at *runtime*, not at build time, because anything resolved by name
+rather than imported by name is invisible to the bundler — and pykotor picks
+its format readers by resource type. The build script runs it automatically and
+refuses a build that starts but cannot work.
+
 ## Licence
 
 GPL-3.0-or-later. The full text is in `LICENSE`.
