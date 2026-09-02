@@ -24,22 +24,43 @@ and anything matching `rfk_*`, `c_rfk_*`, `q_rfk_*`.
 
 ## 1. Tangent lighting — the one with no substitute
 
-**Why it matters.** The tangent basis was reverse-engineered this session and
-its *sign* was measured, not derived. A flipped tangent looks identical in every
-viewer and renders wrongly in game. Nothing offline can tell the difference.
+**What is already established.** The basis was reverse-engineered and its sign
+*measured against vanilla*, not guessed. `compute` agrees **positively with
+BioWare's own tangents, better than +0.8** on every mesh that carries the
+column, and the slot order (bitangent, tangent, normal) was read off five of
+them. So the convention is anchored. What that cannot show is whether the
+engine renders a basis computed for *new* geometry, and a flipped tangent is
+invisible in any viewer.
+
+**An A/B kit is built and waiting in `out_tangent_test/`.** Two copies of Carth's
+head on a Selkath body, identical in every byte except the sign of 2,274
+tangent vectors. This project's own previewer renders them **pixel for pixel
+identically** — which is the whole reason the test needs the game.
+
+Rebuild it any time with:
 
 ```bash
-kmdlfun transplant --install "<K1>" --host n_selkath --donor p_carthh --fit --out out_fun/
+python tools/flip_tangents.py <a build folder> --out <dir>
 ```
 
-- [ ] **Selkath host, human head.** Load and look at the face under a moving
-      light. Bump detail should look *lit*, not inverted - highlights where the
-      light is, not opposite it.
-- [ ] **A second tangent host** (`n_rakata`, `n_xorh`, `twilek_m`,
-      `c_rakghoul`) to confirm it is not one model's quirk.
+- [ ] Install `A_ours` into Override, go to **Manaan** — Ahto City is full of
+      Selkath and brightly lit — and walk around one so the light crosses its
+      face. Screenshot from a fixed spot.
+- [ ] Install `B_flipped` over it and look again from the same spot.
+- [ ] **If one looks wrong, the other is right.** Wrong looks like highlights
+      on the opposite side from the light, detail reading inside-out or sunken
+      where it should be raised, a face going flat or greasy as the camera
+      moves. A looking right is the expected result; B looking right means the
+      sign is inverted in the tool and every tangent-bearing model it has
+      written is wrong.
+- [ ] **If they look the same**, tangents are doing no visible work on this
+      model and the test says nothing. Try `n_rakata`, `twilek_m`, `n_xorh` or
+      `c_rakghoul` — the other four that carry the column.
 
-**Failure looks like:** surface detail that seems inside-out or lit from the
-wrong side; a face that reads flat or oddly greasy as the camera moves.
+The point of the pair is that judging one head alone asks "does this look
+right", which is an opinion about a face you have never seen lit. Judging two
+that differ in exactly one sign asks "which of these is wrong", which is an
+observation.
 
 ## 2. The heads that were unreachable until now
 
