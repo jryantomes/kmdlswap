@@ -38,7 +38,11 @@ MANIFEST_NAME = "head.json"
 
 VALID_FACING = ("+y", "-y", "+x", "-x")
 VALID_ANCHOR = ("chin", "centre", "center")
-VALID_UP = ("z", "y")
+# `x` joined these when a real scan turned up using it - the Lee Perry-Smith
+# head is X-up, and `orient` had been ignoring the axis rather than refusing
+# it. A manifest value the writer accepts and the reader does nothing with is
+# the worst of the three options.
+VALID_UP = ("z", "y", "x")
 
 
 @dataclass

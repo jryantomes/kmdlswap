@@ -122,3 +122,39 @@ def test_generation_is_deterministic(tmp_path):
     a = headgen.build_pack(tmp_path / "a")
     b = headgen.build_pack(tmp_path / "b")
     assert (a / "head.obj").read_bytes() == (b / "head.obj").read_bytes()
+
+
+def test_every_up_axis_is_acted_on():
+    """`x` used to fall through silently, so a pack declaring it was treated as
+    already Z-up - the manifest accepted a value the code ignored, and the head
+    merely came out the wrong size with nothing saying why."""
+    from kmdlfun import headgen
+
+    box = [(1.0, 0.0, 0.0), (0.0, 2.0, 0.0), (0.0, 0.0, 3.0)]
+
+    assert headgen.orient(box, up="z") == box
+    assert headgen.orient(box, up="y") != box
+    assert headgen.orient(box, up="x") != box, "x was ignored"
+
+
+def test_the_up_rotations_do_not_mirror():
+    """A reflection maps the axis just as well and turns the head inside out."""
+    import numpy as np
+
+    from kmdlfun import headgen
+
+    basis = [(1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)]
+    for up in ("y", "x"):
+        moved = np.asarray(headgen.orient(basis, up=up), dtype=float)
+        assert np.linalg.det(moved) == pytest.approx(1.0), up
+
+
+def test_the_tallest_axis_ends_up_as_z():
+    from kmdlfun import headgen
+
+    # A head twice as tall as it is wide, lying along X.
+    tall_x = [(0.0, 0.0, 0.0), (2.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)]
+    moved = headgen.orient(tall_x, up="x")
+    span = [max(p[i] for p in moved) - min(p[i] for p in moved) for i in range(3)]
+
+    assert span[2] == max(span), span

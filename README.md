@@ -129,6 +129,15 @@ kmdlfun render     p_hk47 --install "<K1>" --textured --turntable 24 --out spin.
 
 ### The app
 
+**Basic and advanced.** The window opens in basic mode, which hides the parts
+that assume you already know the format: the Transplant tab, which asks for a
+host, a donor and two node names, and the per-build options for decimation,
+cropping, winding repair and reshaping. What is left is the path a new modder
+wants — pick a body, a wardrobe and a head, or bring one in from a `.glb` or
+from Jade Empire, and build it. `Settings ▸ Mode ▸ Advanced` shows everything,
+and the choice is remembered. Nothing is switched off by hiding it; the
+defaults behind those controls are the ones the app relies on anyway.
+
 Seven tabs sharing the log and build button. The folders live behind
 **Settings** rather than on screen: the app finds the games itself at startup, from
 Windows' own record of what is installed — uninstall entries, GOG Galaxy's
@@ -175,7 +184,11 @@ which looks like a texture fault and is not one.
 fitting, winding repair and cropping. A pack is checked before anything is
 built, and a failure names the check. **Import .glb** turns a sculpt, a scan or
 a Blender export into a pack and selects it, so anything that can reach glTF
-can reach KOTOR. **From Jade Empire** does the same for that game's own models
+can reach KOTOR. A `.glb` arrives with glTF's declared Y-up and `+y` facing,
+which is usually right and sometimes not: whether a head is upright and which
+way it looks cannot be read off its geometry, so the Preview tab is where a
+wrong one is caught and the pack's manifest is where it is corrected. **From
+Jade Empire** does the same for that game's own models
 — 158 heads and 112 bodies, picked from a grid of faces, rotated upright and
 scaled on the way in.
 

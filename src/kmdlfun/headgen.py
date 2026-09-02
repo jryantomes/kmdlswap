@@ -299,10 +299,21 @@ def orient(positions, facing: str = "+y", up: str = "z"):
 
     `up` handles the other common mismatch: many tools export Y-up, where KOTOR
     is Z-up, and a head exported that way arrives lying on its back.
+
+    All three axes are handled. `x` used to fall through silently, so a pack
+    declaring it was quietly treated as already Z-up - the manifest accepted a
+    value the code ignored, which is worse than rejecting it, because the head
+    then merely comes out the wrong size and nothing says why.
+
+    Both rotations have determinant +1. A reflection would map the axis just as
+    well and turn the head inside out.
     """
     out = list(positions)
-    if up.lower() == "y":
+    axis = up.lower()
+    if axis == "y":
         out = [(x, -z, y) for (x, y, z) in out]
+    elif axis == "x":
+        out = [(-z, y, x) for (x, y, z) in out]
     degrees = FACING_TO_DEGREES.get(facing.lower(), 0.0)
     if degrees:
         a = math.radians(degrees)
