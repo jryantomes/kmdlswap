@@ -356,3 +356,89 @@ def test_a_model_with_unique_node_names_has_no_donors(pair):
     for name in ("p_hk47", "p_carthh", "c_dewback"):
         idx.add(kc.describe(kl.parse(*pair(name)), name))
     assert idx.donors_for("p_hk47") == []
+
+
+# --- the standalone build ---------------------------------------------------
+#
+# A bundled app fails at *runtime*, not at build time: anything resolved by
+# name rather than imported by name is invisible to PyInstaller's analysis, and
+# pykotor picks its format readers by resource type. So the app carries a
+# self-test, and these check the self-test itself is honest.
+
+
+def _launcher():
+    import sys
+    from pathlib import Path
+
+    tools = str(Path(__file__).resolve().parent.parent / "tools")
+    if tools not in sys.path:
+        sys.path.insert(0, tools)
+    import app
+
+    return app
+
+
+def test_the_launcher_has_a_selftest():
+    app = _launcher()
+    assert callable(app.selftest)
+    assert callable(app.main)
+
+
+def test_the_selftest_exercises_every_bundled_dependency():
+    """Naming them is the point. A build that starts and then cannot read a
+    2DA is worse than one that does not start at all."""
+    import inspect
+
+    body = inspect.getsource(_launcher().selftest)
+    for needed in ("numpy", "PIL", "tkinter", "twoda", "gff", "lip",
+                   "kmdlswap", "jade", "installs"):
+        assert needed in body, needed
+
+
+def test_the_selftest_passes_here():
+    """If it cannot pass unfrozen it will certainly not pass frozen."""
+    assert _launcher().selftest() == 0
+
+
+def test_a_failure_to_start_is_shown_rather_than_swallowed():
+    """A windowed build has no console, so a traceback that reaches stderr is
+    lost and the app looks like it silently refused to start."""
+    import inspect
+
+    body = inspect.getsource(_launcher().main)
+    assert "format_exc" in body
+    assert "crash" in body.lower()
+
+
+def test_the_spec_ships_a_folder_not_a_single_file():
+    """A one-file build unpacks itself on every launch; with numpy and Tk
+    inside that is several seconds of nothing, which reads as a hang."""
+    from pathlib import Path
+
+    spec = (Path(__file__).resolve().parent.parent / "kmdlfun.spec").read_text()
+
+    assert "COLLECT(" in spec, "not a one-folder build"
+    assert "exclude_binaries=True" in spec
+    assert "console=False" in spec, "a window should not drag a terminal behind it"
+    assert 'collect_submodules("pykotor")' in spec, (
+        "pykotor resolves formats at runtime and has to be named"
+    )
+    for unwanted in ("pytest", "pip", "PyInstaller"):
+        assert unwanted in spec.split("excludes=")[1][:200], (
+            f"{unwanted} should not ship inside the app"
+        )
+
+
+def test_the_build_tool_is_not_a_runtime_dependency():
+    """Nobody should have to install PyInstaller to *use* the app."""
+    import tomllib
+    from pathlib import Path
+
+    data = tomllib.loads(
+        (Path(__file__).resolve().parent.parent / "pyproject.toml").read_text())
+    runtime = " ".join(data["project"]["dependencies"]).lower()
+
+    assert "pyinstaller" not in runtime
+    assert "pytest" not in runtime
+    assert "pyinstaller" in " ".join(
+        data["project"]["optional-dependencies"]["build"]).lower()

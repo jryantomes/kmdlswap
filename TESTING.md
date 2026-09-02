@@ -498,6 +498,32 @@ bones and placement within 0.013. **None of it has been in the game.**
       texture, not a conversion fault — the `GH` in the name appears to mark
       them.
 
+## 24. The standalone build
+
+`python tools/build_app.py` produces `dist/kmdlfun/`, 77 MB, which needs no
+Python installed. The build script self-tests it and refuses one that starts
+but cannot work.
+
+Confirmed here: it builds, the self-test passes on all nine checks including
+pykotor's dynamically resolved format readers, and the window opens. **What has
+not been confirmed is the only thing that matters** — that it runs on a machine
+that is not this one.
+
+- [ ] Zip `dist/kmdlfun/` and copy it to a machine with **no Python** on it.
+      Run `kmdlfun.exe`. This is the whole point and the only test that counts;
+      everything works here because everything is already installed here.
+- [ ] On that machine, run `kmdlfun.exe --selftest` first. It writes
+      `kmdlfun-selftest.txt` beside the executable, and it will name what is
+      missing far more clearly than a window that fails to open.
+- [ ] Check it finds the games on that machine, or that Settings can be pointed
+      at them by hand if the games are not installed there.
+- [ ] Expect Windows SmartScreen or antivirus to complain about an unsigned
+      executable. That is normal for an unsigned PyInstaller build and not a
+      sign anything is wrong; signing it needs a certificate.
+- [ ] Watch how long the window takes to appear from a cold start. If it is
+      slow enough to be annoying, say so — the folder layout was chosen to
+      avoid exactly that and it is worth knowing if it did not.
+
 ---
 
 ## Housekeeping

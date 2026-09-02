@@ -41,3 +41,9 @@ dist/
 
 # Personal Claude Code permissions - machine-local, not the project's business
 .claude/settings.local.json
+
+# Bundled builds. 76MB of somebody else's libraries, reproducible from the
+# spec in one command, and not the kind of thing a repository should carry.
+/dist/
+/build/
+*.spec.bak
