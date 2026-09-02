@@ -1266,8 +1266,9 @@ def test_importing_selects_the_pack_it_just_made(app, tmp_path):
 
     kind, payload = app.events.get_nowait()
     assert kind == "imported", payload
-    pack, lines = payload
+    pack, lines, triangles = payload
     assert pack == out
+    assert triangles > 0, "the budget cannot follow a pack of unknown size"
     assert (Path(out) / "head.obj").is_file()
     assert any("vertices" in line for line in lines)
 
@@ -1654,8 +1655,9 @@ def test_converting_a_jade_model_writes_a_pack_and_selects_it(app, tmp_path):
 
     kind, payload = app.events.get_nowait()
     assert kind == "imported", payload
-    pack, lines = payload
+    pack, lines, triangles = payload
     assert pack == out
+    assert triangles > 0
     assert (Path(out) / "head.obj").is_file()
     assert any("triangles" in line for line in lines)
 
@@ -1668,3 +1670,25 @@ def test_the_jade_workers_touch_no_tk_variable(app):
     assert ".get()" not in inspect.getsource(kgui.App._jade_work)
     body = inspect.getsource(kgui.App._draw_jade)
     assert ".get()" not in body[body.index("def work()"):]
+
+
+def test_a_pack_already_within_budget_is_not_decimated(app):
+    """The 690 default suits a photogrammetry head of three or four thousand
+    triangles. A Jade head arrives at about 1100 - inside what the game ships -
+    and reducing it anyway throws away the geometry holding the eyes and mouth.
+    It looks like a texture fault and is not one."""
+    from kmdlfun import headspec
+
+    app.head_decimate.set(True)
+    app._suggest_budget(1137)
+    assert not app.head_decimate.get()
+
+    app.head_decimate.set(True)
+    app._suggest_budget(headspec.TRIANGLES_WARN + 1)
+    assert app.head_decimate.get(), "an oversized pack still needs reducing"
+
+
+def test_an_unknown_size_changes_nothing(app):
+    app.head_decimate.set(True)
+    app._suggest_budget(0)
+    assert app.head_decimate.get()

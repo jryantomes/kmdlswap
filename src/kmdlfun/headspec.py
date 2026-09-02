@@ -91,6 +91,66 @@ def _weld(positions):
     return [first.setdefault(p, i) for i, p in enumerate(positions)]
 
 
+def loose_islands(mesh: ObjMesh) -> int:
+    """Islands that sit outside the main one - fragments rather than features.
+
+    The component count alone cannot tell a floating blob from a pair of eyes.
+    KOTOR keeps eyes, teeth and hair in *separate nodes*, so a vanilla head
+    mesh really is one or two pieces and anything else is debris; but a head
+    from elsewhere may carry them as islands inside a single mesh, and Jade
+    Empire's do - 84 of its 158 heads have exactly six pieces, which is a face
+    plus two eyes plus teeth, all inside the head.
+
+    So the question worth asking is not how many islands there are but whether
+    any of them is somewhere the head is not. An island wholly inside the main
+    island's bounding box is a feature; one hanging outside it is the failure
+    this check was written for.
+    """
+    weld = _weld(mesh.positions)
+    adjacency = collections.defaultdict(set)
+    for f in mesh.faces:
+        a, b, c = (weld[i] for i in f)
+        if a == b or b == c or a == c:
+            continue
+        adjacency[a] |= {b, c}
+        adjacency[b] |= {a, c}
+        adjacency[c] |= {a, b}
+
+    seen: set = set()
+    groups = []
+    for v in adjacency:
+        if v in seen:
+            continue
+        stack, group = [v], []
+        while stack:
+            x = stack.pop()
+            if x in seen:
+                continue
+            seen.add(x)
+            group.append(x)
+            stack.extend(adjacency[x] - seen)
+        groups.append(group)
+    if len(groups) <= 1:
+        return 0
+
+    def box(group):
+        points = [mesh.positions[i] for i in group]
+        return ([min(p[i] for p in points) for i in range(3)],
+                [max(p[i] for p in points) for i in range(3)])
+
+    groups.sort(key=len, reverse=True)
+    lo, hi = box(groups[0])
+    slack = max(hi[i] - lo[i] for i in range(3)) * 0.02
+
+    loose = 0
+    for group in groups[1:]:
+        glo, ghi = box(group)
+        if any(glo[i] < lo[i] - slack or ghi[i] > hi[i] + slack
+               for i in range(3)):
+            loose += 1
+    return loose
+
+
 def topology(mesh: ObjMesh):
     """Connected components, boundary-edge share and degenerate faces."""
     weld = _weld(mesh.positions)
@@ -160,16 +220,24 @@ def check_mesh(mesh: ObjMesh) -> Verdict:
 
     components, share, degenerate, boundary, total_edges = topology(mesh)
 
+    loose = loose_islands(mesh) if components > MAX_COMPONENTS_OK else 0
     if components <= MAX_COMPONENTS_OK:
         v.add("pass", "one piece", f"{components} connected component(s)")
-    elif components <= MAX_COMPONENTS_WARN:
+    elif not loose:
+        # Every extra island is inside the head: eyes, teeth, brows. That is
+        # how a head authored as one mesh looks, and it is not the failure this
+        # check exists for.
+        v.add("pass", "one piece",
+              f"{components} pieces, all inside the head - eyes and teeth "
+              f"rather than loose fragments")
+    elif loose <= MAX_COMPONENTS_WARN - MAX_COMPONENTS_OK:
         v.add("warn", "one piece",
-              f"{components} components; vanilla heads have at most "
-              f"{MAX_COMPONENTS_OK}. Loose fragments float beside the model")
+              f"{components} pieces, {loose} of them outside the head. "
+              f"Loose fragments float beside the model")
     else:
         v.add("fail", "one piece",
-              f"{components} disconnected pieces; vanilla heads have at most "
-              f"{MAX_COMPONENTS_OK}. Delete loose geometry and keep the largest island")
+              f"{components} pieces, {loose} of them outside the head. "
+              f"Delete the loose geometry and keep the head")
 
     if share <= BOUNDARY_OK:
         v.add("pass", "closed", f"{share:.1%} of edges are open ({boundary}/{total_edges})")

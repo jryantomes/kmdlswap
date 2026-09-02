@@ -6,8 +6,15 @@ integration contributors, supplied to this project by its author on 2026-09-02.
 GPL-3.0-or-later, the same licence as this project - which is the reason the
 code can be used here at all rather than only its findings.
 
-Only the format layer is vendored: `mdl`, `binary`, `specialized` and
-`controllers` reach no further than each other and import no `bpy`. The rest of
+Only the format layer is vendored: `mdl`, `binary`, `specialized`,
+`controllers` and `txb` reach no further than each other and import no `bpy`.
+`txb` is the texture decoder - swizzling and DXT, which is exactly the kind of
+thing worth taking rather than rewriting.
+
+`mab`, the material format, is deliberately *not* here: it would drag in 1607
+lines of shader-path tables for the sake of one string, and that string sits at
+a fixed offset. `kmdlfun.jade` reads it directly, with a test that checks the
+rule against all 1607 materials in the game. The rest of
 the add-on - its Blender operators, its writers, its texture and walkmesh
 conversion - is not here.
 
@@ -17,3 +24,4 @@ rest of the tool uses.
 """
 
 from .mdl import JadeModel, is_jade_mdl, parse_jade_mdl   # noqa: F401
+from .txb import parse_txb_bytes, tga_bytes                # noqa: F401
