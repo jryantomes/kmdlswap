@@ -2088,20 +2088,50 @@ class App(ttk.Frame):
             from . import jade as kjade
 
             result = kjade.to_pack(entry, out, scale=scale)
+            wears = result["texture"] or "none - it wears the host's"
             lines = [
                 f"{result['resref']}",
                 f"  vertices  {result['vertices']}",
                 f"  triangles {result['triangles']}",
                 f"  uvs       {result['uvs'] or 'NONE - it will render untextured'}",
+                f"  texture   {wears}",
                 f"  scale     x{scale:.2f}, rotated upright",
             ]
             lines.extend(f"  note: {n}" for n in result["notes"])
             lines.append(f"wrote a head pack to {result['pack']}")
             lines.append("Build it onto a host with Fit ticked - the geometry "
                          "arrives at Jade's origin, not the head node's.")
-            self.events.put(("imported", (out, lines)))
+            self.events.put(("imported", (out, lines, result["triangles"])))
         except Exception as exc:  # noqa: BLE001
             self.events.put(("error", f"{type(exc).__name__}: {exc}"))
+
+    def _suggest_budget(self, triangles: int):
+        """Only decimate a pack that needs it.
+
+        The 690 default suits a photogrammetry head arriving with three or four
+        thousand triangles. A Jade head arrives with about 1100, comfortably
+        inside what the game ships - vanilla heads run 440 to 796 and the check
+        does not complain below 1500 - and reducing it to 690 anyway throws
+        away the geometry that holds the eyes and the mouth. It looks like the
+        texture is wrong; it is not, the surface simply no longer has the
+        resolution the texture was painted for.
+        """
+        from . import headspec
+
+        if not triangles:
+            return
+        if triangles <= headspec.TRIANGLES_WARN:
+            if self.head_decimate.get():
+                self.head_decimate.set(False)
+                self._say(f"decimation off: {triangles} triangles is already "
+                          f"within what the game ships (vanilla heads run "
+                          f"{headspec.TRIANGLES_TYPICAL[0]}-"
+                          f"{headspec.TRIANGLES_TYPICAL[1]}, and the check "
+                          f"allows {headspec.TRIANGLES_WARN})")
+        else:
+            self.head_decimate.set(True)
+            self._say(f"decimation on: {triangles} triangles is more than the "
+                      f"{headspec.TRIANGLES_WARN} the check allows")
 
     def _import_glb(self):
         """Turn a .glb into a pack folder and select it, in one step.
@@ -2138,7 +2168,7 @@ class App(ttk.Frame):
             # Selecting it is the point: the next thing anyone does with a
             # pack is build it, and retyping the path is the step that gets
             # skipped and then blamed on the importer.
-            self.events.put(("imported", (out, lines)))
+            self.events.put(("imported", (out, lines, result.triangles)))
         except Exception as exc:  # noqa: BLE001
             self.events.put(("error", f"{type(exc).__name__}: {exc}"))
 
@@ -3296,10 +3326,11 @@ class App(ttk.Frame):
                 elif kind == "jade_thumb":
                     self._show_jade_thumb(*payload)
                 elif kind == "imported":
-                    pack, lines = payload
+                    pack, lines, triangles = payload
                     self.pack_dir.set(pack)
                     for line in lines:
                         self._say(line)
+                    self._suggest_budget(triangles)
                     self.build_btn.config(state="normal")
                 elif kind == "wardrobe":
                     self._show_wardrobe(payload)

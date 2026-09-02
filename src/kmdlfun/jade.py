@@ -49,6 +49,16 @@ TO_KOTOR = np.array([
 
 MDL_TYPE = 0x07D2
 MDX_TYPE = 0x0BC8
+MAB_TYPE = 0x0BC3          # material
+TXB_TYPE = 0x0BC9          # texture
+
+# A material names its diffuse texture as a null-terminated string at this
+# offset, straight after the fixed float block. Verified against every one of
+# the 1607 materials in the game - see `test_jade.py`. Scanning for the first
+# printable run instead gets 13% of them wrong, because float bytes are often
+# printable ASCII.
+TEXTURE_NAME_AT = 0x64
+RESREF_STEM = 14           # the field is 16 and the suffix takes two
 RIM_MAGIC = b"RIM V1.0"
 RIM_KEY_SIZE = 32
 
@@ -103,6 +113,7 @@ class Mesh:
     faces: list[tuple[int, int, int]] = field(default_factory=list)
     uvs: list[tuple[float, float]] = field(default_factory=list)
     normals: list[tuple[float, float, float]] = field(default_factory=list)
+    materials: list[int] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
 
     @property
@@ -245,6 +256,9 @@ def mesh(mdl_bytes: bytes, mdx_bytes: bytes | None, *, scale: float = SCALE,
                                  f"{node.name!r}, zeroed")
             world = ((v @ r.T + t) @ rotation.T) * scale
             out.positions.extend(tuple(float(x) for x in row) for row in world)
+            material = getattr(found, "material_id", None)
+            if material and material not in out.materials:
+                out.materials.append(int(material))
             for tri in (found.triangles or ()):
                 a, b, c = tri[:3]
                 out.faces.append((base + a, base + b, base + c))
@@ -283,7 +297,14 @@ def _quaternion(q):
 
 
 def _uvs(found, out: Mesh) -> None:
-    """The first UV layer, if there is one.
+    """The first UV layer, with V turned over.
+
+    Jade's V axis runs the opposite way to the one this project's `.obj`
+    pipeline expects. Left alone, the texture still lands on the head and still
+    looks like skin - the eyes end up near the eyes - so it reads as a slightly
+    wrong model rather than as a flipped coordinate. Settled by rendering the
+    two side by side: one is a scrambled mess, the other is a face with a
+    moustache and a goatee exactly where they belong.
 
     Without UVs a head still builds and renders untextured, which is worth
     saying rather than discovering in game.
@@ -293,14 +314,85 @@ def _uvs(found, out: Mesh) -> None:
         out.notes.append("no UVs - the head will build but render untextured")
         return
     for uv in layers[0]:
-        out.uvs.append((float(uv[0]), float(uv[1])))
+        out.uvs.append((float(uv[0]), 1.0 - float(uv[1])))
+
+
+# --- textures ---------------------------------------------------------------
+#
+# A mesh does not name its texture; it names a material by number, and the
+# material names the texture. Both live in the archives, and both are split the
+# way models are: the material sits beside the MDL in `<area>.rim`, the texture
+# beside the MDX in `<area>-a.rim`.
+
+
+_INDEX: dict[tuple[str, int], dict[str, Source]] = {}
+
+
+def index_of(install, restype: int) -> dict[str, Source]:
+    """Every resource of one type, by resref. Cached - the walk is 1028 files."""
+    key = (str(install), restype)
+    if key in _INDEX:
+        return _INDEX[key]
+
+    root = Path(install) / "data"
+    found: dict[str, Source] = {}
+    if root.is_dir():
+        for archive in sorted(root.rglob("*.rim")):
+            for resref, kind, offset, size in _rim_entries(archive):
+                if kind == restype:
+                    found.setdefault(resref.lower(),
+                                     Source(archive, offset, size))
+    _INDEX[key] = found
+    return found
+
+
+def texture_name(install, material_id: int) -> str | None:
+    """The diffuse texture a material names, or None."""
+    source = index_of(install, MAB_TYPE).get(str(material_id).lower())
+    if source is None:
+        return None
+    raw = source.read()
+    if len(raw) <= TEXTURE_NAME_AT:
+        return None
+    end = raw.find(b"\0", TEXTURE_NAME_AT)
+    if end < 0:
+        return None
+    name = raw[TEXTURE_NAME_AT:end].decode("ascii", "replace").strip()
+    # "NULL" is how the format spells an empty slot.
+    return name if name and name.upper() != "NULL" else None
+
+
+def texture(install, name: str) -> bytes | None:
+    """One texture, decoded to TGA bytes, or None if it is not there."""
+    source = index_of(install, TXB_TYPE).get(name.lower())
+    if source is None:
+        return None
+    from .vendor.jade import parse_txb_bytes, tga_bytes
+
+    try:
+        return tga_bytes(parse_txb_bytes(source.read()))
+    except Exception:  # noqa: BLE001 - an undecodable texture is not fatal
+        return None
+
+
+def texture_for(install, found: Mesh) -> tuple[str, bytes] | None:
+    """The texture a mesh wears: material number, then material, then image."""
+    for material in found.materials:
+        name = texture_name(install, material)
+        if not name:
+            continue
+        data = texture(install, name)
+        if data:
+            return name, data
+    return None
 
 
 # --- into a head pack -------------------------------------------------------
 
 
 def to_pack(entry: Entry, out_dir, *, scale: float = SCALE,
-            name: str | None = None) -> dict:
+            name: str | None = None, install=None,
+            with_texture: bool = True) -> dict:
     """Write a Jade model out as a head pack the Custom head tab can build.
 
     The pack is the same shape a `.glb` import produces, so everything
@@ -321,6 +413,22 @@ def to_pack(entry: Entry, out_dir, *, scale: float = SCALE,
                    uvs=found.uvs or None, normals=found.normals or None,
                    name=out_dir.name)
 
+    # The install is only needed for the texture: a mesh names a material by
+    # number, and both the material and the image it points at live in the
+    # archives rather than in the model.
+    texture_file = None
+    if with_texture:
+        root = install or _install_of(entry)
+        got = texture_for(root, found) if root else None
+        if got:
+            source_name, data = got
+            # The filename becomes the resref, and that field is 16 characters.
+            texture_file = out_dir.name.lower()[:RESREF_STEM] + "01"
+            (out_dir / f"{texture_file}.tga").write_bytes(data)
+            found.notes.append(f"texture {source_name} decoded from .txb")
+        elif found.materials:
+            found.notes.append("no texture found - it will wear the host's")
+
     headpack.write_template(out_dir, name=name or entry.resref)
     manifest = out_dir / headpack.MANIFEST_NAME
     data = json.loads(manifest.read_text(encoding="utf-8"))
@@ -338,8 +446,18 @@ def to_pack(entry: Entry, out_dir, *, scale: float = SCALE,
         "vertices": len(found.positions),
         "triangles": len(found.faces),
         "uvs": len(found.uvs),
+        "texture": texture_file,
         "notes": found.notes,
     }
+
+
+def _install_of(entry: Entry):
+    """The game folder an entry came out of: `<install>/data/<area>/x.rim`."""
+    archive = entry.mdl.archive
+    for parent in archive.parents:
+        if (parent / "chitin.key").is_file():
+            return parent
+    return None
 
 
 # --- pictures ---------------------------------------------------------------

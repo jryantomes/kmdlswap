@@ -233,3 +233,134 @@ def test_a_thumbnail_can_be_drawn_and_is_cached(a_head, tmp_path):
 
     again = jade.thumbnail(a_head, root=tmp_path)
     assert again == first
+
+
+# --- textures ---------------------------------------------------------------
+#
+# A Jade mesh does not name its texture. It names a *material* by number; the
+# material names the texture; and both live in the archives, split the same way
+# models are - material beside the MDL, texture beside the MDX.
+
+
+def test_the_material_names_its_texture(jade_path):
+    """The rule this depends on: the diffuse texture is a null-terminated
+    string at offset 0x64. Verified below against every material in the game."""
+    assert jade.texture_name(jade_path, 13657) == "H_Common01"
+
+
+def test_that_offset_holds_for_every_material_in_the_game(jade_path):
+    """Scanning for the first printable run instead gets 13% of them wrong,
+    because float bytes are frequently printable ASCII - so the rule has to be
+    the offset, and it has to be checked against all of them."""
+    from pathlib import Path
+
+    materials = sorted(Path(jade_path).glob("override/*.mab"))
+    if len(materials) < 100:
+        pytest.skip("this install has no loose materials to check against")
+
+    good = 0
+    for path in materials:
+        raw = path.read_bytes()
+        if len(raw) <= jade.TEXTURE_NAME_AT:
+            continue
+        end = raw.find(b"\0", jade.TEXTURE_NAME_AT)
+        name = raw[jade.TEXTURE_NAME_AT:end].decode("ascii", "replace")
+        # A texture name is a resref: printable, no spaces, sane length.
+        if name and name.isprintable() and " " not in name and len(name) <= 32:
+            good += 1
+    assert good / len(materials) > 0.99, f"{good}/{len(materials)}"
+
+
+def test_an_unknown_material_is_not_an_error(jade_path):
+    assert jade.texture_name(jade_path, 99999999) is None
+
+
+def test_a_texture_decodes_to_an_image(jade_path):
+    import io
+
+    from PIL import Image
+
+    data = jade.texture(jade_path, "H_Common01")
+    assert data, "the texture did not decode"
+
+    image = Image.open(io.BytesIO(data))
+    assert image.size == (256, 256)
+    assert image.mode in ("RGB", "RGBA")
+
+
+def test_a_missing_texture_gives_nothing_rather_than_raising(jade_path):
+    assert jade.texture(jade_path, "no_such_texture_anywhere") is None
+
+
+def test_a_pack_carries_its_texture(a_head, tmp_path):
+    result = jade.to_pack(a_head, tmp_path / "pack")
+
+    assert result["texture"], result["notes"]
+    tga = result["pack"] / f"{result['texture']}.tga"
+    assert tga.is_file() and tga.stat().st_size > 1000
+    assert any("decoded from .txb" in n for n in result["notes"])
+
+
+def test_the_texture_name_fits_a_resref(a_head, tmp_path):
+    """The filename becomes the resref and that field is 16 characters, so a
+    long pack name must not produce one the engine will truncate."""
+    result = jade.to_pack(a_head, tmp_path / "a_very_long_pack_name_indeed")
+
+    assert len(result["texture"]) <= 16, result["texture"]
+
+
+def test_only_one_texture_lands_in_the_pack(a_head, tmp_path):
+    """`headpack` refuses a folder with several and no way to choose."""
+    result = jade.to_pack(a_head, tmp_path / "pack")
+    images = list(result["pack"].glob("*.tga")) + list(result["pack"].glob("*.tpc"))
+
+    assert len(images) == 1
+
+
+def test_the_texture_can_be_declined(a_head, tmp_path):
+    result = jade.to_pack(a_head, tmp_path / "pack", with_texture=False)
+
+    assert result["texture"] is None
+    assert not list(result["pack"].glob("*.tga"))
+
+
+def test_v_runs_the_other_way_from_ours(a_head):
+    """Jade's V axis is upside down against this project's `.obj` pipeline.
+    Left alone the texture still lands on the head and still looks like skin -
+    the eyes end up near the eyes - so it reads as a slightly wrong model
+    rather than as a flipped coordinate, which is why it went unnoticed until
+    the two were rendered side by side."""
+    import tempfile
+    from pathlib import Path
+
+    from kmdlfun.vendor.jade import parse_jade_mdl
+
+    mdl_bytes, mdx_bytes = jade.read(a_head)
+    folder = Path(tempfile.mkdtemp())
+    (folder / "m.mdl").write_bytes(mdl_bytes)
+    (folder / "m.mdx").write_bytes(mdx_bytes)
+    raw = parse_jade_mdl(folder / "m.mdl", folder / "m.mdx")
+    original = next(n.mesh.uv_layers[0] for n in raw.iter_nodes()
+                    if n.mesh is not None and n.mesh.uv_layers)
+
+    converted = jade.mesh(mdl_bytes, mdx_bytes)
+    assert converted.uvs[0][1] == pytest.approx(1.0 - float(original[0][1]))
+    assert converted.uvs[0][0] == pytest.approx(float(original[0][0]))
+
+
+@pytest.mark.slow
+def test_a_textured_jade_head_builds_and_the_texture_travels(a_head, tmp_path,
+                                                             install_path):
+    from kmdlfun import headbuild
+
+    jade.to_pack(a_head, tmp_path / "pack")
+    result = headbuild.run(str(tmp_path / "pack"), install=install_path,
+                           host="p_carthh", node="Head", decimate=690,
+                           repair=True, fit=True, reshape=False, hide=[],
+                           crop=None, build=True)
+    assert result.ok, "\n".join(result.lines)
+    assert result.texture_path is not None
+
+    written = tmp_path / "built"
+    headbuild.write(result, written, "p_carthh")
+    assert list(written.glob("*.tga")), sorted(p.name for p in written.iterdir())

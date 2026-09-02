@@ -460,6 +460,13 @@ Confirmed offline: `h_common01_` converts to 742 vertices and 1137 triangles
 with UVs, and builds onto `p_carthh` with weights transferred across all 16
 bones and placement within 0.013. **None of it has been in the game.**
 
+- [ ] **Decimation is now off for a Jade head, and should stay off.** The 690
+      default suits a photogrammetry head of three or four thousand triangles;
+      a Jade head arrives at about 1100, which is inside what the game ships
+      (vanilla heads run 440-796, and the check allows 1500). Reducing it
+      anyway destroys the geometry the eyes and mouth sit on, and the result
+      looks like a texture fault rather than a resolution one. The importer
+      sets the box for you now - if you tick it back on, expect a smeared face.
 - [ ] Convert `h_common01_` and build it onto `p_carthh` with **Fit ticked**.
       Fit is needed here and is not the shrink you saw on transplants — the
       head arrives at 93% of the node's size, so fitting is a 0.98× nudge that
@@ -476,9 +483,20 @@ bones and placement within 0.013. **None of it has been in the game.**
       If 0.83 is wrong, this is how you find the number that is right.
 - [ ] Convert something with no UVs if you can find one. It should still build
       and say plainly that it will render untextured.
-- [ ] Textures are **not** imported yet — Jade keeps them in its own `.txb`
-      format. A converted head wears the host's texture, which is why the first
-      one will look like Carth's skin on a Jade face.
+- [ ] Some heads still fail the checks. `h_bling02_` is too small (0.153 tall
+      against the node's 0.281) and `h_girl01gh_` is 57% of the node — Jade
+      carries a per-model `scale` in its header that this does not apply, and
+      those are the models where it would matter. Raise the scale box for them
+      rather than assuming they are broken.
+- [ ] **Textures now come across.** A mesh names a material by number, the
+      material names the texture, and the `.txb` is decoded to a `.tga` in the
+      pack. Confirmed offline on three heads: skin, hair, eyes and facial hair
+      all land where they belong. Check one in game — if a face looks like it
+      is wearing its texture sideways, the V axis is the thing to suspect,
+      since it runs opposite to ours and is flipped on the way in.
+- [ ] Some heads are **greyscale** (`h_old01gh_` is). That is Jade's own
+      texture, not a conversion fault — the `GH` in the name appears to mark
+      them.
 
 ---
 

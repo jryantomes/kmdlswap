@@ -236,6 +236,8 @@ def main(argv: list[str] | None = None) -> int:
     jd.add_argument("--out", help="pack folder to create")
     jd.add_argument("--kind", choices=["head", "body", "all"], default="head",
                     help="which models to list (default: heads)")
+    jd.add_argument("--no-texture", action="store_true",
+                    help="skip the texture; the head then wears the host's")
     jd.add_argument("--scale", type=float,
                     help="size correction; the measured default is 0.83, and "
                          "it is a measurement rather than a fact - see "
@@ -920,7 +922,9 @@ def _jade(args) -> int:
 
     scale = args.scale if args.scale is not None else jade.SCALE
     try:
-        result = jade.to_pack(entry, _Path(args.out), scale=scale)
+        result = jade.to_pack(entry, _Path(args.out), scale=scale,
+                              install=install,
+                              with_texture=not args.no_texture)
     except jade.JadeError as exc:
         print(f"kmdlfun: {exc}", file=sys.stderr)
         return 1
@@ -929,6 +933,8 @@ def _jade(args) -> int:
     print(f"  vertices  {result['vertices']}")
     print(f"  triangles {result['triangles']}")
     print(f"  uvs       {result['uvs'] or 'NONE - it will render untextured'}")
+    wears = result["texture"] or "none - it will wear the host's"
+    print(f"  texture   {wears}")
     print(f"  scale     x{scale} , rotated upright")
     for note in result["notes"]:
         print(f"  note: {note}")

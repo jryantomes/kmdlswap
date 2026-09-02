@@ -166,6 +166,11 @@ pairings are read rather than guessed — every `modeltype B` row names both a
 `race` and a `normalhead`, so the tool can say which combinations the game
 already ships while still offering the ones it does not.
 
+The triangle budget follows the pack rather than a fixed default: a mesh
+already inside what the game ships is not reduced. Decimating a 1100-triangle
+head to 690 leaves the texture correct and the surface too coarse to carry it,
+which looks like a texture fault and is not one.
+
 **Custom head** — a mesh from outside the game into one node, with decimation,
 fitting, winding repair and cropping. A pack is checked before anything is
 built, and a failure names the check. **Import .glb** turns a sculpt, a scan or
@@ -200,10 +205,13 @@ decimation, winding repair, the solidity check, the weight transfer. Reading
 the format is [somebody else's code](src/kmdlfun/vendor/jade/), vendored from
 JadeBlender under the GPL; everything on top of it is in `kmdlfun/jade.py`.
 
-Two corrections happen on the way in, both measured rather than assumed:
-a Jade model's height runs along X where KOTOR's runs along Z, and Jade models
-are about a sixth larger. Neither figure has been in front of the engine yet —
-see [reports/JADE_FINDINGS.md](reports/JADE_FINDINGS.md).
+Three corrections happen on the way in, none of them guessable from the
+numbers and all three settled by rendering: a Jade model's height runs along X
+where KOTOR's runs along Z, its V texture axis runs the opposite way to ours,
+and Jade models are about a sixth larger. Textures come too — a mesh names a
+material by number, the material names the texture, and the `.txb` is decoded
+into the pack. None of it has been in front of the engine yet; see
+[reports/JADE_FINDINGS.md](reports/JADE_FINDINGS.md).
 
 Creating *characters* is still KOTOR only. Jade is a source of parts.
 

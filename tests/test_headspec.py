@@ -60,7 +60,8 @@ def test_loose_fragments_are_rejected():
     v = headspec.check_mesh(m)
     assert not v.accepted
     fail = next(f for f in v.failures if f.check == "one piece")
-    assert "6 disconnected pieces" in fail.detail
+    assert "6 pieces" in fail.detail
+    assert "outside the head" in fail.detail, fail.detail
 
 
 def test_an_open_shell_is_rejected():
@@ -373,3 +374,45 @@ def test_every_vanilla_head_passes_the_solidity_rule(pair):
         faces = [f.vertices for f in geo.faces]
         got = repair.outward_fraction(positions, faces)
         assert got >= headspec.SOLID_REJECT, f"{model} would be rejected at {got:.1%}"
+
+
+def test_islands_inside_the_head_are_features_not_fragments():
+    """Eyes and teeth. KOTOR keeps them in separate *nodes*, so a vanilla head
+    mesh really is one or two pieces - but a head authored elsewhere as a
+    single mesh carries them as islands, and Jade Empire's do: 84 of its 158
+    heads have exactly six pieces, being a face plus eyes plus teeth.
+
+    Counting islands cannot tell those from debris. Where they sit can."""
+    m = cube()
+    for offset in ((0.04, 0.04, 0.04), (-0.04, 0.04, 0.04), (0.0, -0.04, 0.02)):
+        piece = cube(scale=0.02, offset=offset)
+        base = len(m.positions)
+        m.positions.extend(piece.positions)
+        m.uvs.extend(piece.uvs)
+        m.faces.extend((a + base, b + base, c + base) for a, b, c in piece.faces)
+
+    assert headspec.loose_islands(m) == 0
+    v = headspec.check_mesh(m)
+    finding = next(f for f in v.findings if f.check == "one piece")
+    assert finding.level == "pass", finding.detail
+    assert "inside the head" in finding.detail
+
+
+def test_one_island_outside_is_still_worth_saying():
+    m = cube()
+    for scale, offset in ((0.02, (0.04, 0.04, 0.04)), (0.02, (3.0, 0.0, 0.0))):
+        piece = cube(scale=scale, offset=offset)
+        base = len(m.positions)
+        m.positions.extend(piece.positions)
+        m.uvs.extend(piece.uvs)
+        m.faces.extend((a + base, b + base, c + base) for a, b, c in piece.faces)
+
+    assert headspec.loose_islands(m) == 1
+    finding = next(f for f in headspec.check_mesh(m).findings
+                   if f.check == "one piece")
+    assert finding.level in ("warn", "fail")
+    assert "outside the head" in finding.detail
+
+
+def test_a_single_piece_has_nothing_loose():
+    assert headspec.loose_islands(cube()) == 0
