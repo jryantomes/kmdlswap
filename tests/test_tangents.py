@@ -207,3 +207,109 @@ def test_the_donors_that_were_blocked_are_now_measurable(k1):
     assert fits, "nothing measured"
     blocked = [f.donor for f in fits if f.blocked]
     assert not blocked, f"still blocked: {blocked}"
+
+
+# --- the A/B kit ------------------------------------------------------------
+#
+# The sign is anchored to vanilla by the tests above. What they cannot show is
+# whether the engine renders a basis computed for *new* geometry, so the answer
+# is a pair of models differing in exactly that one thing.
+
+
+def test_flipping_negates_the_tangent_and_nothing_else(k1, tmp_path):
+    """Bitangent and normal have to survive untouched, or the A/B compares two
+    things at once and answers neither."""
+    import shutil
+    import sys
+
+    import numpy as np
+
+    sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve()
+                           .parent.parent / "tools"))
+    import flip_tangents
+
+    from kmdlfun import parts as kparts
+    from kmdlswap import layout as kl
+    from kmdlswap import mdx as kmdx
+
+    name = next((n for n in CARRIERS if k1.has(n)), None)
+    if name is None:
+        pytest.skip("no tangent-bearing model in this install")
+
+    source = tmp_path / "src"
+    source.mkdir()
+    mdl_bytes, mdx_bytes = k1.read(name)
+    (source / f"{name}.mdl").write_bytes(mdl_bytes)
+    (source / f"{name}.mdx").write_bytes(mdx_bytes)
+
+    touched = flip_tangents.flip(source / f"{name}.mdl",
+                                 source / f"{name}.mdx", tmp_path / "out")
+    assert touched, "nothing was flipped"
+
+    def column(folder):
+        lay = kl.parse((folder / f"{name}.mdl").read_bytes(),
+                       (folder / f"{name}.mdx").read_bytes())
+        node = next(n for n in kparts.mesh_nodes(lay)
+                    if kmdx.stride_layout(lay, n).columns.get("tangent")
+                    is not None)
+        stride = kmdx.stride_layout(lay, node)
+        return np.asarray(kmdx._column(lay.mdx, node,
+                                       stride.columns["tangent"],
+                                       node.vertex_count, "9f"), float)
+
+    before, after = column(source), column(tmp_path / "out")
+    for label, part in (("bitangent", ktangents.BITANGENT),
+                        ("normal", ktangents.NORMAL)):
+        assert np.allclose(before[:, part], after[:, part]), label
+    assert np.allclose(before[:, ktangents.TANGENT],
+                       -after[:, ktangents.TANGENT])
+
+
+def test_a_flipped_model_is_still_valid(k1, tmp_path):
+    """Both halves of the pair have to load, or one of them is testing the
+    loader rather than the lighting."""
+    import sys
+
+    from kmdlswap import layout as kl
+    from kmdlswap import validate as kv
+
+    sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve()
+                           .parent.parent / "tools"))
+    import flip_tangents
+
+    name = next((n for n in CARRIERS if k1.has(n)), None)
+    if name is None:
+        pytest.skip("no tangent-bearing model in this install")
+
+    source = tmp_path / "src"
+    source.mkdir()
+    mdl_bytes, mdx_bytes = k1.read(name)
+    (source / f"{name}.mdl").write_bytes(mdl_bytes)
+    (source / f"{name}.mdx").write_bytes(mdx_bytes)
+    flip_tangents.flip(source / f"{name}.mdl", source / f"{name}.mdx",
+                       tmp_path / "out")
+
+    flipped = kl.parse((tmp_path / "out" / f"{name}.mdl").read_bytes(),
+                       (tmp_path / "out" / f"{name}.mdx").read_bytes())
+    assert kv.check(flipped).ok
+
+
+def test_a_model_with_no_tangents_reports_nothing_to_flip(k1, tmp_path):
+    """Saying so beats writing an identical copy and calling it a test."""
+    import sys
+
+    sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve()
+                           .parent.parent / "tools"))
+    import flip_tangents
+
+    if not k1.has("p_carthh"):
+        pytest.skip("no p_carthh")
+
+    source = tmp_path / "src"
+    source.mkdir()
+    mdl_bytes, mdx_bytes = k1.read("p_carthh")
+    (source / "p_carthh.mdl").write_bytes(mdl_bytes)
+    (source / "p_carthh.mdx").write_bytes(mdx_bytes)
+
+    assert flip_tangents.flip(source / "p_carthh.mdl",
+                              source / "p_carthh.mdx", tmp_path / "out") == {}
