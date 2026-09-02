@@ -483,11 +483,16 @@ bones and placement within 0.013. **None of it has been in the game.**
       If 0.83 is wrong, this is how you find the number that is right.
 - [ ] Convert something with no UVs if you can find one. It should still build
       and say plainly that it will render untextured.
-- [ ] Some heads still fail the checks. `h_bling02_` is too small (0.153 tall
-      against the node's 0.281) and `h_girl01gh_` is 57% of the node — Jade
-      carries a per-model `scale` in its header that this does not apply, and
-      those are the models where it would matter. Raise the scale box for them
-      rather than assuming they are broken.
+- [ ] **136 of 148 heads build**, swept offline — see
+      [reports/JADE_SWEEP.md](reports/JADE_SWEEP.md), regenerate with
+      `python tools/jade_sweep.py`. The twelve that do not are content, not
+      bugs: six are the wrong *shape* for a head node (hats, pigtails,
+      troglodytes) and six fold back on themselves, usually layered hair. If
+      you hit one, the preview is the place to judge it.
+- [ ] Masks are their own kind now (`H_Mask01`-`09`, plus the `H_Decap01`
+      stump). They convert but will not pass head checks, because an open
+      shell is not meant to be closed or to face outward. Worth trying one
+      anyway to see what the game makes of it.
 - [ ] **Textures now come across.** A mesh names a material by number, the
       material names the texture, and the `.txb` is decoded to a `.tga` in the
       pack. Confirmed offline on three heads: skin, hair, eyes and facial hair

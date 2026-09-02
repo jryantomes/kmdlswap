@@ -109,11 +109,15 @@ tangent looks identical in every viewer and wrong in game.
   sorted, Jade's height running along X where KOTOR's runs along Z. Worth
   confirming with the author, and nothing has been in front of the engine.
   [reports/JADE_FINDINGS.md](reports/JADE_FINDINGS.md)
-- **Jade, still open.** Bodies are catalogued but have no route in - only heads
-  become packs. Jade carries a per-model `scale` in its header that the
-  importer ignores, which is why `h_bling02_` and `h_girl01gh_` fail the size
-  check. And creating characters is KOTOR-only; all three games is the stated
-  goal.
+- **Jade, still open.** 136 of its 148 heads build and all 148 carry a texture
+  ([reports/JADE_SWEEP.md](reports/JADE_SWEEP.md)). What is left: bodies are
+  catalogued but have no route in, since a head pack fills one node and a body
+  is many. Fitting scales by the tightest axis, so a head that is wide for its
+  height - a hat, pigtails - is shrunk until it is too short; matching height
+  instead would take most of the six that fail on size. And creating characters
+  is KOTOR-only, where all three games is the stated goal.
+  The per-model `scale` question is closed: applying it makes every failing
+  case worse, so ignoring it is right.
 - **Neverwinter Nights.** Container reads today; models are a second reader, and
   neverblender to `.glb` is the cheap path. NWN heads are KOTOR's contemporaries
   and built to comparable budgets, so unlike SWTOR the density problem mostly is

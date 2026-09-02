@@ -1975,7 +1975,7 @@ class App(ttk.Frame):
         ttk.Label(bar, text="Show").pack(side="left", padx=(0, 6))
         self.jade_kind = tk.StringVar(value="head")
         kinds = ttk.Combobox(bar, textvariable=self.jade_kind, width=8,
-                             state="readonly", values=["head", "body"])
+                             state="readonly", values=["head", "body", "mask"])
         kinds.pack(side="left")
         kinds.bind("<<ComboboxSelected>>", lambda _e: self._refresh_jade())
         # The scale is a measurement, not a fact - it disagrees in direction

@@ -416,3 +416,37 @@ def test_one_island_outside_is_still_worth_saying():
 
 def test_a_single_piece_has_nothing_loose():
     assert headspec.loose_islands(cube()) == 0
+
+
+def test_an_island_that_reaches_past_the_face_but_touches_it_is_a_part():
+    """A hat, a topknot, an ear. It sits outside the largest island's bounding
+    box and is still part of the head - which is why the box was the wrong
+    question. Measured across Jade's heads, every such island touches, the
+    widest gap being a tenth of the head; a loose fragment sits whole
+    model-widths away."""
+    m = cube()
+    hat = cube(scale=0.05, offset=(0.0, 0.0, 0.13))     # perched on top, touching
+    base = len(m.positions)
+    m.positions.extend(hat.positions)
+    m.uvs.extend(hat.uvs)
+    m.faces.extend((a + base, b + base, c + base) for a, b, c in hat.faces)
+
+    assert headspec.loose_islands(m) == 0, "a touching part was called debris"
+    finding = next(f for f in headspec.check_mesh(m).findings
+                   if f.check == "one piece")
+    assert finding.level == "pass", finding.detail
+
+
+def test_the_gap_is_what_decides_not_the_box():
+    """Same island, moved away. Nothing about its size or shape changed."""
+    def with_piece(offset):
+        m = cube()
+        piece = cube(scale=0.05, offset=offset)
+        base = len(m.positions)
+        m.positions.extend(piece.positions)
+        m.uvs.extend(piece.uvs)
+        m.faces.extend((a + base, b + base, c + base) for a, b, c in piece.faces)
+        return m
+
+    assert headspec.loose_islands(with_piece((0.0, 0.0, 0.13))) == 0
+    assert headspec.loose_islands(with_piece((0.0, 0.0, 1.50))) == 1
