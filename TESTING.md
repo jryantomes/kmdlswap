@@ -907,3 +907,44 @@ simulation that rotates jaw-weighted vertices; its rotation sign was initially
 backwards, which made an open mouth look clamped shut. It is useful for seeing
 whether an opening exists, and worthless as a guide to how far the engine
 actually moves anything.
+
+## 31. The mouth was there all along, closed to zero width
+
+**Status: built, installed, awaiting in-game confirmation. Supersedes §30, whose
+cut is now off by default.**
+
+The user's reading was right and mine was wrong: *"the place where you would see
+the mouth was welded shut during conversion."*
+
+**What §30 got wrong.** It concluded the face shell had no mouth because every
+boundary analysis reported one hole (the neck). All of those analyses **weld by
+position** — which they must, since welding is what stops a UV seam looking like
+a hole — and Jade Empire models a mouth as an aperture whose two rims sit on
+*identical coordinates*. Welding merges them and the hole vanishes from the
+measurement. The face is not solid; the mouth has zero width.
+
+**Proof.** On `h_common01_`, 26 duplicated positions between 32% and 43% of head
+height have one copy used only by faces *above* and another only by faces
+*below*. That is a rim pair, not a seam — an ordinary UV seam has every copy on
+the same side (18 of the 44 duplicates there are exactly that).
+
+**Why it could never open.** `weights.transfer` samples the host surface *by
+position*, and the two rims occupy the same position, so it assigns them
+identical weights by construction. Measured on the installed build: 26 rim
+pairs, **all 26** bound to the same kind of bone. They move together, so the
+aperture stays at zero width no matter how the face is animated, and nothing
+behind it is ever visible.
+
+`lips.split_rims` finds the pairs and `lips.bind` weights them apart, upper rim
+to the upper-lip profile and lower to the lower-lip profile. After: 26 pairs,
+0 sharing a bone, 26 parted. 54 upper and 49 lower rim vertices bound.
+
+**§30's cut is now off by default** (`mouth=False`). It removed real geometry to
+make a hole that already existed, which left a permanent gap at rest. The module
+stays for a head that genuinely has no aperture.
+
+**Method note, and the important one.** Four passes in a row measured the mouth
+with a tool that could not see it, and each time the measurement agreed with the
+previous wrong conclusion. Welding by position is correct for finding islands
+and fatal for finding apertures; both readings were needed and only one was ever
+taken. The user supplied the hypothesis that broke the loop.

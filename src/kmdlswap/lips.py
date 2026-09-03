@@ -178,6 +178,64 @@ def find_lips(positions, faces):
     return upper, lower, bag
 
 
+def split_rims(positions, faces, *, band=BAND):
+    """An aperture whose two edges sit exactly on top of each other.
+
+    This is how Jade Empire models a mouth, and it defeats every analysis that
+    welds by position - which is all of them, because welding is what makes a
+    UV seam stop looking like a hole. On ``h_common01_`` the face shell reports
+    one hole (the neck) when welded and boundary loops at 36% and 38% of head
+    height when not, and 26 duplicated positions there have one copy used only
+    by faces *above* and another only by faces *below*. That is a mouth, closed
+    to zero width.
+
+    It matters because ``weights.transfer`` samples the host by position, and
+    these two copies are at the *same* position: it hands them identical
+    weights by construction, so they move together and the mouth can never
+    part. Measured on the installed build, all 26 pairs came out bound to the
+    same kind of bone.
+
+    Returns ``(upper, lower)`` vertex indices, empty when there is no such seam.
+    """
+    P = np.asarray([p[:3] for p in positions], dtype=np.float64)
+    if len(P) < 8 or not faces:
+        return [], []
+    lo, hi = P.min(axis=0), P.max(axis=0)
+    height = float(hi[2] - lo[2])
+    if height <= 0:
+        return [], []
+
+    faces_of: dict[int, list[int]] = collections.defaultdict(list)
+    for i, face in enumerate(faces):
+        for v in tuple(face)[:3]:
+            faces_of[v].append(i)
+    centres = np.array([P[list(tuple(f)[:3])].mean(axis=0) for f in faces])
+
+    at: dict[tuple, list[int]] = collections.defaultdict(list)
+    for i, p in enumerate(P):
+        at[(round(float(p[0]), 5), round(float(p[1]), 5), round(float(p[2]), 5))].append(i)
+
+    upper: list[int] = []
+    lower: list[int] = []
+    for key, group in at.items():
+        if len(group) < 2:
+            continue
+        if not (band[0] <= (key[2] - lo[2]) / height <= band[1]):
+            continue
+        above, below = [], []
+        for v in group:
+            touching = faces_of.get(v)
+            if not touching:
+                continue
+            (above if float(np.mean(centres[touching][:, 2])) > key[2] else below).append(v)
+        # Only a genuine rim pair: one copy owned by the face above the gap and
+        # one by the face below. A plain UV seam has all its copies on one side.
+        if above and below:
+            upper.extend(above)
+            lower.extend(below)
+    return upper, lower
+
+
 def _sides(host_influences, slot_names: dict[int, str], host_positions: np.ndarray):
     """Mean x of the region each bone leads, read off the host's own weights."""
     centre = (float(host_positions[:, 0].min()) + float(host_positions[:, 0].max())) / 2
@@ -212,9 +270,13 @@ def bind(
         return influences, []
 
     found = find_lips(positions, faces)
-    if found is None:
+    seam_upper, seam_lower = split_rims(positions, faces)
+    if found is None and not seam_upper:
         return influences, []
-    upper_island, lower_island, bag_island = found
+    if found is None:
+        upper_island, lower_island, bag_island = [], [], None
+    else:
+        upper_island, lower_island, bag_island = found
 
     P = np.asarray([p[:3] for p in positions], dtype=np.float64)
     lowered = {k: v.lower() for k, v in slot_names.items()}
@@ -270,14 +332,27 @@ def bind(
     apply(lower_island, "lower")
     if bag_island:
         apply(bag_island, "bag")
+    # The seam last, so a coincident rim wins over any island claim on the same
+    # vertex: it is the one that has to part for the mouth to open at all.
+    apply(seam_upper, "upper")
+    apply(seam_lower, "lower")
 
-    total = len(upper_island) + len(lower_island) + (len(bag_island) if bag_island else 0)
-    return out, [
-        f"lips: bound {len(upper_island)} upper and {len(lower_island)} lower lip "
-        f"vertices"
-        + (f" and a {len(bag_island)}-vertex mouth interior" if bag_island else "")
-        + f" to the vanilla mouth rig ({total} in all)"
-    ]
+    lines = []
+    if upper_island or lower_island:
+        total = len(upper_island) + len(lower_island) + (len(bag_island) if bag_island else 0)
+        lines.append(
+            f"lips: bound {len(upper_island)} upper and {len(lower_island)} lower lip "
+            f"vertices"
+            + (f" and a {len(bag_island)}-vertex mouth interior" if bag_island else "")
+            + f" to the vanilla mouth rig ({total} in all)"
+        )
+    if seam_upper:
+        lines.append(
+            f"mouth seam: the face carries an aperture closed to zero width; "
+            f"bound its {len(seam_upper)} upper and {len(seam_lower)} lower rim "
+            f"vertices apart so it can open"
+        )
+    return out, lines
 
 
 def _finalise(pool: dict[int, float], max_influences: int = MAX_INFLUENCES) -> list[Influence]:

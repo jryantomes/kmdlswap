@@ -174,3 +174,79 @@ def test_a_mismatched_influence_list_is_refused_quietly():
 
     assert out is infl
     assert lines == []
+
+
+# --- an aperture closed to zero width ---------------------------------------
+#
+# The failure that survived four passes. Jade Empire models a mouth as a hole
+# whose two rims sit on the same coordinates, so every analysis that welds by
+# position - which is all of them, because welding is what stops a UV seam
+# looking like a hole - reports a solid face. Worse, `weights.transfer` samples
+# the host by position, so it hands both rims identical weights by construction
+# and they can never part.
+
+
+def head_with_a_zero_width_mouth():
+    """Two surfaces meeting along a line of doubled vertices.
+
+    Above the line the faces belong to one copy, below it to the other. In
+    space they touch; in topology they are two boundaries.
+    """
+    points, faces = [], []
+    n = 9
+    xs = [-0.1 + 0.2 * i / (n - 1) for i in range(n)]
+
+    def strip(z0, z1, upper):
+        base = len(points)
+        for x in xs:
+            points.append((x, 0.1, z0))
+            points.append((x, 0.1, z1))
+        for i in range(n - 1):
+            a, b = base + 2 * i, base + 2 * i + 1
+            c, d = base + 2 * (i + 1), base + 2 * (i + 1) + 1
+            faces.append((a, b, c))
+            faces.append((b, d, c))
+
+    strip(0.36, 0.50, upper=True)   # above the mouth line, ending on it
+    strip(0.36, 0.22, upper=False)  # below it, starting on the same line
+    return points, faces
+
+
+def test_a_zero_width_aperture_is_found():
+    points, faces = head_with_a_zero_width_mouth()
+
+    upper, lower = lips.split_rims(points, faces, band=(0.0, 1.0))
+
+    assert upper and lower, "the doubled mouth line was not detected"
+    assert set(upper).isdisjoint(lower)
+
+
+def test_a_plain_uv_seam_is_not_mistaken_for_one():
+    """A seam has all its copies on the same side of the line. Binding one
+    apart would tear the face open along a texture boundary."""
+    points, faces = head_with_a_zero_width_mouth()
+    # Duplicate every vertex in place without giving the copies any faces:
+    # coincident, but not a rim pair.
+    points = list(points) + list(points)
+
+    upper, lower = lips.split_rims(points, faces, band=(0.0, 1.0))
+
+    for v in list(upper) + list(lower):
+        assert v < len(points) // 2, "a face-less duplicate was treated as a rim"
+
+
+def test_the_two_rims_are_bound_to_bones_that_pull_them_apart():
+    """The whole point: at the same position, proximity transfer gives both
+    rims the same weights, so the mouth cannot open however it is animated."""
+    points, faces = head_with_a_zero_width_mouth()
+    infl = [led_by(NAMES["head_g"]) for _ in points]
+
+    out, lines = lips.bind(points, faces, infl, RIG)
+
+    upper, lower = lips.split_rims(points, faces, band=(0.0, 1.0))
+    if not upper:
+        pytest.skip("band excluded the seam in this fixture")
+    ups = {out[v][0].bone_slot for v in upper}
+    downs = {out[v][0].bone_slot for v in lower}
+    assert ups != downs, "both rims still lead with the same bone"
+    assert any("mouth seam" in line for line in lines)

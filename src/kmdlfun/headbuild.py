@@ -121,7 +121,12 @@ def run(
     crop: float | None = None,
     decimate: int | None = None,
     repair: bool = False,
-    mouth: bool = True,
+    # Off by default. The aperture cutter was written believing a converted face
+    # had no mouth; it has one, closed to zero width, and `lips.split_rims`
+    # opens it by weighting the two rims apart. Cutting as well removes real
+    # geometry and leaves a permanent hole. Kept for a head that genuinely has
+    # no aperture at all.
+    mouth: bool = False,
     mouth_scale: float = 1.0,
     mouth_height: float | None = None,
     fit: bool = False,
