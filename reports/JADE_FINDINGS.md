@@ -175,6 +175,33 @@ is tall because of her pigtails, and `h_trogr01_` is a troglodyte. Fitting
 scales by the tightest axis, so a head that is wide for its height gets shrunk
 to fit the width and ends up too short.
 
+## In game, 2026-09-02
+
+A Jade head on Vex, a KOTOR NPC whose appearance row, body and clothes were
+left alone so the head was the only variable.
+
+**It works.** The head sits on the neck, is the right sort of size, animates
+with the head, and reads as a person.
+
+**Two findings.**
+
+*Slightly too small, and the scale was not to blame.* The fit step resizes to
+the tightest axis of the host node; a Jade head is fractionally wider than
+Carth's, so the width ratio of 0.980 bound and cost 9% of the height. Placing
+and resizing are separate now and resizing is off by default. The scale is also
+per kind — 0.86 for heads against 0.83 for bodies — because that is what was
+measured, and using the body figure for heads was visibly short.
+
+*The mouth does not open,* and this one is a real format difference rather than
+a bug. A KOTOR head has **no mouth opening**: its lips are continuous surface
+that the jaw bone stretches apart, with separate teeth and tongue nodes behind
+it. A Jade head has an actual hole with two rims of 14 vertices each, at 35%
+and 38% of its height. The jaw binding is fine — 182 weighted vertices against
+vanilla's 63 — but weight transfer works by proximity and the rims sit a
+fraction of a unit apart, so both are bound alike and travel together. A KOTOR
+donor shares the host's lip topology, which is why a Bith head's mouth moved on
+this same character. Separating them needs something proximity cannot give.
+
 ## Heads arrive rotated
 
 A second difference, not mentioned in the original note and visible in the

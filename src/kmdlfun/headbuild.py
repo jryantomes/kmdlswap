@@ -64,12 +64,19 @@ class HeadResult:
         return f"ACCEPTED with {len(self.warnings)} warning(s)"
 
 
-def fit_mesh(mesh, pack, layout, node, lines: list[str]):
-    """Orient, scale and place a foreign mesh onto a node.
+def fit_mesh(mesh, pack, layout, node, lines: list[str], *, resize: bool = True):
+    """Orient a foreign mesh, put it on the node, and optionally resize it.
 
-    Nothing outside KOTOR knows what scale or origin a head node uses, so a raw
-    export always needs this. The pack's hints say which way it was authored;
-    the node's own geometry says where it has to end up.
+    Placing is unconditional: nothing outside KOTOR knows where a head node
+    sits, so a mesh always has to be moved onto it or it floats at its own
+    origin, a unit and a half from the neck.
+
+    Resizing is not. `fit_to` scales by the *tightest* axis, which keeps the
+    head inside the node's box and shrinks it whenever the proportions differ -
+    a Jade head onto Carth is fractionally wider, so the width ratio binds and
+    costs 9% of its height. A mesh converted from a game whose scale is known
+    already arrives the right size, and resizing can only take it away from
+    that. A sculpt or a scan arriving at an arbitrary size still needs it.
     """
     from kmdlswap import edit as ke
 
@@ -84,7 +91,8 @@ def fit_mesh(mesh, pack, layout, node, lines: list[str]):
     positions = headgen.orient(mesh.positions, facing=pack.facing, up=pack.up)
     if pack.scale != 1.0:
         size = [s * pack.scale for s in size]
-    positions = headgen.fit_to(positions, size, centre, anchor=pack.anchor)
+    move = headgen.fit_to if resize else headgen.place_at
+    positions = move(positions, size, centre, anchor=pack.anchor)
 
     before = mesh.positions
     mesh.positions = positions
@@ -97,7 +105,8 @@ def fit_mesh(mesh, pack, layout, node, lines: list[str]):
     def fmt(s):
         return "x".join(f"{c:.3f}" for c in s)
 
-    lines.append(f"fitted: {fmt([b_hi[i] - b_lo[i] for i in range(3)])} -> "
+    lines.append(f"{'fitted' if resize else 'placed'}: "
+                 f"{fmt([b_hi[i] - b_lo[i] for i in range(3)])} -> "
                  f"{fmt([a_hi[i] - a_lo[i] for i in range(3)])}"
                  f"   facing {pack.facing}, up {pack.up}, anchor {pack.anchor}")
     return mesh
@@ -197,8 +206,8 @@ def run(
             return r
         r.node_name = target.name
 
-        if fit:
-            mesh = fit_mesh(mesh, pack, layout, target, r.lines)
+        # Always placed; `fit` now decides only whether it is also resized.
+        mesh = fit_mesh(mesh, pack, layout, target, r.lines, resize=fit)
 
         against = headspec.check_against_target(mesh, layout, target)
         r.lines.extend(against.lines())

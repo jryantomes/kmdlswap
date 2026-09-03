@@ -339,9 +339,15 @@ slot; plain NPCs repeat one body across all nine, which is why the Czerka
 officer is `N_CzerkaOff` nine times and never undresses. The Transplant tab now
 has a **Wearing** box holding the 117 outfits the game already uses.
 
-- [ ] Rebuild Vex with **Wearing** left on `same body as the host`. He should
-      now be dressed in Carth's jacket rather than the underwear — that alone
-      is the fix.
+- [x] **Confirmed in game, 2026-09-02: Vex is dressed.** His row 510 had the
+      bug live — `modela` was `P_CarthBA`, Carth's underwear — and rewriting
+      the nine clothing slots to `P_CarthBB` put him in the jacket. One row,
+      one file, and the outcome was binary rather than a judgement call.
+
+      **This also validates the appearance-row writing underneath §21.** The
+      Character tab builds its rows the same way, so `dress()` and the
+      slot-filling are now proven against the engine rather than only against
+      tests.
 - [ ] Rebuild with **Wearing** set to `N_CzerkaOff`. He should be in the Czerka
       officer's uniform with the transplanted head on top.
 - [ ] Try one where model and texture differ — `N_CommF (Commoner Dirty Fem
@@ -489,6 +495,32 @@ bones and placement within 0.013. **None of it has been in the game.**
       anyway destroys the geometry the eyes and mouth sit on, and the result
       looks like a texture fault rather than a resolution one. The importer
       sets the box for you now - if you tick it back on, expect a smeared face.
+- [x] **Confirmed in game, 2026-09-02, on Vex.** A Jade head built onto his
+      `p_brokerhd` — his appearance row, body and clothes untouched, so the
+      head was the only variable. It sat on the neck, animated with the head,
+      and looked like a person. Two things came out of it:
+
+      **The head was slightly too small**, and it was the *fit* step, not the
+      scale. Fitting resizes to the tightest axis of the host node: the Jade
+      head is fractionally wider than Carth's, so the width ratio of 0.980
+      bound and cost 9% of its height. Placing and resizing are separate
+      operations now, resizing is off by default, and the head went from 91% to
+      96% of the node — **confirmed better in game on the rebuild**. The Jade scale is also per kind now — 0.86 for heads,
+      0.83 for bodies, which is what was measured rather than one figure for
+      both.
+
+      **His mouth does not open.** Not a wiring failure: the jaw bone has 182
+      weighted vertices, more than vanilla's 63. The heads are built
+      differently. A KOTOR head has *no* mouth opening — its lips are
+      continuous surface that the jaw stretches apart, with separate teeth and
+      tongue nodes behind. A Jade head has a real hole with two rims, 14
+      vertices each, at 35% and 38% of its height. Weight transfer works by
+      proximity and the two rims are a fraction of a unit apart, so both get
+      bound alike and move together. A KOTOR donor shares the host's lip
+      topology, which is why the Bith head's mouth moved on this same
+      character. Fixing it means telling the rims apart, which proximity
+      cannot do.
+
 - [ ] Convert `h_common01_` and build it onto `p_carthh` with **Fit ticked**.
       Fit is needed here and is not the shrink you saw on transplants — the
       head arrives at 93% of the node's size, so fitting is a 0.98× nudge that

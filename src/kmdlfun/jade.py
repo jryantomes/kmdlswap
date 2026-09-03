@@ -30,8 +30,20 @@ from pathlib import Path
 
 import numpy as np
 
-# Measured, and held loosely. See the report before trusting it.
+# Measured per kind, because heads and bodies do not agree. Across 158 Jade
+# heads against 105 of KOTOR's the height factor is 0.858; across 112 bodies
+# against 95 it is 0.830, with depth agreeing to 0.4%. Using the body figure
+# for heads made them visibly small in game.
+#
+# Held loosely either way - see reports/JADE_FINDINGS.md before trusting it.
 SCALE = 0.83
+HEAD_SCALE = 0.86
+BODY_SCALE = 0.83
+
+
+def scale_for(kind: str) -> float:
+    """The size correction for one kind of model."""
+    return HEAD_SCALE if kind in (HEAD, MASK) else BODY_SCALE
 
 # Jade height runs along X, KOTOR's along Z, and the two also face opposite
 # ways: `new = (old_z, -old_y, old_x)`. Determinant +1, so it turns the model
@@ -399,7 +411,7 @@ def texture_for(install, found: Mesh) -> tuple[str, bytes] | None:
 # --- into a head pack -------------------------------------------------------
 
 
-def to_pack(entry: Entry, out_dir, *, scale: float = SCALE,
+def to_pack(entry: Entry, out_dir, *, scale: float | None = None,
             name: str | None = None, install=None,
             with_texture: bool = True) -> dict:
     """Write a Jade model out as a head pack the Custom head tab can build.
@@ -416,6 +428,8 @@ def to_pack(entry: Entry, out_dir, *, scale: float = SCALE,
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    if scale is None:
+        scale = scale_for(entry.kind)
     found = mesh(*read(entry), scale=scale)
 
     kobj.write_obj(out_dir / "head.obj", found.positions, found.faces,
@@ -486,13 +500,15 @@ def thumbnail(entry: Entry, *, size: int = 96, root=None):
 
     mdl_bytes, mdx_bytes = read(entry)
     digest = hashlib.md5(mdl_bytes + (mdx_bytes or b"")).hexdigest()
+    # The same scale the pack would use, so the picture and the thing it
+    # promises are the same size.
     folder = Path(root) if root else Path(kthumbs.cache_root()) / "jade"
     out = folder / f"{digest}-{size}.png"
     if out.is_file():
         return out
 
     try:
-        found = mesh(mdl_bytes, mdx_bytes)
+        found = mesh(mdl_bytes, mdx_bytes, scale=scale_for(entry.kind))
         scene = krender.from_mesh(found.positions, found.faces)
         if not len(scene.faces):
             return None
