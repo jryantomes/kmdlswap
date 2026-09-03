@@ -171,8 +171,40 @@ def vertex_normals(positions, faces):
     return out
 
 
+def place_at(positions, size, centre, anchor="chin"):
+    """Move a mesh onto the node without changing its size.
+
+    Placing and resizing are different jobs and were one function, which meant
+    a head could not be put where it belongs without also being rescaled to the
+    node's box. That rescale is by the *tightest* axis, so a head fractionally
+    wider than the host's loses height everywhere: measured on a Jade head onto
+    Carth, the width ratio of 0.980 bound and cost 9% of the height - visible in
+    game as a head that sits slightly too small.
+
+    Anything converted from a game with a known scale already arrives the right
+    size, and resizing it can only make it wrong.
+    """
+    lo = [min(p[i] for p in positions) for i in range(3)]
+    hi = [max(p[i] for p in positions) for i in range(3)]
+    mid = [(hi[i] + lo[i]) / 2 for i in range(3)]
+
+    moved = [tuple(centre[i] + (p[i] - mid[i]) for i in range(3))
+             for p in positions]
+    if anchor == "chin":
+        bottom = min(p[2] for p in moved)
+        want = centre[2] - size[2] / 2
+        moved = [(p[0], p[1], p[2] + (want - bottom)) for p in moved]
+    return moved
+
+
 def fit_to(positions, size, centre, anchor="chin"):
-    """Scale uniformly into `size` and place at `centre`, chin-anchored."""
+    """Scale uniformly into `size` and place at `centre`, chin-anchored.
+
+    The scale is by the tightest axis, which keeps the head inside the node's
+    box at the cost of shrinking it whenever the proportions differ. Right for
+    a sculpt or a scan arriving at an arbitrary size; wrong for anything that
+    already knows how big it should be - see `place_at`.
+    """
     lo = [min(p[i] for p in positions) for i in range(3)]
     hi = [max(p[i] for p in positions) for i in range(3)]
     span = [hi[i] - lo[i] for i in range(3)]

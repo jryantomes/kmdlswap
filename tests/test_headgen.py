@@ -158,3 +158,74 @@ def test_the_tallest_axis_ends_up_as_z():
     span = [max(p[i] for p in moved) - min(p[i] for p in moved) for i in range(3)]
 
     assert span[2] == max(span), span
+
+
+# --- placing and resizing are separate --------------------------------------
+#
+# They used to be one function, so a head could not be put where it belongs
+# without also being rescaled to the node's box. That rescale is by the
+# *tightest* axis, so a head fractionally wider than the host's loses height
+# everywhere: 9% on a Jade head onto Carth, visible in game as a head sitting
+# slightly too small.
+
+
+def a_head(width=1.0, depth=1.0, height=2.0):
+    """Eight corners of a box, which is enough to measure extents."""
+    return [(x * width / 2, y * depth / 2, z * height / 2)
+            for x in (-1, 1) for y in (-1, 1) for z in (-1, 1)]
+
+
+def span(points):
+    return [max(p[i] for p in points) - min(p[i] for p in points)
+            for i in range(3)]
+
+
+def test_placing_moves_without_resizing():
+    from kmdlfun import headgen
+
+    mesh = a_head(width=1.0, depth=1.0, height=2.0)
+    moved = headgen.place_at(mesh, size=[2.0, 2.0, 4.0], centre=[10.0, 20.0, 30.0])
+
+    assert span(moved) == pytest.approx(span(mesh)), "it was resized"
+    assert min(p[0] for p in moved) > 9.0, "it was not moved"
+
+
+def test_fitting_resizes_by_the_tightest_axis():
+    """The behaviour that costs a head its height, kept and named rather than
+    quietly changed - it is right for a sculpt arriving at an arbitrary size."""
+    from kmdlfun import headgen
+
+    # Wider than the node allows, shorter than it could be.
+    mesh = a_head(width=2.0, depth=1.0, height=2.0)
+    fitted = headgen.fit_to(mesh, size=[1.0, 4.0, 4.0], centre=[0.0, 0.0, 0.0])
+
+    got = span(fitted)
+    assert got[0] == pytest.approx(1.0), "the tightest axis should just fit"
+    assert got[2] < 4.0, "and everything else shrinks with it"
+
+
+def test_a_head_the_right_size_already_is_left_alone():
+    """The Jade case. Placing keeps 100% of the height; fitting keeps 50%."""
+    from kmdlfun import headgen
+
+    mesh = a_head(width=1.02, depth=1.0, height=2.0)
+    node = [1.0, 1.4, 2.0]
+
+    placed = headgen.place_at(mesh, node, [0.0, 0.0, 0.0])
+    fitted = headgen.fit_to(mesh, node, [0.0, 0.0, 0.0])
+
+    assert span(placed)[2] == pytest.approx(2.0)
+    assert span(fitted)[2] < 2.0, "fitting gives away height for width"
+
+
+def test_both_anchor_the_chin_to_the_same_place():
+    """Whatever else differs, the bottom of the head has to meet the neck."""
+    from kmdlfun import headgen
+
+    mesh = a_head(width=1.02, depth=1.0, height=2.0)
+    node, centre = [1.0, 1.4, 2.0], [0.0, 0.0, 5.0]
+
+    placed = headgen.place_at(mesh, node, centre, anchor="chin")
+    fitted = headgen.fit_to(mesh, node, centre, anchor="chin")
+
+    assert min(p[2] for p in placed) == pytest.approx(min(p[2] for p in fitted))

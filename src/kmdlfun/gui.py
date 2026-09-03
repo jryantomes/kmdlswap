@@ -826,7 +826,13 @@ class App(ttk.Frame):
         opts = self._advanced(ttk.Frame(page))
         opts.grid(row=3, column=0, columnspan=5, sticky="w", pady=(8, 0))
         self.head_decimate = tk.BooleanVar(value=True)
-        self.head_fit = tk.BooleanVar(value=True)
+        # Off by default. Fitting scales to the *tightest* axis of the host
+        # node, so a head whose proportions differ at all comes out smaller
+        # than it should - measured at 9% short on a Jade head onto Carth, and
+        # visible in game. Anything converted from a game with a known scale
+        # already arrives the right size. A sculpt or a scan does not, and that
+        # is what this is for. Placement happens either way.
+        self.head_fit = tk.BooleanVar(value=False)
         self.head_repair = tk.BooleanVar(value=True)
         self.head_hide = tk.BooleanVar(value=True)
         self.head_reshape = tk.BooleanVar(value=False)
@@ -837,7 +843,8 @@ class App(ttk.Frame):
                     textvariable=self.head_budget).grid(row=0, column=1, sticky="w")
         ttk.Label(opts, text="triangles", foreground="#666").grid(
             row=0, column=2, sticky="w", padx=(4, 14))
-        ttk.Checkbutton(opts, text="Fit to the node", variable=self.head_fit).grid(
+        ttk.Checkbutton(opts, text="Resize to the node (only for sculpts and scans)",
+                        variable=self.head_fit).grid(
             row=0, column=3, sticky="w", padx=(0, 14))
         ttk.Checkbutton(opts, text="Repair winding", variable=self.head_repair).grid(
             row=1, column=0, columnspan=3, sticky="w", pady=(4, 0))

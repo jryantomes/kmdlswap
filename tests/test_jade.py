@@ -402,3 +402,32 @@ def test_a_mask_still_converts(catalogue, tmp_path):
 
     assert result["triangles"] > 0
     assert (result["pack"] / "head.obj").is_file()
+
+
+def test_heads_and_bodies_get_their_own_scale():
+    """Measured separately and they disagree: 0.858 across 158 heads against
+    105 of KOTOR's, 0.830 across 112 bodies against 95. Using the body figure
+    for heads made them visibly small in game."""
+    assert jade.scale_for(jade.HEAD) == jade.HEAD_SCALE
+    assert jade.scale_for(jade.BODY) == jade.BODY_SCALE
+    assert jade.HEAD_SCALE > jade.BODY_SCALE
+    # a mask is a face, so it scales like one
+    assert jade.scale_for(jade.MASK) == jade.HEAD_SCALE
+
+
+def test_a_pack_uses_the_scale_for_its_kind(a_head, tmp_path):
+    """`to_pack` knows the kind; `mesh` only sees bytes, so the choice belongs
+    where the entry is."""
+    from kmdlswap.obj import read_obj
+
+    def height(folder):
+        m = read_obj(folder / "head.obj")
+        return (max(p[2] for p in m.positions)
+                - min(p[2] for p in m.positions))
+
+    chosen = jade.to_pack(a_head, tmp_path / "chosen")
+    as_body = jade.to_pack(a_head, tmp_path / "as_body", scale=jade.BODY_SCALE)
+
+    assert height(chosen["pack"]) > height(as_body["pack"]), (
+        "a head should not be built at the body figure"
+    )
