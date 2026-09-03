@@ -851,3 +851,59 @@ because the symptom was described as "glued shut" and read as a movement problem
 It was never movement. The lesson is to ask what a symptom *looks like* before
 deciding what it *is* — the render that would have settled this existed from the
 first hour and was misread.
+
+## 30. The face shell had no mouth at all
+
+**Status: built, installed, awaiting in-game confirmation. This is the cause of
+§29's remaining symptom.**
+
+Reported after §29: teeth no longer stick out, movement looks fine, *"it's like
+the texture is glued shut, not allowing to see the inside of the mouth."*
+
+**The texture is innocent.** The Jade atlas carries teeth along its top edge and
+a pink mouth interior at the bottom right (`reports/mouth_textures.png`). The
+artwork is all present.
+
+**The shell covers everything.** Measured in model space at the mouth, by how
+far forward each surface reaches:
+
+| surface | front edge |
+|---|---|
+| **face shell skin** | **+0.1048** |
+| lip pieces | +0.1005, +0.0962 |
+| teeth | +0.0963, +0.0941 |
+| tongue | +0.0923 |
+| mouth interior bag | +0.0883 |
+
+The shell is an unbroken sheet of skin in front of every other surface; its only
+hole is the neck. Nothing behind it can ever be seen, at any weighting or pose.
+It also means the lip pieces bound in §28 were themselves hidden behind the
+shell and never visible.
+
+**Carth needs no equivalent.** His face is also one surface across the mouth,
+but his lips are *part of it*, weighted to bones that pull them apart, with no
+second surface in the way. Checked directly: none of the 126 duplicated
+positions in his `Head` is split between an upward-driven and a downward-driven
+copy, so there is no hidden seam either. A converted head fails because it has
+*both* a solid shell and separate lips.
+
+`kmdlswap/aperture.py` cuts the shell open inside the ellipse the lip rims
+enclose, front faces only, leaving every other island intact.
+
+**Sizing was decided by rendering, not by argument.** At full rim height the cut
+takes the whole 0.0204 gap, and geometry does not close — the result is a face
+that sits at rest with its teeth bared (`reports/aperture_rest.png`, panels 3
+and 4). At 0.25 it reads as an ordinary closed mouth with a dark lip line and
+opens onto the interior when the lips part (`reports/aperture_open.png`). 19
+shell faces removed on `h_common01_`.
+
+**To validate:** installed as `out_vex_open/`; previous build backed up at
+`out_vex_open/backup-before-open/`. At rest his mouth should look normal — if
+his teeth show while he is standing there saying nothing, the aperture is too
+tall and `mouth_height` wants lowering.
+
+**Method note.** The jaw-open renders in this section come from a hand-rolled
+simulation that rotates jaw-weighted vertices; its rotation sign was initially
+backwards, which made an open mouth look clamped shut. It is useful for seeing
+whether an opening exists, and worthless as a guide to how far the engine
+actually moves anything.

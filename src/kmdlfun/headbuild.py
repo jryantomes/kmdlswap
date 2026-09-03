@@ -121,6 +121,9 @@ def run(
     crop: float | None = None,
     decimate: int | None = None,
     repair: bool = False,
+    mouth: bool = True,
+    mouth_scale: float = 1.0,
+    mouth_height: float | None = None,
     fit: bool = False,
     reshape: bool = False,
     hide: list[str] | None = None,
@@ -208,6 +211,19 @@ def run(
 
         # Always placed; `fit` now decides only whether it is also resized.
         mesh = fit_mesh(mesh, pack, layout, target, r.lines, resize=fit)
+
+        # A head whose lips are separate pieces has no mouth: the face shell is
+        # a continuous sheet of skin in front of the lips, the teeth and the
+        # tongue, so none of them can ever be seen. Open it. No-op on a head
+        # built the way KOTOR builds one.
+        if mouth:
+            from kmdlswap import aperture as kaperture
+
+            mesh.faces, opened = kaperture.cut(
+                mesh.positions, mesh.faces,
+                scale=mouth_scale, scale_height=mouth_height,
+            )
+            r.lines.extend(opened)
 
         against = headspec.check_against_target(mesh, layout, target)
         r.lines.extend(against.lines())
