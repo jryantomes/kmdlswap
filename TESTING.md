@@ -682,3 +682,55 @@ Not owed, recorded so the list above is not read as "nothing works":
   hung wrong.
 - A Tripo-generated head on Carth: head turns, mouth moves, brows do not.
 - `bighead` on HK-47.
+
+## 27. Facial weights: the upper lip bound to the skull
+
+**Status: built, measured, awaiting in-game confirmation.**
+
+Reported in §23: a Jade Empire head on Vex animates at the brows and eyes but
+"his mouth is glued shut".
+
+**What it is not.** Two explanations were tested and both were wrong.
+
+*Not borrowed teeth.* The host's `teethUa01`, `teethLa01` and `tongue` sit in
+their own coordinate spaces and are placed by their node transforms, so they
+land inside a converted head's mouth correctly — confirmed by render in
+`reports/jade_mouth.png`. But they are then visible permanently, because they
+are larger than the Jade head's own mouth bag. The Jade head already has teeth;
+it does not need to borrow any.
+
+*Not a mouth opening.* An early reading claimed KOTOR heads are sealed while
+converted heads carry an open mouth, and a whole module was written against it.
+It was wrong. Read across islands, a separate lip piece's own edge is
+indistinguishable from the rim of a hole. In welded topology `h_common01_` is
+six islands — a 475-vertex face shell with exactly one hole (the neck, same as
+Carth), two eyes, two closed lip pieces and a mouth bag.
+
+**What it is.** Measured by which bone *leads* each vertex, on the same bands:
+
+| band | vanilla `p_carthh` | plain transfer | after the fix |
+|---|---|---|---|
+| upper lip led by skull | 26% | **41%** | 23% |
+| upper lip led by mouth | 48% | 25% | 39% |
+| lower lip led downward | 88% | 97% | 97% |
+
+The **lower** lip was never wrong — it arrives better bound than vanilla. Two
+fifths of the **upper** lip is led by `head_g`, which never moves. Proximity
+transfer inherits from the nearest host *triangle*, and wherever the converted
+face sits off Carth's surface that triangle is skull.
+
+Mean weight shares said the opposite — that the whole mouth was skull-heavy and
+the lower lip starved. That reading averages over bands containing both lips and
+is an artefact. **Dominance, not mean share, is the metric that predicts
+movement.**
+
+`kmdlswap/facerig.py` re-samples only vertices where the skull leads *and* the
+host's anatomy at the same normalised position has a mobile bone leading. A
+blanket version of the same pass fixed the upper lip and dragged the lower lip
+from 97% to 84% while leaking upper-lip weight onto it; the targeted version
+leaves it at 97%. 58 of 285 lower-face vertices qualified on `h_common01_`.
+
+**To validate:** install `out_vex_facerig/` and talk to Vex on Taris. The rest
+pose is unchanged by design — `reports/jade_facerig.png` shows before and after
+as identical — so the only thing to look for is whether the upper lip now moves
+with speech. Nothing else about the head should differ.

@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from . import mdx as kmdx
-from . import topology, weights
+from . import facerig, topology, weights
 from .edit import Face, MeshGeometry, extract
 from .layout import Layout, NodeInfo
 from .obj import ObjMesh
@@ -42,6 +42,7 @@ class SwapReport:
     bones_used: int = 0
     bones_available: int = 0
     bones_claimed: dict[int, int] = field(default_factory=dict)
+    mouth_lines: list[str] = field(default_factory=list)
     normals_source: str = "obj"
     uv_source: str = "obj"
     tangent_source: str = ""
@@ -71,6 +72,8 @@ class SwapReport:
                     f"transferred weight and were given the nearest {total} "
                     f"vertex/vertices, at the weight they held on the host"
                 )
+            for line in self.mouth_lines:
+                out.append(f"            {line}")
         else:
             out.append("skinning    none (mesh is not skinned)")
         for w in self.warnings:
@@ -250,6 +253,17 @@ def build_replacement(
             original.influences,
             mesh.positions,
             influences_out,
+            max_influences=max_influences,
+        )
+        # Nearest-surface is right about detail and wrong about anatomy: where
+        # the new face sits off the host's surface it inherits skull rather than
+        # the small mobile bones, and that part of the face then never moves.
+        # Take a second opinion in anatomical space over the lower front.
+        influences_out, report.mouth_lines = facerig.rebalance(
+            mesh.positions,
+            influences_out,
+            original.positions,
+            original.influences,
             max_influences=max_influences,
         )
         problems = weights.check(influences_out)
