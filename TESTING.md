@@ -829,8 +829,21 @@ Only depth is corrected. The teeth already bracket the mouth vertically (z
 0.0702–0.0922 against lips at 0.0783–0.0864) and are narrow enough to fit, so
 moving them in z or scaling them would be inventing a correction.
 
-**To validate:** installed as `out_vex_mouth/`; previous build backed up at
-`out_vex_mouth/backup-before-mouth/`. Talk to Vex — teeth and tongue should show
+**First attempt failed in game — the teeth stuck out like tusks**
+(`20260903000522_1.jpg`). The correction was real in the file and discarded by
+the engine: `teethUa01` and `teethLa01` both carry a **position controller
+(type 8)**, and the engine takes the controller's value over the node header
+field that was edited. `tongue` is skinned, so its node position is bypassed
+too.
+
+The move now goes into the **geometry** — vertex positions offset in node space,
+with the stored bounding box transported alongside via `UniformScale(1.0, …)`,
+since the engine culls and sorts by that box. Nothing can override vertex data.
+Verified: header positions come out byte-identical to vanilla, clearance
++0.0085, model validates.
+
+**To validate:** installed as `out_vex_teeth/`; previous build backed up at
+`out_vex_teeth/backup-before-teeth/`. Talk to Vex — teeth and tongue should show
 when his mouth opens, and nothing should be visible at rest.
 
 **Method note.** Three passes in a row fixed something real and missed the cause,

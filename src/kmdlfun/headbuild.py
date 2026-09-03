@@ -300,7 +300,7 @@ def _write_into(layout, node, mesh, pack, reshape, hide, r: HeadResult):
 
         # Kept, but positioned for the host's face. A shallower replacement puts
         # the host's teeth in front of the new lips.
-        mdl, seated = kmouth.seat(kl.parse(mdl, mdx), mdl, node, layout)
+        mdl, mdx, seated = kmouth.seat(kl.parse(mdl, mdx), mdl, mdx, node, layout)
         r.lines.extend(seated)
 
     if not kv.check(kl.parse(mdl, mdx)).ok:

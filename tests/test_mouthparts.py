@@ -68,7 +68,10 @@ def test_only_depth_is_corrected():
 
     source = inspect.getsource(mouthparts.seat)
     assert "np.array([0.0, shift, 0.0])" in source, "the shift must be depth only"
-    assert "scale" not in source.lower()
+    # UniformScale is how the stored bounds are transported with the vertices;
+    # the factor must be exactly 1, so it is carrying a translation and nothing
+    # else.
+    assert "UniformScale(1.0, local)" in source
 
 
 class TestAgainstTheGame:
@@ -105,7 +108,36 @@ class TestAgainstTheGame:
         layout = kl.parse(mdl, mdx)
         head = next(n for n in kparts.mesh_nodes(layout) if n.name.lower() == "head")
 
-        out, lines = mouthparts.seat(layout, mdl, head, layout)
+        out_mdl, out_mdx, lines = mouthparts.seat(layout, mdl, mdx, head, layout)
 
-        assert out == mdl
+        assert out_mdl == mdl
+        assert out_mdx == mdx
         assert lines == []
+
+    def test_the_node_headers_are_left_alone(self, k1):
+        """The move goes into the geometry, not the node transform. Editing the
+        header measured correct in the file and did nothing in game, because
+        the teeth carry a position controller the engine reads instead."""
+        import struct
+
+        from kmdlfun import parts as kparts
+        from kmdlfun.library import ModelLibrary
+        from kmdlswap import layout as kl
+        from kmdlswap._io import MDL_BASE
+
+        mdl, mdx = ModelLibrary(k1).read("p_carthh")
+        layout = kl.parse(mdl, mdx)
+        head = next(n for n in kparts.mesh_nodes(layout) if n.name.lower() == "head")
+        before = {
+            n.name: struct.unpack_from("<3f", mdl, MDL_BASE + n.offset + 16)
+            for n in mouthparts.mouth_parts(layout)
+        }
+
+        out_mdl, _, _ = mouthparts.seat(layout, mdl, mdx, head, layout)
+
+        after_layout = kl.parse(out_mdl, mdx)
+        after = {
+            n.name: struct.unpack_from("<3f", out_mdl, MDL_BASE + n.offset + 16)
+            for n in mouthparts.mouth_parts(after_layout)
+        }
+        assert after == before
