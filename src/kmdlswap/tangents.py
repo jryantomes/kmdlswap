@@ -27,7 +27,21 @@ smoothed across their own seam and smoothing-group rules, which are not
 recorded anywhere in the file. What a replacement needs is a *valid* basis for
 its own geometry, not BioWare's basis for geometry that is gone. The vanilla
 figures are kept as a regression check on the convention - the sign especially,
-since a flipped tangent is invisible in a viewer and wrong in game.
+since a flipped tangent is invisible in a viewer.
+
+**It appears to be invisible in game too, which is not what this said before.**
+Tested on 2026-09-02 against a live install: negating every tangent on a Selkath
+changed nothing on screen, and neither did replacing all 1,942 of them with a
+single constant direction. The engine is not indifferent to bump mapping - it
+validated a hand-made bump texture and refused it by name - so the likeliest
+reading is that it derives its own basis and never reads this column. The claim
+that a flipped tangent "renders wrongly in game" was inherited from the reverse
+engineering, never checked, and the evidence points the other way.
+
+That does not make the convention wrong or the column pointless to fill. The
+values still agree positively with BioWare's, the stride and every header field
+stay as they were, and being right costs nothing. It means the risk of being
+*wrong* here is much smaller than it was written up as.
 
 Filling the column also keeps the stride and every header field exactly as they
 were: only the data changes. Dropping the column instead would mean rewriting

@@ -34,8 +34,21 @@ sys.path.insert(0, str(ROOT / "src"))
 TANGENT_FLOATS = slice(3, 6)
 
 
-def flip(mdl_path: Path, mdx_path: Path, out_dir: Path) -> dict:
-    """Write a copy whose tangent vectors point the other way."""
+def flip(mdl_path: Path, mdx_path: Path, out_dir: Path, mode: str = "flip") -> dict:
+    """Write a copy with the tangent column disturbed.
+
+    `flip` negates it, which is the question the sign convention asks.
+
+    `wreck` replaces every tangent with the same fixed direction, which asks a
+    blunter question: does the engine read this column *at all*? A negated
+    tangent is a symmetric change and can be genuinely hard to see; a constant
+    one destroys the basis everywhere, and if the lighting still does not move
+    then the column is not being used and the sign cannot matter.
+
+    That escalation is the point. A null result from `flip` on its own means
+    either "the sign does not matter" or "the column is ignored", and those are
+    very different answers.
+    """
     from kmdlfun import parts as kparts
     from kmdlswap import layout as kl
     from kmdlswap import mdx as kmdx
@@ -56,8 +69,11 @@ def flip(mdl_path: Path, mdx_path: Path, out_dir: Path) -> dict:
         for i in range(node.vertex_count):
             at = base + i * node.mdx_stride
             values = list(struct.unpack_from("<9f", mdx, at))
-            for j in range(*TANGENT_FLOATS.indices(9)):
-                values[j] = -values[j]
+            if mode == "wreck":
+                values[3:6] = [1.0, 0.0, 0.0]
+            else:
+                for j in range(*TANGENT_FLOATS.indices(9)):
+                    values[j] = -values[j]
             struct.pack_into("<9f", mdx, at, *values)
         touched[node.name] = node.vertex_count
 
@@ -71,6 +87,10 @@ def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("folder", help="a build folder holding one .mdl and .mdx")
     p.add_argument("--out", required=True)
+    p.add_argument("--mode", choices=["flip", "wreck"], default="flip",
+                   help="flip negates the tangents; wreck replaces them all "
+                        "with one fixed direction, to ask whether the engine "
+                        "reads the column at all")
     args = p.parse_args()
 
     folder = Path(args.folder)
@@ -85,13 +105,13 @@ def main() -> int:
         print(f"no {mdx.name} beside it", file=sys.stderr)
         return 1
 
-    touched = flip(mdl, mdx, Path(args.out))
+    touched = flip(mdl, mdx, Path(args.out), args.mode)
     if not touched:
         print("no mesh in this model carries a tangent column - "
               "there is nothing for this test to measure", file=sys.stderr)
         return 1
     for name, count in touched.items():
-        print(f"  flipped {count} tangents on {name!r}")
+        print(f"  {args.mode}ed {count} tangents on {name!r}")
     print(f"\nwrote {args.out}")
     print("Install this and the original in turn. They differ in exactly one "
           "sign, so any visible difference is the tangent basis.")

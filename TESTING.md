@@ -22,45 +22,46 @@ and anything matching `rfk_*`, `c_rfk_*`, `q_rfk_*`.
 
 # Part one: in the game
 
-## 1. Tangent lighting — the one with no substitute
+## 1. Tangent lighting — tested 2026-09-02, and the risk was overstated
 
-**What is already established.** The basis was reverse-engineered and its sign
-*measured against vanilla*, not guessed. `compute` agrees **positively with
-BioWare's own tangents, better than +0.8** on every mesh that carries the
-column, and the slot order (bitangent, tangent, normal) was read off five of
-them. So the convention is anchored. What that cannot show is whether the
-engine renders a basis computed for *new* geometry, and a flipped tangent is
-invisible in any viewer.
+**Result: three destructive perturbations, nothing visible.** Not the
+confirmation that was expected, and a more useful answer than one would have
+been.
 
-**An A/B kit is built and waiting in `out_tangent_test/`.** Two copies of Carth's
-head on a Selkath body, identical in every byte except the sign of 2,274
-tangent vectors. This project's own previewer renders them **pixel for pixel
-identically** — which is the whole reason the test needs the game.
+| what was installed | what changed on screen |
+|---|---|
+| every tangent negated | nothing |
+| every tangent replaced with one constant direction | nothing |
+| the bump map declaration removed from the texture | nothing anyone could call |
 
-Rebuild it any time with:
+Vanilla `n_selkath`, vanilla geometry, one variable at a time. If our tangent
+values were capable of looking wrong in game, *destroying* them would have
+looked wrong.
 
-```bash
-python tools/flip_tangents.py <a build folder> --out <dir>
-```
+The engine is not indifferent to bump mapping — it validated a hand-made bump
+texture and refused it by name, `"Invalid Bumpmap!"` — so it has a live path
+that reads those textures. The likeliest reading is that it derives its own
+tangent basis and never reads the MDX column.
 
-- [ ] Install `A_ours` into Override, go to **Manaan** — Ahto City is full of
-      Selkath and brightly lit — and walk around one so the light crosses its
-      face. Screenshot from a fixed spot.
-- [ ] Install `B_flipped` over it and look again from the same spot.
-- [ ] **If one looks wrong, the other is right.** Wrong looks like highlights
-      on the opposite side from the light, detail reading inside-out or sunken
-      where it should be raised, a face going flat or greasy as the camera
-      moves. A looking right is the expected result; B looking right means the
-      sign is inverted in the tool and every tangent-bearing model it has
-      written is wrong.
-- [ ] **If they look the same**, tangents are doing no visible work on this
-      model and the test says nothing. Try `n_rakata`, `twilek_m`, `n_xorh` or
-      `c_rakghoul` — the other four that carry the column.
+**What this settles.** Filling the column is not a risk. The values agree
+positively with BioWare's at better than +0.8, the stride and headers are
+untouched, and the 21 tangent-carrying heads stay reachable. The claim that a
+flipped tangent "renders wrongly in game" was inherited from the reverse
+engineering, never tested, and is not supported.
 
-The point of the pair is that judging one head alone asks "does this look
-right", which is an opinion about a face you have never seen lit. Judging two
-that differ in exactly one sign asks "which of these is wrong", which is an
-observation.
+**What it does not settle.** Whether bump mapping reaches the screen at all on
+this machine — a 2003 effect on a modern GPU. The `.txi` control that would
+have answered it was inconclusive by eye, and the pixel comparison failed
+because the dialogue camera moves between takes: 47–52% of pixels differ
+between *every* pair of screenshots, including two we know look identical. A
+conclusive version needs a fixed camera and a model with dramatic bump detail,
+and is low value now the practical question is answered.
+
+**The kit is kept** in `out_tangent_test/`; `tools/flip_tangents.py --mode
+flip|wreck` rebuilds it for any model.
+
+- [ ] *Optional, low priority.* If a Selkath ever looks wrong in normal play,
+      that is the signal this testing could not produce, and worth reopening.
 
 ## 2. The heads that were unreachable until now
 
@@ -620,10 +621,22 @@ wrong on the next one is worse than no heuristic.
 
 ## Housekeeping
 
-Still in `Override/` from earlier testing, both safe to delete:
+**Cleared 2026-09-02**, twice over. Everything installed during the tangent
+testing — `n_selkath.mdl/.mdx`, `N_Selkath01b.tga/.txi`, `N_Selkath01.txi` — is
+out, and Override holds nothing of ours.
 
-- `p_carthh` — Carth reshaped onto Dustil's head
-- `p_bastilabb` — Bastila's cap-1 armour body
+`p_carthh` had been sitting in `Override/` since the
+head-swap testing on 2026-08-30, so Carth had a Quarren head for three days.
+It read small and bare because that build hid hair, eyes, teeth and tongue —
+2 visible meshes against vanilla's 9 — rather than because of its size.
+
+Pulled out and kept in `out_rescued/quarren_carth/` in case it is wanted again.
+`p_bastilabb` was already gone.
+
+The lesson worth keeping: a test model installed into the game stays installed.
+Nothing in this project removes one, and there is no reason to expect the person
+who put it there to remember three days later. Anything installed for a test
+belongs in this section the moment it goes in.
 
 ## Already verified, for contrast
 
