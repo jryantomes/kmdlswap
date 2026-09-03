@@ -278,17 +278,30 @@ def _write_into(layout, node, mesh, pack, reshape, hide, r: HeadResult):
         from . import parts as kparts
         from . import visibility as kvis
 
+        from . import mouthparts as kmouth
+
         after = kl.parse(mdl, mdx)
         wanted = list(hide) if hide else [
             # Everything visible except the node just replaced. These are shaped
             # for the face that is gone, so they float.
+            #
+            # The mouth interior is the exception, and hiding it was a real bug:
+            # teeth and a tongue sit *inside* the head rather than on its
+            # surface, so they still belong there, and without them the mouth
+            # opens onto nothing. Reported from the game as lips that move on a
+            # mouth that looks taped shut.
             n.name for n in kparts.mesh_nodes(after)
-            if n.name.lower() != node.name.lower()
+            if n.name.lower() != node.name.lower() and not kmouth.is_mouth_part(n.name)
         ]
         mdl, hidden = kvis.hide_nodes(after, mdl, wanted)
         if hidden:
             r.lines.append(f"hidden (host parts that no longer fit): "
                            f"{', '.join(hidden)}")
+
+        # Kept, but positioned for the host's face. A shallower replacement puts
+        # the host's teeth in front of the new lips.
+        mdl, seated = kmouth.seat(kl.parse(mdl, mdx), mdl, node, layout)
+        r.lines.extend(seated)
 
     if not kv.check(kl.parse(mdl, mdx)).ok:
         r.error = "result failed validation; nothing written"

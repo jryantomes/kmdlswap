@@ -788,3 +788,53 @@ and is untouched.
 **Method note worth keeping:** dominance beats mean share, and *islands* beat
 regions. Two passes in a row measured something true about a region and missed
 the handful of vertices that actually mattered.
+
+## 29. The mouth interior was being hidden
+
+**Status: built, installed, awaiting in-game confirmation. This is the actual
+cause of §23's "glued shut".**
+
+Reported after §28: *"The movements work but there's no teeth or tongue like
+with the KOTOR models."* The lips animate correctly — §28 did its job — and the
+mouth opens onto nothing, which reads as taped shut.
+
+**Cause.** A KOTOR head is several nodes: `Head` is the face, and the mouth
+interior is two or three separate nodes beside it. They are near-universal —
+across 106 K1 head models, 104 carry a `tongue` and essentially all carry teeth
+under three naming schemes (`teethua`/`teethla` on 54, `teethupper`/`teethlower`
+on 44, `teethua01`/`teethla01` on 3, which is Carth). When a converted head
+replaces `Head`, the build hid *every* other visible node. Right for hair and
+eyelids, which are shaped for the vanished face and would float. Wrong for the
+mouth interior, which sits inside the head and still belongs there.
+
+**Why keeping them naively also fails.** They are placed for the host's face.
+Measured in model space at mouth height:
+
+| | face surface | teeth front | clearance |
+|---|---|---|---|
+| vanilla Carth | y +0.1185 | +0.1100 | **+0.0085 (inside)** |
+| Jade build, before | y +0.1048 | +0.1100 | **−0.0052 (through the lips)** |
+
+The Jade face is 0.0137 shallower at the mouth, so Carth's teeth protrude. That
+is what an early attempt at this looked like — `reports/jade_mouth.png` — and it
+is why the idea was dismissed the first time round, on the strength of a static
+render, before the real symptom was known.
+
+`kmdlfun/mouthparts.py` keeps the mouth interior and moves it back to the
+clearance the host itself had, measured from both heads rather than nudged by a
+constant. After: teeth clearance +0.0085, matching Carth exactly; tongue
++0.0125. `reports/jade_mouthparts.png` shows no teeth visible at rest.
+
+Only depth is corrected. The teeth already bracket the mouth vertically (z
+0.0702–0.0922 against lips at 0.0783–0.0864) and are narrow enough to fit, so
+moving them in z or scaling them would be inventing a correction.
+
+**To validate:** installed as `out_vex_mouth/`; previous build backed up at
+`out_vex_mouth/backup-before-mouth/`. Talk to Vex — teeth and tongue should show
+when his mouth opens, and nothing should be visible at rest.
+
+**Method note.** Three passes in a row fixed something real and missed the cause,
+because the symptom was described as "glued shut" and read as a movement problem.
+It was never movement. The lesson is to ask what a symptom *looks like* before
+deciding what it *is* — the render that would have settled this existed from the
+first hour and was misread.
