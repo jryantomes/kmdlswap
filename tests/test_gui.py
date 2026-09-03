@@ -1309,15 +1309,27 @@ def _a_glb():
 # all three already exist for anything the game ships.
 
 
-@pytest.fixture
-def stocked(app, install_path):
-    """The tab with a real catalogue in it, loaded synchronously."""
+@pytest.fixture(scope="module")
+def catalogue(install_path):
+    """The wardrobe catalogue, built once for the whole module.
+
+    Same lesson as `scanned` above, found the same way: building it takes about
+    fourteen seconds and nine tests wanted it, so the suite spent two minutes
+    re-deriving identical read-only data. The app only ever reads a catalogue -
+    `_show_catalogue` keeps a reference and `_part_items` copies out of it - so
+    one instance is safe to share.
+    """
     from kmdlfun import wardrobe as kw
     from kmdlfun.library import ModelLibrary
 
+    return kw.build(install_path, library=ModelLibrary(install_path))
+
+
+@pytest.fixture
+def stocked(app, install_path, catalogue):
+    """The tab with a real catalogue in it, loaded synchronously."""
     app.install.set(install_path)
-    app._show_catalogue(kw.build(install_path,
-                                 library=ModelLibrary(install_path)))
+    app._show_catalogue(catalogue)
     return app
 
 
