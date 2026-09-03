@@ -734,3 +734,57 @@ leaves it at 97%. 58 of 285 lower-face vertices qualified on `h_common01_`.
 pose is unchanged by design — `reports/jade_facerig.png` shows before and after
 as identical — so the only thing to look for is whether the upper lip now moves
 with speech. Nothing else about the head should differ.
+
+## 28. The lips are separate pieces, and that is why the mouth stayed shut
+
+**Status: built, measured, awaiting in-game confirmation. Supersedes §27's
+conclusion, which was correct in itself but not the cause.**
+
+§27 corrected the upper lip's *region* from 41% skull-led to 23% and was
+installed. In-game result: **no visible change.** The weights it fixed were not
+the ones holding the mouth shut.
+
+**Why it was missed.** Every measurement had been taken over geometric bands.
+The visible mouth is two 14-vertex lip islands; a band around the mouth holds
+285 vertices. 28 inside 285 vanish into the average. Measuring the islands
+themselves, on the installed build:
+
+| island | led by |
+|---|---|
+| upper lip (14) | `head_g` 9, `f_um_g` 5 |
+| lower lip (14) | `f_um_g` 4, `f_jaw_g` 4, `head_g` 4 |
+| mouth bag (11) | `head_g` 5, `f_jaw_g` 5 |
+
+The upper lip is led by a bone that never moves; the lower lip has as much
+weight lifting it as dropping it, so the two cancel. Proximity transfer fails
+here specifically because separate lip pieces sit *recessed behind* the face
+shell, and the nearest host surface to a point tucked under Carth's lip is skull,
+not lip. `facerig` could not reach them for the same reason.
+
+**Also settled: the `.lip` route cannot work.** A KOTOR `.lip` file is a list of
+`(time, shape)` pairs into 16 shapes the engine owns — `AH`, `EE`, `EH`, `FV`,
+`KG`, `L`, `MPB`, `NEUTRAL`, `NG`, `OH`, `OOH`, `SH`, `STS`, `TD`, `TH`, `Y`. It
+carries no geometry and no bone transforms, so there is nowhere to put imported
+animation, and what each shape *looks like* is decided by the head's weights.
+The Jade head model also reports zero animations. The `.lip` file can still
+change how *much* a mouth moves (denser keyframes, more extreme shapes) — that
+is a separate, open idea.
+
+`kmdlswap/lips.py` finds the lip pieces as welded islands and binds them to the
+profile measured across 101 vanilla heads. After it:
+
+| island | after |
+|---|---|
+| upper lip | `f_um_g` 14/14 |
+| lower lip | `f_llm_g` 8, `f_rlm_g` 6 (split by side) |
+| mouth bag | `f_jaw_g` 11/11 |
+
+**To validate:** installed as `out_vex_lips/`; previous build backed up at
+`out_vex_lips/backup-before-lips/`. Talk to Vex on Taris. The rest pose is
+unchanged, so the only question is whether the mouth now opens. A head whose
+mouth is part of the face shell (every vanilla KOTOR head) has no lip islands
+and is untouched.
+
+**Method note worth keeping:** dominance beats mean share, and *islands* beat
+regions. Two passes in a row measured something true about a region and missed
+the handful of vertices that actually mattered.

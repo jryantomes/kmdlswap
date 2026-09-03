@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from . import mdx as kmdx
-from . import facerig, topology, weights
+from . import facerig, lips, topology, weights
 from .edit import Face, MeshGeometry, extract
 from .layout import Layout, NodeInfo
 from .obj import ObjMesh
@@ -266,6 +266,20 @@ def build_replacement(
             original.influences,
             max_influences=max_influences,
         )
+        # Lips modelled as their own pieces sit recessed behind the face, so the
+        # nearest host surface to them is skull rather than lip. They are also
+        # too few to show up in any regional average - 28 vertices inside a band
+        # of 285 - so they need finding and binding directly.
+        influences_out, lip_lines = lips.bind(
+            mesh.positions,
+            [tuple(f)[:3] for f in mesh.faces],
+            influences_out,
+            {slot: n.name for slot, n in kmdx.bone_slot_nodes(layout, node).items()},
+            original.positions,
+            original.influences,
+            max_influences=max_influences,
+        )
+        report.mouth_lines = list(report.mouth_lines) + lip_lines
         problems = weights.check(influences_out)
         if problems:
             raise ValueError(
