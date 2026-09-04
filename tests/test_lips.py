@@ -208,7 +208,11 @@ def head_with_a_face_over_lips():
         points.extend(p)
         faces.extend([(a + base, b + base, c + base) for a, b, c in f])
 
-    def plane(y, nx=16, nz=22):
+    # Dense enough that several rows land inside the mouth box on both sides
+    # of the lip line. A coarse plane put a single row in it, all on one side,
+    # and the split had nothing to work with - which is a property of the
+    # fixture, not of the code.
+    def plane(y, nx=16, nz=64):
         pts = [
             (-0.15 + 0.30 * i / (nx - 1), y, k / (nz - 1))
             for i in range(nx) for k in range(nz)
@@ -237,14 +241,14 @@ def test_the_shell_splits_at_the_lip_line():
     out, lines = lips.bind(points, faces, infl, RIG)
 
     assert any("stretches apart" in line for line in lines), lines
+    from kmdlswap import mouthsplit
+
+    # The same box the code uses. Writing the factors out again here is how this
+    # test drifted from `bind` once already: the weighting box and the split box
+    # have to be the one box, or the test asserts about vertices the code never
+    # touched.
     upper, lower = lips.find_lips(points, faces)[:2]
-    rim = P[sorted(set(upper) | set(lower))]
-    box = (
-        float(rim[:, 0].min() + rim[:, 0].max()) / 2,
-        float(rim[:, 2].min() + rim[:, 2].max()) / 2,
-        float(rim[:, 0].max() - rim[:, 0].min()) / 2 * 1.6,
-        float(rim[:, 2].max() - rim[:, 2].min()) / 2 * 2.0,
-    )
+    box = mouthsplit._box(points, upper, lower)
     above, below = lips.mouth_region(points, faces, near=box)
     assert above and below
 
@@ -259,14 +263,14 @@ def test_the_split_is_confined_to_the_mouth():
     the mouth tears the face somewhere it should not."""
     points, faces = head_with_a_face_over_lips()
     P = np.asarray(points, dtype=float)
+    from kmdlswap import mouthsplit
+
+    # The same box the code uses. Writing the factors out again here is how this
+    # test drifted from `bind` once already: the weighting box and the split box
+    # have to be the one box, or the test asserts about vertices the code never
+    # touched.
     upper, lower = lips.find_lips(points, faces)[:2]
-    rim = P[sorted(set(upper) | set(lower))]
-    box = (
-        float(rim[:, 0].min() + rim[:, 0].max()) / 2,
-        float(rim[:, 2].min() + rim[:, 2].max()) / 2,
-        float(rim[:, 0].max() - rim[:, 0].min()) / 2 * 1.6,
-        float(rim[:, 2].max() - rim[:, 2].min()) / 2 * 2.0,
-    )
+    box = mouthsplit._box(points, upper, lower)
     above, below = lips.mouth_region(points, faces, near=box)
     mid_y = (P[:, 1].min() + P[:, 1].max()) / 2
 

@@ -267,17 +267,23 @@ def bind(
         rim = _P[sorted(set(found[0]) | set(found[1]))]
         # Generous around the lips - a mouth corner reaches past the modelled
         # lip piece - but nothing like far enough to touch the skull seam.
-        box = (
-            float(rim[:, 0].min() + rim[:, 0].max()) / 2,
-            float(rim[:, 2].min() + rim[:, 2].max()) / 2,
-            float(rim[:, 0].max() - rim[:, 0].min()) / 2 * 1.6,
-            float(rim[:, 2].max() - rim[:, 2].min()) / 2 * 2.0,
-        )
+        # The same box the face is parted along. It has to be the same: the
+        # weighting decides which vertices lift and which drop, and the split
+        # decides where the surface is allowed to come apart. Where the first
+        # reaches past the second, faces span from a lifted vertex to a dropped
+        # one with nothing between them to give, and they tear - rendered, the
+        # mouth grew triangular fangs.
+        from . import mouthsplit as _mouthsplit
+
+        box = _mouthsplit._box(positions, found[0], found[1])
         if split is not None:
-            # The face was parted along its lip line, so which side a vertex is
-            # on is known exactly rather than inferred from its height. The two
-            # halves sit on identical coordinates and nothing else can tell them
-            # apart.
+            # Only the vertices actually parted. Weighting the whole lip area by
+            # height as well was tried and is wrong: the strong lip profiles then
+            # apply to vertices the surface is not split along, so faces span
+            # from a lifted vertex to a dropped one with nothing between them to
+            # give. Rendered, the mouth grew triangular fangs. Aligning the two
+            # boxes did not help - the problem is the breadth of the weighting,
+            # not where its edge falls.
             seam_upper, seam_lower = split
         else:
             seam_upper, seam_lower = mouth_region(positions, faces, near=box)
@@ -353,17 +359,43 @@ def bind(
     # mouth pieces". A piece tucked behind the lip has to move *with* the lip in
     # front of it, whatever that lip happens to be doing, so it inherits from
     # the nearest shell vertex - after the seam above has corrected those.
-    interior = list(upper_island) + list(lower_island) + list(bag_island or [])
     followed = 0
-    if interior and len(shell_index):
-        shell_points = P[shell_index]
-        for v in interior:
-            d = shell_points - P[v]
-            nearest = int(np.argmin(np.einsum("ij,ij->i", d, d)))
-            source = out[int(shell_index[nearest])]
-            if source:
-                out[v] = [Influence(f.bone_slot, f.weight) for f in source]
-                followed += 1
+    if len(shell_index):
+        line = None
+        if upper_island and lower_island:
+            both = P[sorted(set(upper_island) | set(lower_island))]
+            line = float(both[:, 2].min() + both[:, 2].max()) / 2
+
+        # Which side of the lip line a piece may inherit from. This matters
+        # because the two halves of a split line sit on identical coordinates,
+        # so "the nearest shell vertex" is ambiguous exactly where it must not
+        # be: a lower tooth can end up following the upper lip and then rides up
+        # through it, which in game read as the teeth poking through oddly.
+        def source_pool(side):
+            if line is None:
+                return shell_index
+            keep = [
+                v for v in shell_index
+                if (P[v][2] >= line if side == "upper" else P[v][2] <= line)
+            ]
+            return np.asarray(keep, dtype=int) if keep else shell_index
+
+        for group, side in (
+            (upper_island, "upper"),
+            (lower_island, "lower"),
+            (bag_island or [], "lower"),
+        ):
+            pool = source_pool(side)
+            if not len(pool):
+                continue
+            points = P[pool]
+            for v in group:
+                d = points - P[v]
+                nearest = int(np.argmin(np.einsum("ij,ij->i", d, d)))
+                source = out[int(pool[nearest])]
+                if source:
+                    out[v] = [Influence(f.bone_slot, f.weight) for f in source]
+                    followed += 1
 
     lines = []
     if followed:

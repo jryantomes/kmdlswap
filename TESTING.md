@@ -1187,3 +1187,40 @@ opening onto a dark interior with teeth.
 `out_vex_topo/backup-before/`. At rest the mouth should look shut with no line
 or gap. Talking, it should part and show teeth and interior rather than smearing
 skin — and nothing should tear at the corners or run into the cheeks.
+
+
+## 38. Where the split stands
+
+**Status: installed. Top lip working, bottom lip not.**
+
+Reported on §37: *"the top lip is mostly working, there is still some jagged
+lines and the teeth are poking through oddly, but the bottom lip is stretching
+instead of showing the inside of his mouth."*
+
+**Fixed: the teeth poking through.** Each interior piece took the weights of its
+nearest shell vertex, and the two halves of a split lip line sit on *identical*
+coordinates — so "nearest" is ambiguous exactly where it must not be, and a
+lower tooth could end up following the upper lip and ride up through it. Each
+piece now inherits only from shell vertices on its own side of the line.
+
+**Not fixed: the bottom lip stretching.** The obvious cause is that only the 12
+split vertices carry lip weights, while the lower lip below them keeps whatever
+the transfer gave it. Weighting the whole lip area by height as well — which is
+what §34 did before the split existed — **tears the mouth into triangular
+fangs**, because the strong lip profiles then apply to vertices the surface is
+not split along, so faces span from a lifted vertex to a dropped one with
+nothing between them to give. Aligning the weighting box to the split box did
+not help; the problem is the breadth of the weighting, not where its edge falls.
+
+Both attempts are rendered with culling. Reverted to split-only, which is clean
+in the preview and is what §37 was reported on.
+
+**What this points at.** To weight a broad lip area, the surface has to be split
+along the *whole* boundary of that area, not just a line across the middle of
+it. The current split runs one line at the lip; a broader weighted region needs
+a correspondingly broader parting, or a graded falloff so no two adjacent
+vertices ever differ enough to tear. The second is likely the smaller change.
+
+**To validate:** installed as `out_vex_topo2/` — the §37 split plus the teeth
+fix. Backup at `out_vex_topo2/backup-before/`. Expect the top lip as before and
+the bottom lip still stretching; the teeth should no longer poke through.
