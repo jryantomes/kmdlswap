@@ -1112,3 +1112,40 @@ a set of teeth. Talking, the interior should show instead of smeared skin. If
 teeth are visible while he stands there saying nothing, `mouth_height` wants
 dropping further; if the mouth still smears, the aperture is too small to matter
 and it wants raising.
+
+
+## 36. Face deletion cannot make a mouth line at this resolution
+
+**Status: cut reverted. The mouth remains unsolved; the route to solving it is
+now clear.**
+
+Reported: *"the top lip is cut into triangles where you can see the teeth."*
+
+**Arithmetic, not judgement.** Triangles near the mouth average **0.0067** tall.
+The aperture is **0.0020**. The slit is a third of a triangle, so deleting any
+whole face leaves a hole three times too big and shaped like a triangle. No
+choice of `mouth_height` fixes that — below one triangle the cut is jagged, at
+one triangle it bares teeth at rest. `mouth` is off again.
+
+**A correction that has been wrong all session.** The two 14-vertex pieces I
+have been calling *lip islands* sample **u 0.012–0.182, v 0.015–0.071** — the
+teeth strip along the top of the Jade atlas. **They are the head's own upper and
+lower teeth.** The 11-vertex bag samples u 0.879–0.982, v 0.831–0.972, the pink
+patch: the mouth interior. So this head carries its own teeth and interior all
+along, behind a closed face, and it never needed Carth's borrowed ones.
+
+**What the head actually is.** A closed face shell, with teeth and a mouth
+interior modelled behind it and mapped to their own corner of the texture. For
+any of it to show, the shell has to part along the lip line.
+
+**The route that remains.** Not deletion — a **topological split**: duplicate
+the vertices along the lip line so the shell has two coincident boundaries
+there, exactly the zero-width aperture §31 wrongly believed already existed.
+Then the §34 stretch weighting parts them, with no gap at rest and no jagged
+triangles, because nothing is removed. That is real mesh surgery — identifying
+the loop, duplicating it, reassigning the faces above it — and is not a small
+change.
+
+**State:** installed as `out_vex_nocut/` — stretch weighting, mouth interior
+seated, interior following the shell, no cut. Animations work and the mouth line
+smears rather than opening, which is where §34 left it.
