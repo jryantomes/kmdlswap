@@ -1224,3 +1224,39 @@ vertices ever differ enough to tear. The second is likely the smaller change.
 **To validate:** installed as `out_vex_topo2/` — the §37 split plus the teeth
 fix. Backup at `out_vex_topo2/backup-before/`. Expect the top lip as before and
 the bottom lip still stretching; the teeth should no longer poke through.
+
+
+## 39. The lower rim needs the jaw, and the preview cannot tell
+
+**Status: installed, untested. The preview is blind to this change by
+construction.**
+
+Screenshots of §38 magnified show the split working: a thin sliver of teeth
+appears at the lip line, so the upper half lifts. What does not happen is the
+lower half dropping — below the sliver is stretched lower lip, not interior.
+
+**The profile was the problem.** The lower rim was given the measured vanilla
+lower-lip profile, which carries `f_jaw_g` at only **5%**. That is correct for a
+vanilla head and wrong here. A vanilla lower lip needs no jaw weight because it
+sits on a mandible that is already swinging and is carried along; measured on
+Carth, his chin is 0.52 jaw while his lower-lip band is 0.04. A converted head
+parted along a single line has no such carry — its rim is weighted like a lip
+and travels like one.
+
+`SPLIT_LOWER_PROFILE` puts the jaw in charge of the rim: jaw 0.55, near
+lower-mouth 0.35, near corner 0.10. Strong jaw weighting is safe *here
+specifically* because this is the one line the surface is parted along, so there
+is no neighbour on the far side to tear away from — which is what went wrong
+every time a broad region was weighted this hard.
+
+**The preview cannot check it.** The jaw-open simulation sums every "down" bone
+into a single rotation, so `f_jaw_g` and `f_llm_g` are the same thing to it and
+the two builds render identically. Only the engine distinguishes them, because
+only the engine moves those bones differently. Recorded because it is a real
+limit on the whole method: **the simulation can test where a vertex is bound,
+never which of several moving bones it is bound to.**
+
+**To validate:** installed as `out_vex_jawrim/`; backup at
+`out_vex_jawrim/backup-before/`. The upper sliver should stay and the lower lip
+should now drop away from it rather than stretching. If the lower lip drops too
+far, or drags the chin with it, the jaw share is too high.

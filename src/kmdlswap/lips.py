@@ -70,6 +70,20 @@ LOWER_PROFILE = {"near_lower": 0.701, "near_corner": 0.234, "jaw": 0.065}
 # The bag is the inside of the mouth; it belongs to the jaw that opens it.
 BAG_PROFILE = {"jaw": 0.700, "near_lower": 0.300}
 
+# The lower half of a *split* lip line is a different case from a lower-lip
+# vertex on an unsplit face, and wants a different profile.
+#
+# On a vanilla head the lower lip carries almost no jaw - 5% - because it does
+# not need any: it sits on a mandible that is itself swinging, and is carried
+# along. A converted head parted along one line has no such carry. Its lower
+# rim is weighted for a lip and travels like one, which in game showed as a
+# sliver of teeth at the lip line and a lower lip that stretched instead of
+# dropping. Putting the jaw in charge of the rim gives it the travel the bone
+# actually has. Safe to make strong here specifically, because this is the one
+# line the surface is parted along - there is no neighbour on the other side to
+# tear away from.
+SPLIT_LOWER_PROFILE = {"jaw": 0.550, "near_lower": 0.350, "near_corner": 0.100}
+
 # Where a mouth can sit, as a fraction of head height. Wide enough to be
 # generous, narrow enough to exclude the eyes above and the neck below.
 BAND = (0.18, 0.52)
@@ -339,6 +353,12 @@ def bind(
                     near_corner: LOWER_PROFILE["near_corner"],
                     JAW: LOWER_PROFILE["jaw"],
                 }
+            elif which == "split_lower":
+                want = {
+                    JAW: SPLIT_LOWER_PROFILE["jaw"],
+                    near_lower: SPLIT_LOWER_PROFILE["near_lower"],
+                    near_corner: SPLIT_LOWER_PROFILE["near_corner"],
+                }
             else:
                 want = {
                     JAW: BAG_PROFILE["jaw"],
@@ -348,7 +368,7 @@ def bind(
 
     # The shell's own aperture first: those rims are what open the mouth.
     apply(seam_upper, "upper")
-    apply(seam_lower, "lower")
+    apply(seam_lower, "split_lower" if split is not None else "lower")
 
     # Then the pieces lying behind the shell - lips, and the interior bag.
     #
