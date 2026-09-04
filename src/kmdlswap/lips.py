@@ -441,3 +441,75 @@ def _finalise(pool: dict[int, float], max_influences: int = MAX_INFLUENCES) -> l
     if total <= 0:
         return []
     return [Influence(slot, w / total) for slot, w in ranked]
+
+
+# --- the colour of the cavity ------------------------------------------------
+
+# How big a patch of texture to look for, in pixels. Big enough that bilinear
+# filtering at the edges cannot drag a neighbouring colour in, small enough to
+# find one on a crowded atlas.
+DARK_PATCH = 6
+
+
+def darkest_uv(image, *, block: int = DARK_PATCH):
+    """A UV pointing at the darkest flat patch of a texture.
+
+    Vanilla lines a mouth with one flat colour: all 8 vertices of Carth's cavity
+    sample the same near-black patch, luminance 33.7 to the decimal on every one
+    of them. So the target is a *patch*, not a gradient - scored on brightness
+    and on how uniform it is, because a dark patch that is half shadow and half
+    hair reads as a smear when a whole cavity is mapped onto it.
+
+    Returns ``(u, v, luminance)`` or None.
+    """
+    a = np.asarray(image)
+    if a.dtype != np.uint8:
+        a = (np.clip(a, 0, 1) * 255).astype(np.uint8)
+    if a.ndim != 3 or a.shape[0] < block * 2 or a.shape[1] < block * 2:
+        return None
+    lum = a[..., :3].mean(axis=2)
+    height, width = lum.shape
+
+    best = None
+    for y in range(0, height - block, block):
+        for x in range(0, width - block, block):
+            patch = lum[y:y + block, x:x + block]
+            score = float(patch.mean()) + float(patch.std())
+            if best is None or score < best[0]:
+                best = (score, x, y, float(patch.mean()))
+    if best is None:
+        return None
+    _, x, y, mean = best
+    return (x + block / 2) / width, 1.0 - (y + block / 2) / height, mean
+
+
+def darken_interior(mesh, interior, image) -> list[str]:
+    """Point a converted head's mouth interior at a dark patch of its own texture.
+
+    The geometry is already right - measured against Carth, the depth matches to
+    a few thousandths - but it is painted mid-tone: luminance ~127 against his
+    33.7. An opening mouth then reveals something that reads as lip rather than
+    as a hole, which is how it looked in game through every geometric fix.
+
+    This is a judgement, not a repair: the head is painted the way its artist
+    painted it, and this makes it read as a KOTOR mouth instead. Nothing else is
+    touched, and the patch comes from the head's own atlas rather than being
+    invented.
+    """
+    if not interior or image is None:
+        return []
+    found = darkest_uv(image)
+    if found is None:
+        return []
+    u, v, lit = found
+    if not mesh.has_uvs:
+        return []
+
+    before = float(np.mean([mesh.uvs[i][1] for i in interior])) if interior else 0.0
+    for i in interior:
+        mesh.uvs[i] = (float(u), float(v))
+    return [
+        f"mouth cavity: pointed its {len(interior)} vertices at the darkest flat "
+        f"patch of the head's own texture (luminance {lit:.0f}; the host's cavity "
+        f"is 34), so an open mouth reads as a hole rather than as lip"
+    ]

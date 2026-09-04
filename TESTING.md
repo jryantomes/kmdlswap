@@ -1299,3 +1299,42 @@ its artist painted it — so darkening it is a choice about intent, not a fix.
 of an object agreed with a hypothesis and were not checked against each other.
 The tell was available immediately: the correction it justified moved the mesh
 by 0.0004.
+
+
+## 41. The cavity is dark now, and it probably does not matter
+
+**Status: installed. Correct on its own terms; the preview shows no visible
+difference, and the reason is worth more than the change.**
+
+Asked for the interior UVs to be remapped to a dark spot. Done: `darkest_uv`
+scores every patch of the head's own atlas on brightness *and* uniformity — a
+patch that is half shadow and half hair smears when a whole cavity is mapped
+onto it — and `darken_interior` points all 11 interior vertices at the winner.
+They now sample a flat **12.3** where they sampled ~127; Carth's cavity is 33.7.
+Flat is authentic: all 8 of Carth's cavity vertices sample one patch, to the
+decimal.
+
+**The render does not change, and that is the finding.** If darkening the
+interior made no visible difference, the interior is not what fills the opening.
+What shows through the parted lips is stretched *shell* — the lower lip's own
+outer surface — which is exactly what has been reported from the game
+throughout: "the bottom lip is stretching instead of showing the inside of his
+mouth."
+
+So the interior's colour was never the lever, and neither was its depth (§40).
+**The lower lip not travelling is the whole problem**, and it has survived: the
+vanilla lip profile, the jaw-led rim profile (§39), the topological split, and
+now this. Each of those was a real defect and none was *the* defect.
+
+What has not been tried is the one thing every attempt has skirted: the lower
+lip's *own surface*, below the split line, is weighted by proximity transfer and
+nothing has ever corrected it — §38 established that weighting it broadly tears
+the mesh, so it needs a graded falloff from the rim outward rather than a region
+assignment. That is the next thing to build, and it should be built against a
+measurement of how far the lower lip actually travels, not against a render.
+
+**To validate:** installed as `out_vex_dark/`; backup at
+`out_vex_dark/backup-before/`. Expect no visible change from the last build. If
+the mouth interior *does* look darker, that is worth knowing too - it would mean
+the bag is visible after all and the preview is wrong about which surface fills
+the opening.
