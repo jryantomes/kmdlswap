@@ -1338,3 +1338,40 @@ measurement of how far the lower lip actually travels, not against a render.
 the mouth interior *does* look darker, that is worth knowing too - it would mean
 the bag is visible after all and the preview is wrong about which surface fills
 the opening.
+
+
+## 42. The graded falloff does not work, and why
+
+**Status: tried, rendered, reverted. Nothing installed from it.**
+
+The lower lip below the split rim keeps its transferred weights, so the rim
+travels and the lip under it does not. §38 established that assigning the whole
+area the rim's profile tears the mesh into fangs. A graded falloff — full
+strength at the rim, easing to nothing with distance — was the obvious remedy:
+no two neighbouring vertices then differ by more than a step, so the surface
+should carry the motion instead of ripping where the assignment stops.
+
+**It grows fangs anyway.** Rendered with culling at falloff radii of 0.5, 1.0
+and 2.0 times the mouth's half-height, every one of them. The rest pose is clean
+in all three; the open pose is worse than doing nothing.
+
+Two attempts, both wrong:
+
+- Grading the **lower** side alone moved the discontinuity rather than removing
+  it. The upper rim stayed at full strength against unmanaged neighbours, and
+  the fangs simply hung from the upper lip instead.
+- Grading **both** sides did not help either, at any radius.
+
+**What the spikes actually are.** They are cream-coloured — the head's own
+**teeth pieces**, not shell. Those pieces take their weights from the nearest
+shell vertex, and the falloff makes the shell around them strongly mobile. A
+14-vertex island whose few vertices inherit sharply different weights does not
+deform, it spikes.
+
+So the falloff is not wrong in principle; it is applied to a head whose interior
+pieces follow the very surface being graded. Any future attempt has to settle
+what the teeth do **before** grading the shell they inherit from — most likely
+by binding them rigidly to one bone each, upper and lower, rather than letting
+them sample a field that is now steep.
+
+Reverted to the §41 build, which is what was last installed and tested.
