@@ -1476,3 +1476,43 @@ surface it recolours is the one being seen.
 
 **To test:** whatever looked off about the texture should be gone. The white bar
 fix from §44 stays. The bottom lip still stretches (§42).
+
+
+## 46. Cutting the lip line so the seam is dense enough to be a mouth
+
+**Status: installed as `out_vex_cutline/`. THERE IS SOMETHING TO TEST.**
+
+Reported: *"2 little triangles you can see through the texture to the teeth on
+the upper lip"* — **only while talking**, which was the answer.
+
+Three hypotheses checked and cleared first:
+
+- **texture damaged by repeated builds** — no; `j01.tga` is byte-identical to a
+  fresh conversion and all 754 UVs are finite and in range;
+- **the split causing inverted faces** — no; the 25 backward-facing faces at the
+  mouth are in the raw conversion (26 before repair, 25 after) and unchanged by
+  placing or splitting;
+- **those faces being culled and seen through** — no; all 25 have other geometry
+  in front of them, so they are an inner fold facing correctly inward.
+
+**It was resolution.** Splitting only at existing vertices gave **twelve** points
+across the whole mouth, and twelve points on geometry this coarse open into a
+row of triangles rather than a mouth. Visible only while talking is exactly what
+that predicts: at rest the halves coincide and there is nothing to see.
+
+`mouthsplit.cut_along_line` now subdivides every edge crossing the lip line
+inside the mouth, putting a vertex exactly on the line before anything is
+duplicated. The seam went from **12 points to 32**; the head from 765 vertices
+to 807, 1137 triangles to 1203.
+
+**Cut by edge, not by face.** Subdividing a face without subdividing its
+neighbour leaves a T-junction, and a T-junction is a crack. Every face using a
+subdivided edge is retriangulated whether or not it was inside the mouth box,
+and a test asserts no edge straddles the line where a cut point already exists.
+
+Tests also assert the cut points land exactly on the line, that retriangulation
+preserves total face area to 1e-6 (a dropped sliver is a hole, an overlapping
+one z-fights), and that UVs are interpolated along the edge rather than invented.
+
+**To test:** the two triangles should be a continuous mouth line. At rest,
+nothing should have changed at all. The bottom lip still stretches (§42).
