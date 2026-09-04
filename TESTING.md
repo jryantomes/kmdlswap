@@ -1446,3 +1446,33 @@ down what was built on it.
 **To test:** the white bar across the top lip should be gone. The mouth should
 still have teeth in it — the head's own, cream rather than white. The bottom lip
 will still stretch (§42, unsolved).
+
+
+## 45. The texture is intact; the UV remap was not safe
+
+**Status: remap reverted, installed as `out_vex_nodark/`. THERE IS SOMETHING TO
+TEST.**
+
+Reported that the texture looked messed up "from how many times we kept cutting
+at it". Checked first, because that would be a serious defect:
+
+- the installed `j01.tga` is **byte-identical** to a fresh conversion from the
+  Jade source (md5 `1ab39e7c…`, 262,162 bytes). Nothing accumulates: the pack is
+  regenerated from the archive on every build;
+- every one of the 754 UVs is finite and inside 0..1.
+
+So no damage. But there was one deliberate texture-space change, §41's remap of
+the interior onto the darkest flat patch of the atlas, and **it picked pixel
+(3, 3)** — three texels from the corner. That is not a safe place to sample.
+At distance the engine reads a low mip level whose corner texel is the average
+of a large region, so the cavity's colour drifts with the camera, and edge
+filtering can bleed the wrap-around.
+
+Reverted. It was speculative, it was predicted in §41 to change nothing visible
+(the interior is not what fills the opening — stretched shell is), and it
+carried a real artefact. `darkest_uv` is removed with it; anything revisiting
+this has to keep clear of the atlas edges *and* have reason to believe the
+surface it recolours is the one being seen.
+
+**To test:** whatever looked off about the texture should be gone. The white bar
+fix from §44 stays. The bottom lip still stretches (§42).

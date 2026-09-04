@@ -240,20 +240,6 @@ def run(
 
         pieces = klips.find_lips(mesh.positions, [tuple(f)[:3] for f in mesh.faces])
         if pieces is not None:
-            # The cavity is at the right depth and the wrong colour: measured
-            # against Carth it matches to a few thousandths but is painted
-            # mid-tone, so an opening mouth shows something that reads as lip.
-            if pieces[2] and pack.texture_path:
-                try:
-                    from PIL import Image
-
-                    with Image.open(pack.texture_path) as img:
-                        r.lines.extend(
-                            klips.darken_interior(mesh, pieces[2], img.convert("RGB"))
-                        )
-                except Exception as exc:  # noqa: BLE001 - a texture is optional
-                    r.lines.append(f"mouth cavity: left as painted ({exc})")
-
             # The head's own teeth clear the lip by a hair - 0.0030 against the
             # 0.0085 the host's get - which holds at rest and fails the moment
             # the upper lip lifts, putting a white bar through the lip.
