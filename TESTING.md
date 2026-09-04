@@ -1375,3 +1375,39 @@ by binding them rigidly to one bone each, upper and lower, rather than letting
 them sample a field that is now steep.
 
 Reverted to the §41 build, which is what was last installed and tested.
+
+
+## 43. The head's own teeth were never seated
+
+**Status: installed as `out_vex_teethback/`. THERE IS SOMETHING TO TEST.**
+
+Reported: *"a white bar still pokes through the top lip."*
+
+`mouthparts.seat` moves the **host's** teeth, which are separate nodes, and has
+done since §29. A converted head carries its own teeth as islands *inside* the
+mesh, and those had never been touched at all. Measured on the installed build:
+
+| | clearance behind the lip surface |
+|---|---|
+| host's teeth (seated by §29) | 0.0085 |
+| the head's own upper teeth | **0.0030** |
+| the head's own lower teeth | 0.0063 |
+
+0.0030 holds at rest — the diagnostic confirms none of the 14 sat in front of
+the shell — and fails the moment the upper lip lifts, because any relative
+motion over three thousandths puts them through. Which is a white bar across
+the top lip.
+
+`mouthparts.seat_islands` moves each piece back as one, by the difference
+between its tightest clearance and the host's. Both now clear by 0.0085.
+
+**The lesson is the same one as §28.** A fix was written for the host's parts and
+assumed to cover the converted head's equivalents. It did not, and nothing said
+so, because the two live in different places: one in nodes, one in mesh islands.
+Every mouth pass in this file that touches "the teeth" should be read twice —
+once for each.
+
+**To test:** the white bar should be gone from the top lip. Everything else
+should look as it did — this moves two pieces of geometry back by 0.0055 and
+0.0022 and changes nothing about weights. The bottom lip will still stretch;
+that is §42 and is not addressed here.

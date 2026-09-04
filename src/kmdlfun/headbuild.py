@@ -254,6 +254,27 @@ def run(
                 except Exception as exc:  # noqa: BLE001 - a texture is optional
                     r.lines.append(f"mouth cavity: left as painted ({exc})")
 
+            # The head's own teeth clear the lip by a hair - 0.0030 against the
+            # 0.0085 the host's get - which holds at rest and fails the moment
+            # the upper lip lifts, putting a white bar through the lip.
+            from kmdlswap import edit as kedit
+
+            from . import mouthparts as kmouth3
+
+            host_geo = kedit.extract(layout, target)
+            want = kmouth3.teeth_clearance(host_geo.positions, layout, target)
+            if want:
+                shell = klips.islands(
+                    __import__("numpy").asarray(
+                        [q[:3] for q in mesh.positions], dtype=float),
+                    [tuple(f)[:3] for f in mesh.faces],
+                )[0]
+                r.lines.extend(kmouth3.seat_islands(
+                    mesh,
+                    [("upper teeth", pieces[0]), ("lower teeth", pieces[1])],
+                    shell, want,
+                ))
+
             upper, lower, parted = ksplit.split(mesh, pieces[0], pieces[1])
             if upper:
                 mesh.mouth_split = (upper, lower)

@@ -199,3 +199,76 @@ def seat(layout, mdl: bytes, mdx: bytes, node, host_layout=None):
 # The geometry is where it should be and reads as lip rather than as a hole
 # because it is mid-tone rather than dark. That is a texture difference, not a
 # conversion fault, and repainting it is editing the artist's intent.
+
+
+def seat_islands(mesh, pieces, shell, want: float) -> list[str]:
+    """Push a head's *own* teeth back to the clearance the host's teeth have.
+
+    `seat` above moves the host's teeth, which are separate nodes. A converted
+    head usually carries its own as islands inside the mesh, and those have
+    never been touched - on Jade Empire's `h_common01_` the upper teeth clear
+    the lip surface by **0.0030** against the 0.0085 the same build gives
+    Carth's. At rest that is enough; it is not enough once the upper lip lifts,
+    and the teeth come through the lip as a white bar. Reported from the game
+    exactly so.
+
+    Each piece is moved as one, by the difference between its tightest clearance
+    and the wanted one, so its shape and its position along the mouth are kept.
+    """
+    if not pieces or want is None or want <= 0:
+        return []
+    P = np.asarray([p[:3] for p in mesh.positions], dtype=np.float64)
+    if not len(shell):
+        return []
+    lo, hi = P.min(axis=0), P.max(axis=0)
+    mid_y = (lo[1] + hi[1]) / 2
+    front_shell = [s for s in shell if P[s][1] > mid_y]
+    if not front_shell:
+        return []
+
+    lines = []
+    for name, idx in pieces:
+        if not idx:
+            continue
+        gaps = []
+        for v in idx:
+            near = [
+                s for s in front_shell
+                if abs(P[s][2] - P[v][2]) < 0.004 and abs(P[s][0] - P[v][0]) < 0.006
+            ]
+            if near:
+                gaps.append(max(P[s][1] for s in near) - P[v][1])
+        if not gaps:
+            continue
+        have = float(min(gaps))
+        shift = want - have
+        if shift <= 1e-4:
+            continue
+        for v in idx:
+            x, y, z = mesh.positions[v][:3]
+            mesh.positions[v] = (x, y - shift, z)
+        lines.append(
+            f"{name}: moved back {shift:.4f} to clear the lip by {want:.4f}, "
+            f"the clearance the host's teeth get (was {have:.4f})"
+        )
+    return lines
+
+
+def teeth_clearance(host_positions, host_layout, host_node) -> float | None:
+    """How far the host keeps its own teeth behind its lip surface."""
+    parts = mouth_parts(host_layout)
+    if not parts:
+        return None
+    rest = space.rest_pose(host_layout)
+    interior = [_model_space(host_layout, p, rest) for p in parts]
+    interior = [p for p in interior if len(p)]
+    if not interior:
+        return None
+    stacked = np.concatenate(interior)
+    low, high = float(stacked[:, 2].min()), float(stacked[:, 2].max())
+    half_width = max(float(np.abs(stacked[:, 0]).max()) * 1.5, 1e-4)
+    face = _model_space(host_layout, host_node, rest)
+    depth = _face_depth(face, low, high, half_width)
+    if depth is None:
+        return None
+    return float(depth - stacked[:, 1].max())
