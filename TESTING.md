@@ -1906,3 +1906,48 @@ cross-game build does and what this tab deliberately does not: *"Nothing here
 writes geometry - it is two table rows and a blueprint."* Offering the parts
 without that copy would produce a character referring to a model that is not
 there. It is a real feature, not a switch, and it is not done.
+
+
+## 57. Two Settings buttons, no explanations, no KOTOR II heads
+
+**Status: all three done. TEST IN THE APP.**
+
+**The duplicate.** The menu bar has a Settings menu; the top bar had a button
+also called "Settings" which opens the window titled *Folders* - the same window
+as `Settings > Folders...`. Two controls, one name, one of them lying about what
+it opens. The button is now labelled **Folders**, which is what it does, and the
+menu keeps everything else.
+
+**The explanations.** Seven tabs opened straight into controls with no statement
+of what they were for. Each now carries one line at the top. The note goes into
+an outer frame with the tab's own content below it, so no existing layout moved
+- and three tests that walked a tab's *direct* children now walk its
+descendants, which is what they meant anyway.
+
+**KOTOR II heads.** Now offered in the character creator, and the reason it was
+not trivial is worth keeping:
+
+| | |
+|---|---|
+| heads in KOTOR | 108 |
+| heads in KOTOR II | 151 |
+| **names in both** | **78** |
+| offered | **73** |
+
+The 78 shared names are not duplicates to be ignored - shipping one into
+Override would not *add* a head, it would **replace KOTOR's own for every
+character already using it**. Only the 73 unique to KOTOR II are offered.
+
+A borrowed head also has to travel. `register_look` will write a `heads.2da`
+row naming it, and a row is useless alone: an appearance row names a model by
+resref, and a resref the game cannot find is a character with no head. So the
+build now ships the model and its textures, through the same
+`export_donor_textures` the cross-game transplant uses. Verified end to end:
+`c_hadmnoffh.mdl`, `.mdx` and `C_HAdmnOffH01.tpc` written into the build.
+
+Their thumbnails are read from KOTOR II as well - otherwise 73 heads list by
+name against a blank square, which reads as broken rather than as a choice.
+
+**To test:** one Folders button and no second Settings; a line at the top of
+each tab saying what it is for; and KOTOR II heads in the head picker, marked
+`(KOTOR II)`, with pictures. Building one should say it shipped the model.

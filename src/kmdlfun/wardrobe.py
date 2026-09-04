@@ -43,15 +43,22 @@ BUILDS = {"S": "small", "M": "medium", "L": "large"}
 
 @dataclass(frozen=True)
 class Head:
-    """A head model and the `heads.2da` row that names it."""
+    """A head model and the `heads.2da` row that names it.
+
+    `game` is empty for a head the target install already has, and holds the
+    other game's install path for one borrowed from it. A borrowed head needs
+    its model shipping alongside the table rows, because a row can only name a
+    model the game can find - see `heads_from`.
+    """
 
     model: str
     row: int
     look: str = "unknown"
+    game: str = ""
 
     @property
     def label(self) -> str:
-        return self.model
+        return self.model if not self.game else f"{self.model}  (KOTOR II)"
 
 
 @dataclass
@@ -258,4 +265,32 @@ def _classify(cat: Catalogue, install, library) -> None:
 
     for body in cat.bodies:
         body.look = cat.look_of(body.model)
-    cat.heads = [Head(h.model, h.row, cat.look_of(h.model)) for h in cat.heads]
+    cat.heads = [Head(h.model, h.row, cat.look_of(h.model), h.game)
+                 for h in cat.heads]
+
+
+def heads_from(other_install, *, avoiding=(), library=None) -> list[Head]:
+    """Heads the *other* game has that this one does not.
+
+    A KOTOR II head can be worn in KOTOR, but only if the model travels with
+    the table rows: an appearance row names a model by resref, and a resref the
+    game cannot find leaves an invisible head.
+
+    Names that exist in both are skipped, and that is not a nicety. Measured
+    across the two installs: 108 heads in KOTOR, 151 in KOTOR II, and **78 names
+    in common**. Shipping one of those into Override would not add a head - it
+    would replace KOTOR's own, for every character already using it. The 73 that
+    are unique to KOTOR II are the ones that can be offered safely.
+    """
+    from . import library as klib
+
+    taken = {str(n).lower() for n in avoiding}
+    out = []
+    for model in sorted(klib.head_models(other_install)):
+        if model.lower() in taken:
+            continue
+        # Row -1: it has no row in *this* game's table yet. `register_look`
+        # adds one when the character is created.
+        out.append(Head(model=model, row=-1, look="unknown",
+                        game=str(other_install)))
+    return out

@@ -201,7 +201,10 @@ class App(ttk.Frame):
         self.where = ttk.Label(bar, text="looking for your games...",
                                foreground="#666")
         self.where.grid(row=0, column=0, sticky="w")
-        ttk.Button(bar, text="Settings", command=self._open_settings).grid(
+        # "Folders", not "Settings": the menu bar already has a Settings menu,
+        # and this button opens the window titled Folders that is *inside* it,
+        # so two different controls were called the same thing.
+        ttk.Button(bar, text="Folders", command=self._open_settings).grid(
             row=0, column=1, padx=(8, 0))
 
         for var in (self.install, self.install2, self.out_dir):
@@ -483,11 +486,57 @@ class App(ttk.Frame):
         self._build_effect_tab()
         self._build_upcoming_tab()
 
+    # What each tab is for, in one line, at the top of it. A beginner opening
+    # the window meets eight tab names and no indication which one does the
+    # thing they came for.
+    TAB_HELP = {
+        "Effects": "Quick changes to a model that need no donor - resize it, "
+                   "recolour it, or give it a glow. Pick a model, pick an "
+                   "effect, build.",
+        "Transplant": "Put one model's head (or any part) onto another. The "
+                      "host keeps its body and animations; the donor supplies "
+                      "the geometry.",
+        "Custom head": "Build a head from a file you supply - a .glb sculpt, a "
+                       "scan, or a head converted from another game - and fit "
+                       "it to a KOTOR body.",
+        "Character": "Make a new character from parts the game already has: a "
+                     "body, an outfit and a head. Writes two table rows and a "
+                     "blueprint, no geometry.",
+        "Lips": "Make a mouth move for a line of dialogue, with or without a "
+                "recording behind it.",
+        "Builds": "Everything you have made. Install one into the game from "
+                  "here, or take it out again.",
+        "Preview": "Look at any model in the game, or one you have built, "
+                   "before committing to it.",
+    }
+
+    def _explain(self, page, label: str):
+        """Give a tab its one-line description, above everything else.
+
+        The page's own content is gridded from row 0, so the note goes into an
+        outer frame and the caller keeps the inner one. Returning the inner
+        frame means each tab body is unchanged below its first two lines.
+        """
+        text = self.TAB_HELP.get(label)
+        if not text:
+            return page
+        outer = ttk.Frame(page)
+        outer.grid(row=0, column=0, sticky="ew")
+        page.columnconfigure(0, weight=1)
+        ttk.Label(outer, text=text, foreground="#555", wraplength=820,
+                  justify="left").grid(row=0, column=0, sticky="w")
+        inner = ttk.Frame(page)
+        inner.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
+        page.rowconfigure(1, weight=1)
+        return inner
+
     # ---- effects tab -------------------------------------------------------
 
     def _build_effect_tab(self):
         page = ttk.Frame(self.tabs, padding=8)
         self.tabs.add(page, text="Effects")
+        outer_page = page
+        page = self._explain(outer_page, "Effects")
         page.columnconfigure(1, weight=1)
 
         self.effect = tk.StringVar(value=keffects.EFFECTS[0].key)
@@ -544,7 +593,11 @@ class App(ttk.Frame):
     def _build_transplant_tab(self):
         page = ttk.Frame(self.tabs, padding=8)
         self.tabs.add(page, text="Transplant")
-        self._advanced_tab(page, "Transplant")
+        outer_page = page
+        page = self._explain(outer_page, "Transplant")
+        # The notebook holds the outer frame, so that is what gets hidden.
+        # Registering the inner one would raise on the first mode change.
+        self._advanced_tab(outer_page, "Transplant")
         page.columnconfigure(1, weight=1)
         page.columnconfigure(3, weight=1)
 
@@ -813,6 +866,8 @@ class App(ttk.Frame):
         """
         page = ttk.Frame(self.tabs, padding=8)
         self.tabs.add(page, text="Custom head")
+        outer_page = page
+        page = self._explain(outer_page, "Custom head")
         page.columnconfigure(1, weight=1)
 
         ttk.Label(page, text="Head pack").grid(row=0, column=0, sticky="w")
@@ -919,6 +974,8 @@ class App(ttk.Frame):
 
         page = ttk.Frame(self.tabs, padding=8)
         self.tabs.add(page, text="Character")
+        outer_page = page
+        page = self._explain(outer_page, "Character")
         page.columnconfigure(0, weight=1)
         page.rowconfigure(1, weight=1)
 
@@ -1006,17 +1063,28 @@ class App(ttk.Frame):
 
     def _load_catalogue(self, install: str):
         """Read what the install offers, off the Tk thread."""
-        if getattr(self, "_catalogue_for", None) == install:
+        # The other game is read here, on the Tk thread, and handed over as a
+        # plain string - the same rule the scan learned the hard way.
+        other = self.install2.get().strip()
+        if getattr(self, "_catalogue_for", None) == (install, other):
             return
-        self._catalogue_for = install
+        self._catalogue_for = (install, other)
 
         def work():
             try:
+                from . import library as klib
                 from . import wardrobe as kwardrobe
                 from .library import ModelLibrary
 
-                self.events.put(("catalogue", kwardrobe.build(
-                    install, library=ModelLibrary(install))))
+                cat = kwardrobe.build(install, library=ModelLibrary(install))
+                if other:
+                    # KOTOR II heads, for the ones KOTOR does not already have.
+                    # A borrowed head's model has to ship with the character;
+                    # `_character_work` does that when it sees `head.game`.
+                    mine = {h.model.lower() for h in cat.heads}
+                    cat.heads.extend(
+                        kwardrobe.heads_from(other, avoiding=mine))
+                self.events.put(("catalogue", cat))
             except Exception as exc:  # noqa: BLE001
                 self.events.put(("error", f"could not read the parts: {exc}"))
 
@@ -1024,8 +1092,10 @@ class App(ttk.Frame):
 
     def _show_catalogue(self, cat):
         self.catalogue = cat
+        borrowed = sum(1 for h in cat.heads if getattr(h, "game", ""))
         self._say(f"{len(cat.bodies)} bodies, {len(cat.outfits)} outfits and "
-                  f"{len(cat.heads)} heads to build a character from")
+                  f"{len(cat.heads)} heads to build a character from"
+                  + (f" ({borrowed} of them from KOTOR II)" if borrowed else ""))
         for key in PART_KINDS:
             self._refresh_parts(key)
 
@@ -1087,6 +1157,14 @@ class App(ttk.Frame):
         wanted = dict(self.part_labels[key])
         if not path or not wanted:
             return
+        # A borrowed head lives in the other game's files, so its picture has to
+        # be read from there. Without this the KOTOR II heads list by name with
+        # a blank square, which looks like a broken entry rather than a choice.
+        homes = {}
+        if self.catalogue is not None:
+            for head in self.catalogue.heads:
+                if getattr(head, "game", ""):
+                    homes[head.model] = head.game
 
         def work():
             from pathlib import Path as _Path
@@ -1098,10 +1176,26 @@ class App(ttk.Frame):
             try:
                 lib = ModelLibrary(path)
                 look = ktextures.lookup_across([_Path(path)])
+                elsewhere: dict = {}
                 for label, model in wanted.items():
                     if job != self.part_jobs[key]:
                         return
                     try:
+                        home = homes.get(model)
+                        if home:
+                            if home not in elsewhere:
+                                elsewhere[home] = (
+                                    ModelLibrary(home),
+                                    ktextures.lookup_across([_Path(home)]),
+                                )
+                            other_lib, other_look = elsewhere[home]
+                            mdl, mdx = other_lib.read(model)
+                            found = kthumbs.render(mdl, mdx,
+                                                   texture_lookup=other_look)
+                            if found and job == self.part_jobs[key]:
+                                self.events.put(
+                                    ("part_thumb", (key, job, label, found)))
+                            continue
                         mdl, mdx = lib.read(model)
                     except Exception:  # noqa: BLE001
                         continue
@@ -1246,6 +1340,15 @@ class App(ttk.Frame):
                       "spawns it by")
             return
 
+        # Where the head came from, if it is not this game's. Read here on the
+        # Tk thread; the worker gets a plain string.
+        borrowed = ""
+        if picked["head"] and self.catalogue is not None:
+            for head in self.catalogue.heads:
+                if head.model == picked["head"]:
+                    borrowed = getattr(head, "game", "") or ""
+                    break
+
         cfg = dict(
             resref=resref,
             name=self.new_name.get().strip() or resref,
@@ -1254,17 +1357,19 @@ class App(ttk.Frame):
             outfit=picked["outfit"] or None,
             head=picked["head"] or None,
         )
+        self._head_from = borrowed
         self.build_btn.config(state="disabled")
         self._say(f"\n=== {cfg['name']}: {picked['body']}"
                   + (f" in {picked['outfit']}" if picked["outfit"] else "")
                   + (f" with {picked['head']}" if picked["head"] else "") + " ===")
         self.worker = threading.Thread(
             target=self._character_work,
-            args=(self.install.get().strip(), self.out_dir.get().strip(), cfg),
+            args=(self.install.get().strip(), self.out_dir.get().strip(), cfg,
+                  borrowed),
             daemon=True)
         self.worker.start()
 
-    def _character_work(self, install, out_dir, cfg):
+    def _character_work(self, install, out_dir, cfg, borrowed: str = ""):
         try:
             from pathlib import Path as _Path
 
@@ -1274,6 +1379,8 @@ class App(ttk.Frame):
             out = str(_Path(out_dir or ".") / f"character_{cfg['resref']}")
             ch = kchar.assemble(install, out, **cfg)
             lines = list(ch.notes)
+            if borrowed and cfg.get("head"):
+                lines.extend(self._ship_head(borrowed, cfg["head"], _Path(out)))
             lines.extend(f"still yours: {x}" for x in ch.todo)
             kbuilds.adopt(out, {
                 "kind": "character",
@@ -1287,6 +1394,45 @@ class App(ttk.Frame):
         except Exception as exc:  # noqa: BLE001
             self.events.put(("error", f"{type(exc).__name__}: {exc}"))
 
+    @staticmethod
+    def _ship_head(donor_install: str, head: str, out):
+        """Copy a borrowed head's model and textures into the build.
+
+        `register_look` will happily write a `heads.2da` row naming a KOTOR II
+        head, and the row is useless on its own: an appearance row names a model
+        by resref, and a resref the game cannot find leaves a character with no
+        head at all. The model has to travel with the rows.
+
+        Only heads unique to KOTOR II are ever offered - see
+        `wardrobe.heads_from` - so nothing written here can replace a model the
+        game already has.
+        """
+        from pathlib import Path as _Path
+
+        from . import textures as ktextures
+        from .library import ModelLibrary
+
+        out = _Path(out)
+        try:
+            mdl, mdx = ModelLibrary(donor_install).read(head)
+        except Exception as exc:  # noqa: BLE001
+            return [f"could not read {head} from KOTOR II: {exc}"]
+
+        out.mkdir(parents=True, exist_ok=True)
+        (out / f"{head}.mdl").write_bytes(mdl)
+        (out / f"{head}.mdx").write_bytes(mdx)
+        said = [f"shipped {head}.mdl and .mdx from KOTOR II - the row names it, "
+                f"so the model has to be there too"]
+        try:
+            carried = ktextures.export_donor_textures(mdl, mdx, donor_install, out)
+            if carried:
+                said.append("its textures came too: "
+                            + ", ".join(sorted(str(c) for c in carried)[:6]))
+        except Exception as exc:  # noqa: BLE001
+            said.append(f"its textures did not come across ({exc}); the head "
+                        f"will be untextured until they do")
+        return said
+
     # ---- lips tab ----------------------------------------------------------
 
     def _build_lips_tab(self):
@@ -1299,6 +1445,8 @@ class App(ttk.Frame):
         """
         page = ttk.Frame(self.tabs, padding=8)
         self.tabs.add(page, text="Lips")
+        outer_page = page
+        page = self._explain(outer_page, "Lips")
         page.columnconfigure(1, weight=1)
 
         ttk.Label(page, text="Dialogue").grid(row=0, column=0, sticky="w")
@@ -1451,6 +1599,8 @@ class App(ttk.Frame):
         """
         page = ttk.Frame(self.tabs, padding=8)
         self.tabs.add(page, text="Builds")
+        outer_page = page
+        page = self._explain(outer_page, "Builds")
         page.columnconfigure(0, weight=1)
         page.rowconfigure(1, weight=1)
 
@@ -1536,6 +1686,8 @@ class App(ttk.Frame):
         """
         page = ttk.Frame(self.tabs, padding=8)
         self.tabs.add(page, text="Preview")
+        outer_page = page
+        page = self._explain(outer_page, "Preview")
         page.columnconfigure(1, weight=1)
         page.rowconfigure(3, weight=1)
 

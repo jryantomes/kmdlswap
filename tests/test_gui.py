@@ -19,6 +19,26 @@ import pytest
 tk = pytest.importorskip("tkinter", reason="the app needs Tk")
 
 
+def buttons_under(page):
+    """Every button anywhere inside a tab, not just its direct children.
+
+    Each tab now carries a one-line description above its controls, so the
+    controls sit in an inner frame. What these tests care about is whether the
+    tab offers a control at all, not how deeply it is nested.
+    """
+    from tkinter import ttk
+
+    found = []
+
+    def walk(widget):
+        for child in widget.winfo_children():
+            if isinstance(child, ttk.Button):
+                found.append(str(child.cget("text")))
+            walk(child)
+
+    walk(page)
+    return found
+
 @pytest.fixture(scope="module")
 def root():
     """One Tk interpreter for the whole module.
@@ -1248,8 +1268,7 @@ def test_the_custom_head_tab_offers_an_import(app):
             page = app.tabs.nametowidget(app.tabs.tabs()[i])
     assert page is not None
 
-    labels = [w.cget("text") for w in page.winfo_children()
-              if isinstance(w, ttk.Button)]
+    labels = buttons_under(page)
     assert any("glb" in text.lower() for text in labels), labels
 
 
@@ -1264,8 +1283,14 @@ def test_importing_selects_the_pack_it_just_made(app, tmp_path):
     app._import_work(str(source), out)
     from pathlib import Path
 
-    kind, payload = app.events.get_nowait()
-    assert kind == "imported", payload
+    # The catalogue now loads on its own as soon as the game is found, so its
+    # event can be sitting in the queue ahead of this one. Take the event this
+    # test is about rather than assuming it is first.
+    kind, payload = next(
+        (e for e in iter(app.events.get_nowait, None) if e[0] == "imported"),
+        (None, None),
+    )
+    assert kind == "imported", "no import event was posted"
     pack, lines, triangles = payload
     assert pack == out
     assert triangles > 0, "the budget cannot follow a pack of unknown size"
@@ -1635,8 +1660,7 @@ def test_the_custom_head_tab_offers_jade(app):
     for i in range(len(app.tabs.tabs())):
         if app.tabs.tab(i, "text") == "Custom head":
             page = app.tabs.nametowidget(app.tabs.tabs()[i])
-    labels = [w.cget("text") for w in page.winfo_children()
-              if isinstance(w, ttk.Button)]
+    labels = buttons_under(page)
 
     assert any("Jade" in text for text in labels), labels
 
@@ -1865,3 +1889,59 @@ def test_the_scan_button_is_not_the_only_way_in(app):
     assert "_load_catalogue" in source, (
         "nothing loads the parts when the install is found; basic mode is stuck"
     )
+
+
+# --- heads borrowed from the other game -------------------------------------
+
+
+def test_only_heads_the_target_game_lacks_are_offered():
+    """Sharing a name is not a nicety - it is a collision.
+
+    108 heads in KOTOR, 151 in KOTOR II, and 78 names in common. Shipping one of
+    the shared names into Override would not add a head; it would replace
+    KOTOR's own, for every character already using it.
+    """
+    from kmdlfun import installs, library as klib, wardrobe as kwardrobe
+
+    found = installs.detect()
+    k1, k2 = found.get(installs.K1), found.get(installs.K2)
+    if not k1 or not k2:
+        pytest.skip("both games are needed for this one")
+
+    mine = {n.lower() for n in klib.head_models(k1)}
+    offered = kwardrobe.heads_from(k2, avoiding=mine)
+
+    assert offered, "no KOTOR II heads offered at all"
+    for head in offered:
+        assert head.model.lower() not in mine, f"{head.model} would replace a KOTOR head"
+        assert head.game, "a borrowed head must say where it came from"
+        assert "KOTOR II" in head.label
+
+
+def test_a_borrowed_head_ships_its_model(tmp_path):
+    """A row naming a model the game cannot find is a character with no head."""
+    from kmdlfun import installs, gui as kgui, library as klib, wardrobe as kwardrobe
+
+    found = installs.detect()
+    k1, k2 = found.get(installs.K1), found.get(installs.K2)
+    if not k1 or not k2:
+        pytest.skip("both games are needed for this one")
+
+    mine = {n.lower() for n in klib.head_models(k1)}
+    head = kwardrobe.heads_from(k2, avoiding=mine)[0]
+
+    said = kgui.App._ship_head(k2, head.model, tmp_path)
+
+    assert (tmp_path / f"{head.model}.mdl").is_file()
+    assert (tmp_path / f"{head.model}.mdx").is_file()
+    assert any("shipped" in line for line in said)
+
+
+def test_a_head_from_this_game_is_not_marked_borrowed():
+    """Only a head that has to travel carries a game; the rest must not, or
+    every build would copy models it already has."""
+    from kmdlfun import wardrobe as kwardrobe
+
+    head = kwardrobe.Head(model="p_carthh", row=3)
+    assert head.game == ""
+    assert head.label == "p_carthh"
