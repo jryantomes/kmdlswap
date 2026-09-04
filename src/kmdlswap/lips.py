@@ -335,6 +335,8 @@ def bind(
 
     centre_x = (float(P[:, 0].min()) + float(P[:, 0].max())) / 2
     out = [list(f) for f in influences]
+    every = islands(P, faces)
+    shell_index = np.asarray(every[0], dtype=int) if every else np.asarray([], dtype=int)
 
     def apply(island, which):
         for v in island:
@@ -361,23 +363,38 @@ def bind(
                 }
             out[v] = _finalise({by_name[n]: w for n, w in want.items()}, max_influences)
 
-    apply(upper_island, "upper")
-    apply(lower_island, "lower")
-    if bag_island:
-        apply(bag_island, "bag")
-    # The seam last, so a coincident rim wins over any island claim on the same
-    # vertex: it is the one that has to part for the mouth to open at all.
+    # The shell's own aperture first: those rims are what open the mouth.
     apply(seam_upper, "upper")
     apply(seam_lower, "lower")
 
+    # Then the pieces lying behind the shell - lips, and the interior bag.
+    #
+    # These follow the face rather than a profile. Giving them the idealised
+    # lip weights made them swing on the jaw pivot far harder than the shell
+    # around them, and in game the interior sailed out through the opening as a
+    # flat slab: "the top lip and bottom lip split and they are moving with the
+    # mouth pieces". A piece tucked behind the lip has to move *with* the lip in
+    # front of it, whatever that lip happens to be doing, so it inherits from
+    # the nearest shell vertex - after the seam above has corrected those.
+    interior = list(upper_island) + list(lower_island) + list(bag_island or [])
+    followed = 0
+    if interior and len(shell_index):
+        shell_points = P[shell_index]
+        for v in interior:
+            d = shell_points - P[v]
+            nearest = int(np.argmin(np.einsum("ij,ij->i", d, d)))
+            source = out[int(shell_index[nearest])]
+            if source:
+                out[v] = [Influence(f.bone_slot, f.weight) for f in source]
+                followed += 1
+
     lines = []
-    if upper_island or lower_island:
-        total = len(upper_island) + len(lower_island) + (len(bag_island) if bag_island else 0)
+    if followed:
         lines.append(
-            f"lips: bound {len(upper_island)} upper and {len(lower_island)} lower lip "
-            f"vertices"
-            + (f" and a {len(bag_island)}-vertex mouth interior" if bag_island else "")
-            + f" to the vanilla mouth rig ({total} in all)"
+            f"lips: {followed} vertices of the pieces behind the face - "
+            f"{len(upper_island)} upper, {len(lower_island)} lower"
+            + (f", {len(bag_island)} interior" if bag_island else "")
+            + " - now follow the shell in front of them"
         )
     if seam_upper:
         lines.append(

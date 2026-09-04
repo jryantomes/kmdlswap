@@ -70,52 +70,53 @@ def led_by(slot):
     return [Influence(slot, 1.0)]
 
 
-def test_the_lips_are_found_and_bound_to_bones_that_move():
+def test_the_pieces_behind_the_face_follow_the_shell():
+    """They inherit from the face in front of them rather than from an ideal
+    profile.
+
+    Giving them the idealised lip weights made them swing on the jaw pivot far
+    harder than the shell they sit behind, and in game the interior sailed out
+    through the opening as a flat slab. A piece tucked behind a lip has to move
+    with that lip, whatever it happens to be doing.
+    """
     points, faces = head_with_separate_lips()
-    infl = [led_by(NAMES["head_g"]) for _ in points]
+    shell = set(lips.islands(np.asarray(points, dtype=float), faces)[0])
+    # The shell is led by one bone, the pieces behind it by another. If they
+    # follow, the pieces end up on the shell's.
+    infl = [
+        led_by(NAMES["f_jaw_g"]) if i in shell else led_by(NAMES["head_g"])
+        for i in range(len(points))
+    ]
 
     out, lines = lips.bind(points, faces, infl, RIG)
 
-    assert lines and "lips:" in lines[0]
-    found = lips.find_lips(points, faces)
-    upper, lower, bag = found
-    assert all(out[v][0].bone_slot == NAMES["f_um_g"] for v in upper)
-    assert all(
-        out[v][0].bone_slot in (NAMES["f_llm_g"], NAMES["f_rlm_g"]) for v in lower
-    )
-    assert bag and all(out[v][0].bone_slot == NAMES["f_jaw_g"] for v in bag)
+    assert lines and "follow the shell" in lines[0]
+    upper, lower, bag = lips.find_lips(points, faces)
+    for v in list(upper) + list(lower) + list(bag or []):
+        assert out[v][0].bone_slot == NAMES["f_jaw_g"], (
+            "a piece behind the face kept its own weights instead of the shell's"
+        )
 
 
-def test_the_lower_lip_is_never_led_by_a_bone_that_lifts_it():
-    """The measured failure: as much weight lifting the lower lip as dropping
-    it, so the two cancel and the mouth stays shut."""
+def test_a_piece_behind_the_face_never_moves_on_its_own():
+    """Whatever the shell does, the piece behind it does the same. Any
+    divergence shows in game as the interior separating from the mouth."""
     points, faces = head_with_separate_lips()
-    infl = [led_by(NAMES["f_um_g"]) for _ in points]
+    P = np.asarray(points, dtype=float)
+    shell = np.asarray(lips.islands(P, faces)[0], dtype=int)
+    infl = [led_by(NAMES["head_g"]) for _ in points]
+    for i in shell:
+        infl[i] = [Influence(NAMES["f_um_g"], 0.6), Influence(NAMES["f_lmc_g"], 0.4)]
 
     out, _ = lips.bind(points, faces, infl, RIG)
 
-    _, lower, _ = lips.find_lips(points, faces)
-    for v in lower:
-        assert out[v][0].bone_slot != NAMES["f_um_g"]
-        assert NAMES["f_um_g"] not in {f.bone_slot for f in out[v]}
-
-
-def test_the_lower_lip_splits_across_the_two_sides():
-    """`f_llm_g` and `f_rlm_g` are a left/right pair; binding a whole lip to one
-    of them would drag it sideways."""
-    points, faces = head_with_separate_lips()
-    infl = [led_by(NAMES["head_g"]) for _ in points]
-    host = list(points)
-    # Host weights that put f_llm_g on the left and f_rlm_g on the right.
-    host_infl = [
-        led_by(NAMES["f_llm_g"]) if p[0] < 0 else led_by(NAMES["f_rlm_g"]) for p in host
-    ]
-
-    out, _ = lips.bind(points, faces, infl, RIG, host, host_infl)
-
-    _, lower, _ = lips.find_lips(points, faces)
-    leaders = {out[v][0].bone_slot for v in lower}
-    assert leaders == {NAMES["f_llm_g"], NAMES["f_rlm_g"]}
+    upper, lower, bag = lips.find_lips(points, faces)
+    for v in list(upper) + list(lower) + list(bag or []):
+        d = P[shell] - P[v]
+        nearest = int(shell[np.argmin(np.einsum("ij,ij->i", d, d))])
+        assert {(f.bone_slot, round(f.weight, 6)) for f in out[v]} == {
+            (f.bone_slot, round(f.weight, 6)) for f in out[nearest]
+        }
 
 
 def test_a_head_whose_mouth_is_part_of_the_face_is_left_alone():

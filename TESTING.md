@@ -989,3 +989,38 @@ back of the head is bound.
 **To validate:** installed as `out_vex_seam2/`; previous build backed up at
 `out_vex_seam2/backup-before/`. The mouth should behave as it did in the last
 screenshots, and the seam around the skull should be gone.
+
+
+## 33. The interior swung out through the mouth, and a flaw in how it was checked
+
+**Status: built and installed, awaiting in-game confirmation.**
+
+Reported: *"it looks like you split the top lip and bottom lip and they are
+moving with the mouth pieces"* — the seam works and the mouth opens, but the
+pieces behind the face move independently of it.
+
+**Cause.** §31 bound the lip pieces and the mouth bag to *idealised* profiles
+(the bag at 70% jaw, 30% lower lip). Those swing on the jaw pivot far harder
+than the shell they sit behind, so as the mouth opened the interior sailed out
+through the opening. A piece tucked behind a lip has to move with that lip,
+whatever it is doing. `lips.bind` now gives each of the 39 interior vertices the
+weights of its nearest shell vertex — after the seam correction has been applied
+to those — so they cannot diverge by construction.
+
+**A flaw in the method, which matters more.** `render.py` does **no backface
+culling** and uses two-sided lighting (deliberately: the head spec tolerates 5%
+of faces winding against their normals). The engine culls. So every render of an
+*open* mouth in §29–§32 was showing the inside of the head — a large flesh-
+coloured slab the game never draws — and I read it as geometry doing something
+wrong. Rendered with `cull=True`, the same build shows a closed mouth at rest
+and teeth over a dark interior when open.
+
+**Rule from now on: any render that looks into an opening must pass `cull=True`.**
+The no-cull default is right for judging a surface and actively misleading for
+judging a cavity. `krender.strip(..., cull=True)` is the switch; it is described
+in `render.py` as "the preview that can see that class of bug", and this is that
+class of bug.
+
+**To validate:** installed as `out_vex_follow/`; previous build backed up at
+`out_vex_follow/backup-before/`. The mouth should behave as it did, without the
+interior separating from the lips as it opens.
