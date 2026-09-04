@@ -446,7 +446,20 @@ def to_pack(entry: Entry, out_dir, *, scale: float | None = None,
         if got:
             source_name, data = got
             # The filename becomes the resref, and that field is 16 characters.
-            texture_file = out_dir.name.lower()[:RESREF_STEM] + "01"
+            #
+            # Named from the *model*, not the folder it is being written into.
+            # The folder is the caller's choice and the truncation then falls in
+            # the wrong place: the window's default is `jade_<resref>`, and
+            # fourteen characters of that is spent before the digits that tell
+            # two heads apart - all eight `h_bandit0*` heads come out as
+            # `jade_h_bandit001`. Across the catalogue that is 42 of 270 models
+            # sharing a texture name with another, so installing two of them
+            # together means one wears the other's face.
+            #
+            # From the resref instead, all 270 are distinct and the longest is
+            # 15 characters.
+            texture_file = (entry.resref.strip("_").lower() or out_dir.name.lower())
+            texture_file = texture_file[:RESREF_STEM] + "01"
             (out_dir / f"{texture_file}.tga").write_bytes(data)
             found.notes.append(f"texture {source_name} decoded from .txb")
         elif found.materials:

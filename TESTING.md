@@ -1603,9 +1603,8 @@ either side, 121 vertices eased around the rim, 34 bound rigidly.
 **A collision found on the way.** Both heads name their texture **`j01`**, with
 different content (md5 `1ab39e7c` against `269c6906`). Installing two converted
 Jade heads at once means the second silently overwrites the first's texture and
-one of them wears the other's face. The texture resref comes from the Jade
-material and is not unique per head; it needs deriving from the head's own
-resref instead. Not fixed here.
+one of them wears the other's face. *(The explanation given here first — that
+the resref comes from the Jade material — was wrong. See §55.)*
 
 **To test:** does her mouth work the way his does — parting rather than
 stretching, teeth and interior showing? That is what says the mouth work is a
@@ -1828,3 +1827,43 @@ binding by what it *is*.
 
 **To test:** does the skin around her eyes stay still now, and do her brows still
 move?
+
+
+## 55. Why every converted texture was called `j01`
+
+**Status: explained and fixed. No in-game test needed — nothing about the
+installed head changes.**
+
+Asked why the Jade textures all share a name. The answer given at the time, that
+the resref comes from the Jade material, was wrong. It comes from the **output
+folder**:
+
+```python
+texture_file = out_dir.name.lower()[:RESREF_STEM] + "01"
+```
+
+Every conversion in this session was written to a scratch folder called `j`, so
+every texture came out `j01`. That part was my own doing and not a defect.
+
+**But there is a real collision underneath it.** The window's default folder is
+`jade_<resref>`, and `RESREF_STEM` is 14 — the field is 16 and the suffix takes
+two. Fourteen characters of `jade_h_bandit01` is spent before the digits that
+tell two heads apart:
+
+| texture resref | heads sharing it |
+|---|---|
+| `jade_h_bandit001` | **all eight** `h_bandit0*` |
+| `jade_h_minstr001` | `h_minstr01_`, `02_`, `03_` |
+| `jade_h_common001` | `h_common01_`, `h_common01gh_` |
+
+**42 of the 270 models** in the catalogue shared a texture name with another.
+Two of them installed together and one wears the other's face.
+
+**Fixed** by naming from the model rather than the folder the caller happened to
+choose. Across the whole catalogue that gives **270 distinct names for 270
+models**, longest 15 characters, so it still fits the field. Two heads written
+into identically-named folders now produce `h_bandit0101.tga` and
+`h_bandit0201.tga`.
+
+Tested across the entire catalogue rather than a sample, because the collisions
+clustered in one family of names and a sample would have missed them.

@@ -431,3 +431,70 @@ def test_a_pack_uses_the_scale_for_its_kind(a_head, tmp_path):
     assert height(chosen["pack"]) > height(as_body["pack"]), (
         "a head should not be built at the body figure"
     )
+
+
+# --- the texture resref ------------------------------------------------------
+
+
+def test_the_texture_is_named_from_the_model_not_the_folder(tmp_path):
+    """Two heads written into folders of the same name must not collide.
+
+    The filename becomes the texture's resref, and it used to come from the
+    output folder. The window's default folder is `jade_<resref>`, which spends
+    fourteen characters before the digits that tell two heads apart: all eight
+    `h_bandit0*` heads came out as `jade_h_bandit001`, and 42 of the 270 models
+    in the catalogue shared a name with another. Installing two of them together
+    means one wears the other's face.
+    """
+    from kmdlfun import installs, jade
+
+    root = installs.detect().get(installs.JADE)
+    if not root:
+        import pytest
+
+        pytest.skip("no Jade Empire install detected")
+
+    from pathlib import Path
+
+    wanted = ("h_bandit01_", "h_bandit02_")
+    seen = set()
+    for resref in wanted:
+        entry = next(
+            (e for e in jade.catalogue(Path(root)) if e.resref.lower() == resref), None
+        )
+        if entry is None:
+            import pytest
+
+            pytest.skip(f"{resref} not present")
+        # Deliberately the same folder name for both.
+        pack = tmp_path / str(len(seen)) / "j"
+        jade.to_pack(entry, pack)
+        textures = [p.name for p in pack.iterdir() if p.suffix == ".tga"]
+        assert textures, f"{resref} produced no texture"
+        seen.update(textures)
+
+    assert len(seen) == len(wanted), f"two heads share a texture name: {seen}"
+
+
+def test_every_head_in_the_catalogue_gets_its_own_texture_name():
+    """Checked across the whole catalogue rather than a sample, because the
+    collisions were in one family of names and a sample would miss them."""
+    import collections
+    from pathlib import Path
+
+    from kmdlfun import installs, jade
+
+    root = installs.detect().get(installs.JADE)
+    if not root:
+        import pytest
+
+        pytest.skip("no Jade Empire install detected")
+
+    names = collections.defaultdict(list)
+    for entry in jade.catalogue(Path(root)):
+        stem = entry.resref.strip("_").lower()[: jade.RESREF_STEM] + "01"
+        names[stem].append(entry.resref)
+        assert len(stem) <= 16, f"{stem} does not fit the resref field"
+
+    clashing = {k: v for k, v in names.items() if len(v) > 1}
+    assert not clashing, f"texture names collide: {clashing}"
