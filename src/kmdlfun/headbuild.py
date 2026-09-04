@@ -121,12 +121,15 @@ def run(
     crop: float | None = None,
     decimate: int | None = None,
     repair: bool = False,
-    # Off by default. The aperture cutter was written believing a converted face
-    # had no mouth; it has one, closed to zero width, and `lips.split_rims`
-    # opens it by weighting the two rims apart. Cutting as well removes real
-    # geometry and leaves a permanent hole. Kept for a head that genuinely has
-    # no aperture at all.
-    mouth: bool = False,
+    # On. A converted shell is closed across the mouth - genuinely, with no
+    # boundary edge anywhere near it - and weighting it to stretch is necessary
+    # but not sufficient: the stretched skin is painted *skin*, so it smears
+    # rather than opening. Reported from the game as "the horizontal line where
+    # his mouth opening would be just stretches instead of showing the teeth and
+    # mouth". The head's own teeth and interior are painted on pieces behind the
+    # shell, so the shell has to be opened for them to show. No-op on a head
+    # with no separate lips to locate the mouth by.
+    mouth: bool = True,
     mouth_scale: float = 1.0,
     mouth_height: float | None = None,
     fit: bool = False,

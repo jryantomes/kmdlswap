@@ -1074,3 +1074,41 @@ that could not distinguish what it claimed to. The pattern each time: a test
 that fires on the right geometry was treated as proof it fires *only* there, and
 the topology was never checked directly. "Are there boundary edges here?" would
 have answered this in one query at any point.
+
+
+## 35. Stretching is necessary but not sufficient — the shell has to be opened too
+
+**Status: built and installed, awaiting in-game confirmation.**
+
+Reported after §34: *"all of the animations work, but the horizontal line where
+his mouth opening would be just stretches instead of showing the teeth and mouth
+like in other textures."*
+
+§34 was right that a KOTOR mouth opens by stretching, and right that the shell
+is closed. What it missed is why that works on Carth and not here: **on Carth
+the skin that stretches into the cavity is UV-mapped to the mouth interior he
+has painted there.** The Jade head paints its interior somewhere else entirely —
+on the lip pieces and the mouth bag, which sit behind the shell. So the same
+stretch smears *skin* across the opening, which is precisely what was seen.
+
+So both are needed. The stretch weighting from §34 stays; the aperture cutter
+from §30 comes back on, at a height chosen by rendering **with culling** this
+time:
+
+| aperture height | at rest | open |
+|---|---|---|
+| 0.40, 0.25 | a band of teeth on a resting face | fine |
+| **0.10** | **faint specks at the lip line** | **teeth and interior** |
+
+6 shell faces removed, an aperture 0.0456 wide by 0.0020 tall.
+
+The tension is structural and cannot be designed away: a hole in geometry does
+not close, so anything cut is visible at rest as well. 0.10 is the point where
+what shows at rest is a glint rather than a grin.
+
+**To validate:** installed as `out_vex_open2/`; previous build backed up at
+`out_vex_open2/backup-before/`. At rest the lip line should read as a line, not
+a set of teeth. Talking, the interior should show instead of smeared skin. If
+teeth are visible while he stands there saying nothing, `mouth_height` wants
+dropping further; if the mouth still smears, the aperture is too small to matter
+and it wants raising.

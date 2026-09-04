@@ -56,11 +56,13 @@ from . import lips
 # mouth hanging open with the teeth showing at rest. Rendered, it is a gape, not
 # a mouth. What a resting mouth wants is a slit: a dark line that becomes an
 # opening when the lips part.
-# Rendered at rest across 0.25, 0.40 and 0.60: 0.40 and 0.60 both show teeth on
-# a resting face, which is a snarl. 0.25 reads as an ordinary closed mouth with
-# a dark lip line, and opens onto the interior once the lips part.
+# Height is the whole judgement, and it was made by rendering with culling on.
+# A hole in geometry does not close, so whatever is cut shows at rest too: at
+# 0.60 and 0.40 the resting face bares a band of teeth, at 0.25 a thinner one,
+# and at 0.10 only faint specks at the lip line while the mouth still opens onto
+# the teeth and interior. Below that the opening stops being worth having.
 SCALE = 1.0
-SCALE_HEIGHT = 0.25
+SCALE_HEIGHT = 0.10
 
 
 def find(positions, faces, *, scale: float = SCALE, scale_height: float | None = None):
