@@ -1867,3 +1867,42 @@ into identically-named folders now produce `h_bandit0101.tga` and
 
 Tested across the entire catalogue rather than a sample, because the collisions
 clustered in one family of names and a sample would have missed them.
+
+
+## 56. Basic mode could not start
+
+**Status: fixed. TEST IN THE APP — `kmdlfun.bat` on the desktop.**
+
+Reported: in basic mode there is no way to scan, the character creator lists no
+heads, bodies or wardrobes, and there is no way to preview the character.
+
+**Three symptoms, one cause.** The "Scan install" button sits on the Transplant
+tab, and `_advanced_tab` hides that whole tab in basic mode. The catalogue was
+only ever loaded from the scan's completion handler:
+
+```
+_scan  ->  _scan_work  ->  ("scanned", ...)  ->  _load_catalogue
+```
+
+No scan, no catalogue, so the pickers stayed empty. And the preview only draws
+once an outfit is picked, so with nothing to pick it never drew. The preview
+widget was there the whole time and is not advanced-hidden; it had nothing to
+draw.
+
+**The coupling was accidental.** `_load_catalogue` needs the install path and
+nothing else - it reads the 2DAs and the model list. The *scan* builds the donor
+compatibility index, which only the Transplant tab uses. They were joined by
+where the button happened to live.
+
+The catalogue now loads as soon as the game is found, and again whenever the
+install path changes. `_load_catalogue` already ignored a repeat of the path it
+held, so the trace firing per keystroke costs nothing.
+
+**Still open: parts from more than one game.** The Character tab writes 2DA rows
+into one install - `character.assemble(install, ...)` - and a row can only name
+a model that game has. Listing a KOTOR II or Jade part would mean shipping that
+model into the target's Override as well, which is what the Transplant tab's
+cross-game build does and what this tab deliberately does not: *"Nothing here
+writes geometry - it is two table rows and a blueprint."* Offering the parts
+without that copy would produce a character referring to a model that is not
+there. It is a real feature, not a switch, and it is not done.

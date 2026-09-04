@@ -206,6 +206,14 @@ class App(ttk.Frame):
 
         for var in (self.install, self.install2, self.out_dir):
             var.trace_add("write", lambda *_a: self._say_where())
+        # Changing the game reloads the parts. `_load_catalogue` ignores a
+        # repeat of the path it already has, so the trace firing on every
+        # keystroke costs nothing.
+        self.install.trace_add(
+            "write",
+            lambda *_a: (self.install.get().strip()
+                         and self._load_catalogue(self.install.get().strip())),
+        )
 
         self._build_menu()
         # Detection reads Steam's index and a few known folders - fast enough
@@ -350,6 +358,21 @@ class App(ttk.Frame):
                 filled.append((key, path, found.how.get(key, "")))
 
         self._say_where()
+
+        # Fill the Character tab as soon as the game is known, rather than
+        # waiting for a scan. The scan button lives on the Transplant tab,
+        # which basic mode hides, so a beginner had no way to reach it: the
+        # pickers stayed empty, nothing could be chosen, and the preview - which
+        # only draws once an outfit is picked - therefore never appeared either.
+        # One missing button read as three missing features.
+        #
+        # The catalogue does not need the scan. It reads the 2DAs and the model
+        # list; the scan builds the *donor compatibility index*, which only the
+        # Transplant tab uses. They were coupled by where the button happened
+        # to be.
+        if self.install.get().strip():
+            self._load_catalogue(self.install.get().strip())
+
         if filled:
             installs.save({k: v.get().strip() for k, v in pairs})
             # Only say so when asked. Announcing three finds on every launch is

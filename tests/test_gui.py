@@ -1823,3 +1823,45 @@ def test_startup_does_not_rewrite_the_preference(app):
     body = inspect.getsource(kgui.App._apply_mode)
     assert "remember" not in body, body
     assert "remember" in inspect.getsource(kgui.App._on_mode_change)
+
+
+# --- basic mode can actually get started ------------------------------------
+#
+# The Character tab was unusable in basic mode and it looked like three separate
+# gaps: no way to scan, no parts listed, no preview. It was one gap. The "Scan
+# install" button sits on the Transplant tab, which basic mode hides, and the
+# catalogue was only ever loaded from the scan's completion handler. No scan, no
+# parts; and the preview only draws once an outfit is picked, so it never drew.
+
+
+def test_the_parts_load_without_a_scan(app, install_path):
+    """The catalogue needs the install path, not the scan.
+
+    The scan builds the donor compatibility index, which only the Transplant tab
+    uses. The two were coupled by where the button happened to live.
+    """
+    import threading
+
+    app.install.set(install_path)
+    for _ in range(300):
+        if app.catalogue is not None:
+            break
+        app.update()
+        app._drain()
+        for thread in threading.enumerate():
+            if thread is not threading.current_thread() and thread.daemon:
+                thread.join(0.05)
+    assert app.catalogue is not None, "the catalogue never arrived"
+    assert len(app.catalogue.bodies) > 20
+    assert len(app.catalogue.heads) > 50
+
+
+def test_the_scan_button_is_not_the_only_way_in(app):
+    """Whatever fills the Character tab must not sit behind an advanced-only
+    control. A beginner never sees the Transplant tab."""
+    import inspect
+
+    source = inspect.getsource(type(app)._show_installs)
+    assert "_load_catalogue" in source, (
+        "nothing loads the parts when the install is found; basic mode is stuck"
+    )
