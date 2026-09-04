@@ -102,6 +102,10 @@ LIP_FALLOFF = 1.5
 # away quickly at the ends, which is the shape of a mouth.
 CORNER_TAPER = 2.0
 
+# Where the eyes sit, as a fraction of head height. Used to find the head's own
+# eyeballs so they can be bound rigidly, as the host binds its own.
+EYE_BAND = (0.50, 0.70)
+
 # Where a mouth can sit, as a fraction of head height. Wide enough to be
 # generous, narrow enough to exclude the eyes above and the neck below.
 BAND = (0.18, 0.52)
@@ -459,8 +463,39 @@ def bind(
     # rigid: bound to the jaw it swings down with it, uncovering the top of the
     # opening, and the render showed daylight straight through the head. The
     # host's own tongue is skinned rather than parented for the same reason.
+    # The head's own eyeballs, found the same way as its teeth and bound the
+    # same way: rigidly to the skull, exactly as the host parents `eyeLA` and
+    # `eyeRA` to `head_g`.
+    #
+    # Left to proximity transfer they pick up the bone nearest them, which at
+    # the eye line is the brow: measured on `h_mercf01_`, 47% and 49% on
+    # `f_lbrw_g` and `f_rbrw_g`. Every brow movement then swings the eyes, and
+    # in game the eyes were seen roaming around the face when only the brow
+    # should move. An eyeball does not deform and does not follow a brow.
+    eye_islands = []
+    if len(shell_index):
+        limit = max(6, int(MAX_ISLAND * len(P)))
+        lo_all, hi_all = P.min(axis=0), P.max(axis=0)
+        height = float(hi_all[2] - lo_all[2])
+        mid_y = float(lo_all[1] + hi_all[1]) / 2
+        for island in every[1:]:
+            if not (6 <= len(island) <= limit):
+                continue
+            centre = P[island].mean(axis=0)
+            if height <= 0 or not (
+                EYE_BAND[0] <= (centre[2] - lo_all[2]) / height <= EYE_BAND[1]
+            ):
+                continue
+            if centre[1] <= mid_y:
+                continue
+            eye_islands.append(island)
+
     rigid = 0
-    for group, bone in ((upper_island, SKULL), (lower_island, JAW)):
+    for group, bone in (
+        (upper_island, SKULL),
+        (lower_island, JAW),
+        *[(g, SKULL) for g in eye_islands],
+    ):
         slot = by_name.get(bone)
         if slot is None:
             continue
@@ -516,8 +551,9 @@ def bind(
         )
     if rigid:
         lines.append(
-            f"teeth: bound {rigid} vertices of the head's own teeth and interior "
-            f"rigidly, one bone each, as the host binds its own"
+            f"rigid: bound {rigid} vertices of the head's own teeth"
+            + (f" and {len(eye_islands)} eyes" if eye_islands else "")
+            + " rigidly, one bone each, as the host binds its own"
         )
     if followed:
         lines.append(

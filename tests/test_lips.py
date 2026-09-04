@@ -91,6 +91,51 @@ def test_the_teeth_are_bound_rigidly_one_bone_each():
     assert any("rigidly" in line for line in lines)
 
 
+def test_the_eyeballs_are_rigid_to_the_skull():
+    """As the host parents `eyeLA` and `eyeRA` to `head_g`.
+
+    Left to proximity transfer they take the bone nearest them, which at the eye
+    line is the brow - measured on a real head, 47% and 49% on `f_lbrw_g` and
+    `f_rbrw_g`. Every brow movement then swings the eyes, and in game the eyes
+    were seen roaming around the face when only the brow should move.
+    """
+    points, faces = head_with_eyes()
+    # Seeded with a facial bone rather than the skull, standing in for the brow
+    # that proximity transfer actually hands them.
+    infl = [led_by(NAMES["f_lmc_g"]) for _ in points]
+
+    out, lines = lips.bind(points, faces, infl, RIG)
+
+    P = np.asarray(points, dtype=float)
+    lo, hi = P.min(axis=0), P.max(axis=0)
+    height = hi[2] - lo[2]
+    mid_y = (lo[1] + hi[1]) / 2
+    eyes = [
+        island for island in lips.islands(P, faces)[1:]
+        if 6 <= len(island) <= max(6, int(lips.MAX_ISLAND * len(P)))
+        and lips.EYE_BAND[0] <= (P[island].mean(axis=0)[2] - lo[2]) / height <= lips.EYE_BAND[1]
+        and P[island].mean(axis=0)[1] > mid_y
+    ]
+    assert eyes, "the fixture has no eyes to bind"
+    for island in eyes:
+        for v in island:
+            assert out[v] == [Influence(NAMES["head_g"], 1.0)], (
+                "an eyeball still follows a facial bone"
+            )
+
+
+def head_with_eyes():
+    """The face-over-lips head, with a pair of eyeballs behind it."""
+    points, faces = head_with_a_face_over_lips()
+    base = len(points)
+    for cx in (-0.05, 0.05):
+        pts, fcs = ring((cx, 0.12, 0.60), width=0.03, height=0.03, n=6)
+        offset = len(points)
+        points.extend(pts)
+        faces.extend([(a + offset, b + offset, c + offset) for a, b, c in fcs])
+    return points, faces
+
+
 def test_the_interior_still_follows_the_face():
     """The bag lines the whole cavity and must not be rigid: bound to the jaw
     it swings down with it and the top of the opening unseals, which rendered

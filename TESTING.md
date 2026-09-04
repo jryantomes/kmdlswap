@@ -1755,3 +1755,36 @@ work.
 with the reasoning attached. Visible mesh on a converted head is `Head` alone.
 
 **To test:** no freeze, and no eye wandering across her face. She will not blink.
+
+
+## 53. The eyeballs were following the brow
+
+**Status: installed as `out_vex_rigideyes/`. THERE IS SOMETHING TO TEST.**
+
+Reported after §52: the brow appears to sit at the eyes, and the *eyes* move
+around the face when only the brow should.
+
+Measured on the installed build, the head's own eyeballs were bound:
+
+| | |
+|---|---|
+| eye 1 | **`f_lbrw_g` 47%**, `head_g` 40%, `f_mdbrw_g` 13% |
+| eye 2 | **`f_rbrw_g` 49%**, `head_g` 38%, `f_mdbrw_g` 13% |
+
+Nearly half of each eyeball on a brow bone. Proximity transfer takes the bone
+nearest a vertex, and at the eye line that is the brow — so every brow movement
+swung the eyes.
+
+The host does not do this: `eyeLA` and `eyeRA` are **not skinned**, parented to
+`head_g`. An eyeball does not deform and does not follow a brow. The head's own
+eyes are now bound the same way, rigidly to the skull, through the path the
+teeth already use. Both come out `head_g` 100%.
+
+**Third part of a converted head found taking whatever bone was nearest**, after
+the teeth (which spiked into fangs) and the mouth interior (which sailed out
+through the opening). Proximity transfer is right for a surface and wrong for
+every rigid piece behind one. The rule is now explicit in `lips.bind`: anything
+the head carries as its own island — teeth, eyes — is bound rigidly to the bone
+the host uses for it, and only the face itself is transferred.
+
+**To test:** do her eyes stay put when her brows move?
