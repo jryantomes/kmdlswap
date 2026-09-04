@@ -1687,3 +1687,36 @@ shape - and the numbers settled it.
 `h_common01_` was built and confirmed before the taper existed, so its mouth
 opened as a rectangle too and was not noticed. Worth a look next time it is
 installed.
+
+
+## 51. Blinking is a rotation, so the pivot has to move too
+
+**Status: installed as `out_vex_blink/` (`h_mercf01_`). THERE IS SOMETHING TO
+TEST.**
+
+The eyelids were kept (§49) and still did not blink.
+
+**Blinking is a rotation.** In `pause1`, `eyeLlid` and `eyeRlid` carry exactly
+one controller each: **type 20, orientation**. The lid turns about its node
+pivot to close over the eye.
+
+§49 moved the lid's *geometry* forward 0.0263 and left the pivot behind, so the
+lid swung through an arc centred 0.0263 back instead of closing over the eye.
+Moving geometry is right for the teeth, which are placed rather than turned, and
+wrong for anything that rotates.
+
+**Header and controller both, always.** Checked across every mesh node of
+`p_carthh`: the header position and the position-controller value are identical
+to 1e-6 on all nine. Editing one leaves the model disagreeing with itself, and
+that is precisely §29 — the header was moved, the controller was not, the engine
+read the controller and the teeth did not budge. `_shift_position_controller`
+now writes both, and the lids come out with the two agreeing.
+
+**A measurement trap this exposed.** `space.rest_pose` reads the *header*. For
+any node with a position controller, a model-space measurement taken through it
+is only as good as the two agreeing — which they do in vanilla and did not in
+anything this project edited header-only. Every measurement of a controller-
+carrying node before this is suspect.
+
+**To test:** does she blink? Eyes and mouth should be unchanged from the last
+build.

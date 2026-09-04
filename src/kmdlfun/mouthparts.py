@@ -43,11 +43,17 @@ be inventing a correction for a problem that is not there.
 
 from __future__ import annotations
 
+import struct
+
 import numpy as np
 
 from kmdlfun import parts as kparts
 from kmdlfun import space
 from kmdlswap import mdx as kmdx
+from kmdlswap._io import MDL_BASE
+
+# Controller kinds, from the 16-byte controller entry.
+POSITION_CONTROLLER = 8
 
 # Mouth interior, under every naming scheme the K1 corpus uses.
 TEETH = ("teethua", "teethla", "teethupper", "teethlower", "teethua01", "teethla01")
@@ -424,31 +430,17 @@ def seat_eyelids(layout, mdl: bytes, mdx: bytes, node, host_layout=None):
     if abs(shift) < 1e-4:
         return mdl, mdx, []
 
-    from kmdlswap import edit as ke
-    from kmdlswap import layout as kl
-
-    out, current_mdx, names = mdl, None, []
+    out = bytearray(mdl)
+    names = []
     for lid in lids:
-        after = kl.parse(out, current_mdx) if current_mdx is not None else layout
-        target = next(
-            (n for n in kparts.mesh_nodes(after) if n.name.lower() == lid.name.lower()),
-            None,
-        )
-        if target is None:
-            continue
         r = rest[lid.index]
         local = tuple(
             float(v)
             for v in np.asarray(r.rotation, dtype=float).T @ np.array([0.0, shift, 0.0])
         )
-        geo = ke.extract(after, target)
-        geo.columns["vertex"] = [
-            tuple(p[i] + local[i] for i in range(3)) for p in geo.positions
-        ]
-        out, current_mdx = ke.replace_geometry(
-            after, target, geo, moved=ke.UniformScale(1.0, local)
-        )
-        names.append(lid.name)
+        if _shift_position_controller(out, lid, local):
+            names.append(lid.name)
+    out, current_mdx = bytes(out), mdx
 
     if not names:
         return mdl, mdx, []
@@ -458,3 +450,51 @@ def seat_eyelids(layout, mdl: bytes, mdx: bytes, node, host_layout=None):
         f"{want:.4f} behind the new face, as they do on the host - they are what "
         f"blinks"
     ]
+
+
+def _shift_position_controller(mdl: bytearray, node, delta) -> bool:
+    """Move a node's rest position: header *and* position controller.
+
+    Both, because vanilla keeps them identical - checked across every mesh node
+    of `p_carthh`, header and controller agree to 1e-6 on all nine. Editing one
+    leaves the model disagreeing with itself, and that is exactly what happened
+    in §29: the header was moved, the controller was not, the engine read the
+    controller and the teeth did not budge.
+
+    The header field is not enough - the engine reads the controller over it,
+    which is why the teeth had to be moved in geometry (§29). But geometry is
+    not enough either for anything that *rotates*: an eyelid blinks by turning
+    about its node pivot (controller type 20 in `pause1`), so moving its
+    vertices while leaving the pivot behind makes it swing through an arc
+    instead of closing over the eye. In game, a head that never blinks.
+
+    Moving the controller moves the pivot and the geometry together.
+    """
+    at = MDL_BASE + node.offset
+    current = struct.unpack_from("<3f", mdl, at + 16)
+    struct.pack_into(
+        "<3f", mdl, at + 16, *(float(current[i] + delta[i]) for i in range(3))
+    )
+    controllers_offset, count = struct.unpack_from("<II", mdl, at + 56)
+    data_offset, data_length = struct.unpack_from("<II", mdl, at + 68)
+    if not count or controllers_offset >= 0xFFFFFF00:
+        # The header alone is all this node has.
+        return True
+    for i in range(count):
+        entry = MDL_BASE + controllers_offset + i * 16
+        kind = struct.unpack_from("<I", mdl, entry)[0]
+        if kind != POSITION_CONTROLLER:
+            continue
+        rows, _timekey, datakey = struct.unpack_from("<HHH", mdl, entry + 6)
+        columns = struct.unpack_from("<B", mdl, entry + 12)[0] & 0x0F
+        if rows < 1 or columns < 3:
+            continue
+        for row in range(rows):
+            base = MDL_BASE + data_offset + (datakey + row * columns) * 4
+            current = struct.unpack_from("<3f", mdl, base)
+            struct.pack_into(
+                "<3f", mdl, base, *(float(current[j] + delta[j]) for j in range(3))
+            )
+        return True
+    # A node with controllers but no position one: the header carries it.
+    return True
