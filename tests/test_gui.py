@@ -19,6 +19,32 @@ import pytest
 tk = pytest.importorskip("tkinter", reason="the app needs Tk")
 
 
+
+def take_event(app, wanted):
+    """Pull one event of a kind out of the queue, leaving the rest.
+
+    The catalogue loads on its own as soon as the game is found, so its event
+    can be sitting ahead of the one a test is waiting for - and in a full run
+    other events land too. Draining with `iter(get_nowait, None)` does not work:
+    `get_nowait` raises `Empty` rather than returning `None`, so it blows up
+    instead of stopping.
+    """
+    import queue
+
+    keep, found = [], None
+    while True:
+        try:
+            item = app.events.get_nowait()
+        except queue.Empty:
+            break
+        if found is None and item[0] == wanted:
+            found = item
+        else:
+            keep.append(item)
+    for item in keep:
+        app.events.put(item)
+    return found if found is not None else (None, None)
+
 def buttons_under(page):
     """Every button anywhere inside a tab, not just its direct children.
 
@@ -1283,13 +1309,7 @@ def test_importing_selects_the_pack_it_just_made(app, tmp_path):
     app._import_work(str(source), out)
     from pathlib import Path
 
-    # The catalogue now loads on its own as soon as the game is found, so its
-    # event can be sitting in the queue ahead of this one. Take the event this
-    # test is about rather than assuming it is first.
-    kind, payload = next(
-        (e for e in iter(app.events.get_nowait, None) if e[0] == "imported"),
-        (None, None),
-    )
+    kind, payload = take_event(app, "imported")
     assert kind == "imported", "no import event was posted"
     pack, lines, triangles = payload
     assert pack == out
@@ -1689,8 +1709,8 @@ def test_converting_a_jade_model_writes_a_pack_and_selects_it(app, tmp_path):
     out = str(tmp_path / "pack")
     app._jade_work(entry, out, kjade.SCALE)
 
-    kind, payload = app.events.get_nowait()
-    assert kind == "imported", payload
+    kind, payload = take_event(app, "imported")
+    assert kind == "imported", "no import event was posted"
     pack, lines, triangles = payload
     assert pack == out
     assert triangles > 0
