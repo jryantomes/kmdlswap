@@ -177,148 +177,100 @@ def test_a_mismatched_influence_list_is_refused_quietly():
     assert lines == []
 
 
-# --- an aperture closed to zero width ---------------------------------------
+# --- the shell opens by stretching -----------------------------------------
 #
-# The failure that survived four passes. Jade Empire models a mouth as a hole
-# whose two rims sit on the same coordinates, so every analysis that welds by
-# position - which is all of them, because welding is what stops a UV seam
-# looking like a hole - reports a solid face. Worse, `weights.transfer` samples
-# the host by position, so it hands both rims identical weights by construction
-# and they can never part.
+# A KOTOR mouth has no opening. The face is one closed surface, the vertices
+# above the lip line lift and those below drop, and the skin between them pulls
+# apart to line the cavity. A converted shell is closed the same way and needs
+# the same treatment: checked on `h_common01_`, the welded shell has no boundary
+# vertex anywhere near the mouth.
+#
+# An earlier version hunted for an aperture whose rims coincided, believing
+# conversion had welded a real opening shut. There is no such aperture. What it
+# found were UV-seam duplicates, told apart by comparing the mean height of each
+# copy's faces - which measures the slope of the surface, not its topology.
+# Binding those apart detached the lips from the face along their outline and
+# left the mouth line itself welded, which is exactly how it looked in game.
 
 
-def head_with_a_zero_width_mouth():
-    """Two surfaces meeting along a line of doubled vertices, front and back.
+def head_with_a_face_over_lips():
+    """A shell that wraps front and back, with the lips behind its front.
 
-    Above the line the faces belong to one copy, below it to the other. In
-    space they touch; in topology they are two boundaries.
-
-    There is a second such line at the *back*, because that is the shape of the
-    bug this fixture exists for: Jade heads carry a coincident seam running
-    right around the skull at jaw height, indistinguishable from a lip rim by
-    the above/below test alone. Binding it apart split the head open along a
-    line that went all the way round.
+    Both halves matter. The front has to be *in front of* the lips, because
+    that is the arrangement that hides them; and there has to be a back, or the
+    mesh's mid-depth sits between the shell and the lips and the front-half
+    test excludes the very geometry it is meant to select.
     """
     points, faces = [], []
-    n = 9
-    xs = [-0.1 + 0.2 * i / (n - 1) for i in range(n)]
 
-    def strip(y, z0, z1):
+    def add(p, f):
         base = len(points)
-        for x in xs:
-            points.append((x, y, z0))
-            points.append((x, y, z1))
-        for i in range(n - 1):
-            a, b = base + 2 * i, base + 2 * i + 1
-            c, d = base + 2 * (i + 1), base + 2 * (i + 1) + 1
-            faces.append((a, b, c))
-            faces.append((b, d, c))
+        points.extend(p)
+        faces.extend([(a + base, b + base, c + base) for a, b, c in f])
 
-    strip(0.1, 0.36, 0.50)    # the mouth: above the line, ending on it
-    strip(0.1, 0.36, 0.22)    # the mouth: below it, on the same line
-    strip(-0.1, 0.36, 0.50)   # the skull seam, at the back, same height
-    strip(-0.1, 0.36, 0.22)
+    def plane(y, nx=16, nz=22):
+        pts = [
+            (-0.15 + 0.30 * i / (nx - 1), y, k / (nz - 1))
+            for i in range(nx) for k in range(nz)
+        ]
+        cells = []
+        for i in range(nx - 1):
+            for k in range(nz - 1):
+                a = i * nz + k
+                cells.append((a, a + 1, (i + 1) * nz + k))
+                cells.append((a + 1, (i + 1) * nz + k + 1, (i + 1) * nz + k))
+        return pts, cells
+
+    add(*plane(0.15))    # the face, in front of everything
+    add(*plane(-0.15))   # the back of the skull
+    add(*ring((0.0, 0.12, 0.38), n=6))
+    add(*ring((0.0, 0.12, 0.35), n=6))
+    add(*ring((0.0, 0.09, 0.36), width=0.05, n=6))
     return points, faces
 
 
-MOUTH_BOX = (0.0, 0.36, 0.12, 0.02)   # centre_x, centre_z, half_x, half_z
-
-
-def test_a_zero_width_aperture_is_found():
-    points, faces = head_with_a_zero_width_mouth()
-
-    upper, lower = lips.split_rims(points, faces, band=(0.0, 1.0), near=MOUTH_BOX)
-
-    assert upper and lower, "the doubled mouth line was not detected"
-    assert set(upper).isdisjoint(lower)
-
-
-def test_a_plain_uv_seam_is_not_mistaken_for_one():
-    """A seam has all its copies on the same side of the line. Binding one
-    apart would tear the face open along a texture boundary."""
-    points, faces = head_with_a_zero_width_mouth()
-    # Duplicate every vertex in place without giving the copies any faces:
-    # coincident, but not a rim pair.
-    points = list(points) + list(points)
-
-    upper, lower = lips.split_rims(points, faces, band=(0.0, 1.0), near=MOUTH_BOX)
-
-    for v in list(upper) + list(lower):
-        assert v < len(points) // 2, "a face-less duplicate was treated as a rim"
-
-
-def test_a_seam_away_from_the_mouth_is_left_alone():
-    """The regression that reached the game: a coincident seam runs around the
-    skull at the same height as the mouth, and binding it apart tore the head
-    open along it. In the build that shipped, 103 vertices were bound, spanning
-    x +-0.068 against a head half-width of 0.085 and reaching from the back of
-    the head to the front. The mouth is x +-0.023."""
-    points, faces = head_with_a_zero_width_mouth()
+def test_the_shell_splits_at_the_lip_line():
+    points, faces = head_with_a_face_over_lips()
     P = np.asarray(points, dtype=float)
-    mid_y = (P[:, 1].min() + P[:, 1].max()) / 2
-
-    upper, lower = lips.split_rims(points, faces, band=(0.0, 1.0), near=MOUTH_BOX)
-
-    assert upper and lower, "the mouth itself must still be found"
-    for v in list(upper) + list(lower):
-        assert P[v][1] > mid_y, f"vertex at y={P[v][1]:+.3f} is on the back of the head"
-
-
-def test_without_somewhere_to_aim_nothing_is_bound():
-    """`near` is required. The above/below test alone cannot tell a lip rim
-    from any other coincident seam, so with no mouth to aim at this returns
-    nothing rather than guessing."""
-    points, faces = head_with_a_zero_width_mouth()
-
-    assert lips.split_rims(points, faces, band=(0.0, 1.0)) == ([], [])
-
-
-def head_with_lips_and_a_seam():
-    """Lip pieces *and* a zero-width aperture, which is what a real one has.
-
-    `bind` locates the mouth from the lip pieces and only then looks for a
-    seam, so both have to be present for the path to run at all.
-    """
-    points, faces = head_with_separate_lips()
-
-    n = 7
-    xs = [-0.02 + 0.04 * i / (n - 1) for i in range(n)]
-
-    def strip(z0, z1):
-        base = len(points)
-        for x in xs:
-            points.append((x, 0.13, z0))
-            points.append((x, 0.13, z1))
-        for i in range(n - 1):
-            a, b = base + 2 * i, base + 2 * i + 1
-            c, d = base + 2 * (i + 1), base + 2 * (i + 1) + 1
-            faces.append((a, b, c))
-            faces.append((b, d, c))
-
-    strip(0.365, 0.40)   # above the mouth line, ending on it
-    strip(0.365, 0.33)   # below it, on the same line
-    return points, faces
-
-
-def test_the_two_rims_are_bound_to_bones_that_pull_them_apart():
-    """The whole point: at the same position, proximity transfer gives both
-    rims the same weights, so the mouth cannot open however it is animated."""
-    points, faces = head_with_lips_and_a_seam()
     infl = [led_by(NAMES["head_g"]) for _ in points]
 
     out, lines = lips.bind(points, faces, infl, RIG)
 
-    assert any("mouth seam" in line for line in lines), lines
-    P = np.asarray(points, dtype=float)
-    rim = P[sorted(set(lips.find_lips(points, faces)[0]) | set(lips.find_lips(points, faces)[1]))]
+    assert any("stretches apart" in line for line in lines), lines
+    upper, lower = lips.find_lips(points, faces)[:2]
+    rim = P[sorted(set(upper) | set(lower))]
     box = (
         float(rim[:, 0].min() + rim[:, 0].max()) / 2,
         float(rim[:, 2].min() + rim[:, 2].max()) / 2,
         float(rim[:, 0].max() - rim[:, 0].min()) / 2 * 1.6,
         float(rim[:, 2].max() - rim[:, 2].min()) / 2 * 2.0,
     )
-    upper, lower = lips.split_rims(points, faces, near=box)
-    assert upper and lower
-    ups = {out[v][0].bone_slot for v in upper}
-    downs = {out[v][0].bone_slot for v in lower}
-    assert ups != downs, "both rims still lead with the same bone"
+    above, below = lips.mouth_region(points, faces, near=box)
+    assert above and below
+
+    lifts = {NAMES["f_um_g"]}
+    drops = {NAMES["f_llm_g"], NAMES["f_rlm_g"], NAMES["f_jaw_g"]}
+    assert all(out[v][0].bone_slot in lifts for v in above), "the upper lip does not lift"
+    assert all(out[v][0].bone_slot in drops for v in below), "the lower lip does not drop"
+
+
+def test_the_split_is_confined_to_the_mouth():
+    """The regression that reached the game twice: anything that reaches past
+    the mouth tears the face somewhere it should not."""
+    points, faces = head_with_a_face_over_lips()
+    P = np.asarray(points, dtype=float)
+    upper, lower = lips.find_lips(points, faces)[:2]
+    rim = P[sorted(set(upper) | set(lower))]
+    box = (
+        float(rim[:, 0].min() + rim[:, 0].max()) / 2,
+        float(rim[:, 2].min() + rim[:, 2].max()) / 2,
+        float(rim[:, 0].max() - rim[:, 0].min()) / 2 * 1.6,
+        float(rim[:, 2].max() - rim[:, 2].min()) / 2 * 2.0,
+    )
+    above, below = lips.mouth_region(points, faces, near=box)
+    mid_y = (P[:, 1].min() + P[:, 1].max()) / 2
+
+    for v in above + below:
+        assert P[v][1] > mid_y, "the back of the head was included"
+        assert abs(P[v][0] - box[0]) <= box[2]
+        assert abs(P[v][2] - box[1]) <= box[3]

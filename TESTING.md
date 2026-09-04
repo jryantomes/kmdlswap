@@ -1024,3 +1024,53 @@ class of bug.
 **To validate:** installed as `out_vex_follow/`; previous build backed up at
 `out_vex_follow/backup-before/`. The mouth should behave as it did, without the
 interior separating from the lips as it opens.
+
+
+## 34. §31 was wrong: there is no welded aperture, and the shell must stretch
+
+**Status: built and installed, awaiting in-game confirmation. Retracts §31.**
+
+Reported: *"his top lip and bottom lip are split in the middle and are opening
+and closing with the mouth movements. The center where his two lips would
+separate do not and still look welded together."*
+
+That is the symptom of binding the wrong line apart, and it is exactly what §31
+did.
+
+**The retraction.** §31 claimed the shell carried an aperture closed to zero
+width, on the evidence of coincident positions with "one copy used only by faces
+above, another only by faces below". That test compares the mean height of each
+copy's *face centroids*, which measures the local **slope of the surface**, not
+its topology. Two checks settle it:
+
+- The welded shell has **no boundary vertex anywhere near the mouth** — it is
+  genuinely continuous, exactly like Carth's.
+- At the mouth line (z −1.618, 36% of head height) there are 16 coincident
+  positions, and **every copy has all of its faces below it**. Three UV copies
+  pointing the same way. Not a rim pair.
+
+So the pairs being bound apart were at 32–35% and 38–39% — the **outer outline
+of the lips**, where they meet the face. Splitting those detached the lips and
+left the mouth line welded. The description above is that failure exactly.
+
+**What is true instead.** A KOTOR mouth opens by *stretching*. The face is one
+closed surface; vertices above the lip line lift with `f_um_g`, those below drop
+with the jaw and lower-lip bones, and the skin between them pulls apart to line
+the cavity — which is why Carth's texture paints the mouth interior onto that
+stretched skin. `lips.mouth_region` now does the same to a converted shell: 43
+vertices above the lip line lift, 72 below it drop. `split_rims` is deleted.
+
+**A second flaw in the checking, carried over from §33.** Every render of an
+open mouth before this was made without backface culling, so it showed the
+inside of the head as a flesh-coloured slab the engine never draws. All renders
+of a cavity now pass `cull=True`.
+
+**To validate:** installed as `out_vex_stretch/`; previous build backed up at
+`out_vex_stretch/backup-before/`. The lips should stay one surface with the
+face, and the mouth line itself should part.
+
+**Method note.** Three separate conclusions in this thread came from a detector
+that could not distinguish what it claimed to. The pattern each time: a test
+that fires on the right geometry was treated as proof it fires *only* there, and
+the topology was never checked directly. "Are there boundary edges here?" would
+have answered this in one query at any point.
