@@ -178,7 +178,7 @@ def find_lips(positions, faces):
     return upper, lower, bag
 
 
-def split_rims(positions, faces, *, band=BAND):
+def split_rims(positions, faces, *, band=BAND, near=None):
     """An aperture whose two edges sit exactly on top of each other.
 
     This is how Jade Empire models a mouth, and it defeats every analysis that
@@ -195,6 +195,18 @@ def split_rims(positions, faces, *, band=BAND):
     part. Measured on the installed build, all 26 pairs came out bound to the
     same kind of bone.
 
+    **It has to be told where the mouth is.** A converted head carries other
+    coincident seams - Jade's run right around the skull at jaw height - and
+    "one copy above, one below" cannot tell them apart from a lip rim. Binding
+    those apart splits the head open along a line that goes all the way round,
+    which is what it did in game: 103 vertices bound, spanning x +-0.068 against
+    a head half-width of 0.085, and reaching from y -0.046 at the back to +0.113
+    at the front. The real mouth is x +-0.023, y +0.070 to +0.102.
+
+    So ``near`` is a box - ``(centre_x, centre_z, half_x, half_z)`` - taken from
+    the lip pieces when there are any, and the front half of the head is
+    required regardless. Without it this returns nothing rather than guessing.
+
     Returns ``(upper, lower)`` vertex indices, empty when there is no such seam.
     """
     P = np.asarray([p[:3] for p in positions], dtype=np.float64)
@@ -204,6 +216,10 @@ def split_rims(positions, faces, *, band=BAND):
     height = float(hi[2] - lo[2])
     if height <= 0:
         return [], []
+    if near is None:
+        return [], []
+    centre_x, centre_z, half_x, half_z = near
+    mid_y = (lo[1] + hi[1]) / 2
 
     faces_of: dict[int, list[int]] = collections.defaultdict(list)
     for i, face in enumerate(faces):
@@ -221,6 +237,11 @@ def split_rims(positions, faces, *, band=BAND):
         if len(group) < 2:
             continue
         if not (band[0] <= (key[2] - lo[2]) / height <= band[1]):
+            continue
+        # The mouth, not every seam at this height.
+        if key[1] <= mid_y:
+            continue
+        if abs(key[0] - centre_x) > half_x or abs(key[2] - centre_z) > half_z:
             continue
         above, below = [], []
         for v in group:
@@ -270,7 +291,19 @@ def bind(
         return influences, []
 
     found = find_lips(positions, faces)
-    seam_upper, seam_lower = split_rims(positions, faces)
+    seam_upper, seam_lower = [], []
+    if found is not None:
+        _P = np.asarray([p[:3] for p in positions], dtype=np.float64)
+        rim = _P[sorted(set(found[0]) | set(found[1]))]
+        # Generous around the lips - a mouth corner reaches past the modelled
+        # lip piece - but nothing like far enough to touch the skull seam.
+        box = (
+            float(rim[:, 0].min() + rim[:, 0].max()) / 2,
+            float(rim[:, 2].min() + rim[:, 2].max()) / 2,
+            float(rim[:, 0].max() - rim[:, 0].min()) / 2 * 1.6,
+            float(rim[:, 2].max() - rim[:, 2].min()) / 2 * 2.0,
+        )
+        seam_upper, seam_lower = split_rims(positions, faces, near=box)
     if found is None and not seam_upper:
         return influences, []
     if found is None:

@@ -948,3 +948,44 @@ with a tool that could not see it, and each time the measurement agreed with the
 previous wrong conclusion. Welding by position is correct for finding islands
 and fatal for finding apertures; both readings were needed and only one was ever
 taken. The user supplied the hypothesis that broke the loop.
+
+
+## 32. The seam binding tore the head open
+
+**Status: fixed and installed, awaiting in-game confirmation. Corrects §31.**
+
+Reported from the game with screenshots: the mouth opens onto a dark interior —
+§31 worked — but *"he has a whole ass seam around his head when he talks"*, and
+`20260903212642_1.jpg` shows a gash across the **back** of the skull at ear
+height.
+
+**Cause, and it was mine.** `split_rims` filtered on the height band alone: no
+front/back test and no lateral limit. Jade heads carry a coincident-vertex seam
+running right around the skull at jaw height, and the "one copy above, one copy
+below" test cannot tell it from a lip rim. So it bound the whole ring apart.
+
+Measured on the build that shipped:
+
+| | bound by `split_rims` | the actual mouth |
+|---|---|---|
+| vertices | **103** | 26 |
+| lateral span | **x ±0.068** (head half-width 0.085) | x ±0.023 |
+| depth span | **y −0.046 … +0.113** (back to front) | y +0.070 … +0.102 |
+
+30 of the 103 were on the back of the head.
+
+**Fix.** `split_rims` now requires a `near` box — centre and half-extent taken
+from the lip pieces — and the front half of the head regardless. With no mouth
+to aim at it returns nothing rather than guessing. After: 26 vertices, 0 on the
+back, x ±0.020. The mouth still opens: 13 pairs part, and the 13 skull-seam
+pairs correctly stay shut.
+
+**Lesson.** §31's detector was validated only on *whether it found the mouth*,
+never on *what else it found*. A test that a detector fires is half a test; the
+other half is that it does not fire elsewhere. `tests/test_lips.py` now carries
+a fixture with both a mouth seam and a skull seam, and asserts nothing on the
+back of the head is bound.
+
+**To validate:** installed as `out_vex_seam2/`; previous build backed up at
+`out_vex_seam2/backup-before/`. The mouth should behave as it did in the last
+screenshots, and the seam around the skull should be gone.

@@ -187,35 +187,46 @@ def test_a_mismatched_influence_list_is_refused_quietly():
 
 
 def head_with_a_zero_width_mouth():
-    """Two surfaces meeting along a line of doubled vertices.
+    """Two surfaces meeting along a line of doubled vertices, front and back.
 
     Above the line the faces belong to one copy, below it to the other. In
     space they touch; in topology they are two boundaries.
+
+    There is a second such line at the *back*, because that is the shape of the
+    bug this fixture exists for: Jade heads carry a coincident seam running
+    right around the skull at jaw height, indistinguishable from a lip rim by
+    the above/below test alone. Binding it apart split the head open along a
+    line that went all the way round.
     """
     points, faces = [], []
     n = 9
     xs = [-0.1 + 0.2 * i / (n - 1) for i in range(n)]
 
-    def strip(z0, z1, upper):
+    def strip(y, z0, z1):
         base = len(points)
         for x in xs:
-            points.append((x, 0.1, z0))
-            points.append((x, 0.1, z1))
+            points.append((x, y, z0))
+            points.append((x, y, z1))
         for i in range(n - 1):
             a, b = base + 2 * i, base + 2 * i + 1
             c, d = base + 2 * (i + 1), base + 2 * (i + 1) + 1
             faces.append((a, b, c))
             faces.append((b, d, c))
 
-    strip(0.36, 0.50, upper=True)   # above the mouth line, ending on it
-    strip(0.36, 0.22, upper=False)  # below it, starting on the same line
+    strip(0.1, 0.36, 0.50)    # the mouth: above the line, ending on it
+    strip(0.1, 0.36, 0.22)    # the mouth: below it, on the same line
+    strip(-0.1, 0.36, 0.50)   # the skull seam, at the back, same height
+    strip(-0.1, 0.36, 0.22)
     return points, faces
+
+
+MOUTH_BOX = (0.0, 0.36, 0.12, 0.02)   # centre_x, centre_z, half_x, half_z
 
 
 def test_a_zero_width_aperture_is_found():
     points, faces = head_with_a_zero_width_mouth()
 
-    upper, lower = lips.split_rims(points, faces, band=(0.0, 1.0))
+    upper, lower = lips.split_rims(points, faces, band=(0.0, 1.0), near=MOUTH_BOX)
 
     assert upper and lower, "the doubled mouth line was not detected"
     assert set(upper).isdisjoint(lower)
@@ -229,24 +240,84 @@ def test_a_plain_uv_seam_is_not_mistaken_for_one():
     # coincident, but not a rim pair.
     points = list(points) + list(points)
 
-    upper, lower = lips.split_rims(points, faces, band=(0.0, 1.0))
+    upper, lower = lips.split_rims(points, faces, band=(0.0, 1.0), near=MOUTH_BOX)
 
     for v in list(upper) + list(lower):
         assert v < len(points) // 2, "a face-less duplicate was treated as a rim"
 
 
+def test_a_seam_away_from_the_mouth_is_left_alone():
+    """The regression that reached the game: a coincident seam runs around the
+    skull at the same height as the mouth, and binding it apart tore the head
+    open along it. In the build that shipped, 103 vertices were bound, spanning
+    x +-0.068 against a head half-width of 0.085 and reaching from the back of
+    the head to the front. The mouth is x +-0.023."""
+    points, faces = head_with_a_zero_width_mouth()
+    P = np.asarray(points, dtype=float)
+    mid_y = (P[:, 1].min() + P[:, 1].max()) / 2
+
+    upper, lower = lips.split_rims(points, faces, band=(0.0, 1.0), near=MOUTH_BOX)
+
+    assert upper and lower, "the mouth itself must still be found"
+    for v in list(upper) + list(lower):
+        assert P[v][1] > mid_y, f"vertex at y={P[v][1]:+.3f} is on the back of the head"
+
+
+def test_without_somewhere_to_aim_nothing_is_bound():
+    """`near` is required. The above/below test alone cannot tell a lip rim
+    from any other coincident seam, so with no mouth to aim at this returns
+    nothing rather than guessing."""
+    points, faces = head_with_a_zero_width_mouth()
+
+    assert lips.split_rims(points, faces, band=(0.0, 1.0)) == ([], [])
+
+
+def head_with_lips_and_a_seam():
+    """Lip pieces *and* a zero-width aperture, which is what a real one has.
+
+    `bind` locates the mouth from the lip pieces and only then looks for a
+    seam, so both have to be present for the path to run at all.
+    """
+    points, faces = head_with_separate_lips()
+
+    n = 7
+    xs = [-0.02 + 0.04 * i / (n - 1) for i in range(n)]
+
+    def strip(z0, z1):
+        base = len(points)
+        for x in xs:
+            points.append((x, 0.13, z0))
+            points.append((x, 0.13, z1))
+        for i in range(n - 1):
+            a, b = base + 2 * i, base + 2 * i + 1
+            c, d = base + 2 * (i + 1), base + 2 * (i + 1) + 1
+            faces.append((a, b, c))
+            faces.append((b, d, c))
+
+    strip(0.365, 0.40)   # above the mouth line, ending on it
+    strip(0.365, 0.33)   # below it, on the same line
+    return points, faces
+
+
 def test_the_two_rims_are_bound_to_bones_that_pull_them_apart():
     """The whole point: at the same position, proximity transfer gives both
     rims the same weights, so the mouth cannot open however it is animated."""
-    points, faces = head_with_a_zero_width_mouth()
+    points, faces = head_with_lips_and_a_seam()
     infl = [led_by(NAMES["head_g"]) for _ in points]
 
     out, lines = lips.bind(points, faces, infl, RIG)
 
-    upper, lower = lips.split_rims(points, faces, band=(0.0, 1.0))
-    if not upper:
-        pytest.skip("band excluded the seam in this fixture")
+    assert any("mouth seam" in line for line in lines), lines
+    P = np.asarray(points, dtype=float)
+    rim = P[sorted(set(lips.find_lips(points, faces)[0]) | set(lips.find_lips(points, faces)[1]))]
+    box = (
+        float(rim[:, 0].min() + rim[:, 0].max()) / 2,
+        float(rim[:, 2].min() + rim[:, 2].max()) / 2,
+        float(rim[:, 0].max() - rim[:, 0].min()) / 2 * 1.6,
+        float(rim[:, 2].max() - rim[:, 2].min()) / 2 * 2.0,
+    )
+    upper, lower = lips.split_rims(points, faces, near=box)
+    assert upper and lower
     ups = {out[v][0].bone_slot for v in upper}
     downs = {out[v][0].bone_slot for v in lower}
     assert ups != downs, "both rims still lead with the same bone"
-    assert any("mouth seam" in line for line in lines)
