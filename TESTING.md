@@ -682,6 +682,8 @@ Not owed, recorded so the list above is not read as "nothing works":
   hung wrong.
 - A Tripo-generated head on Carth: head turns, mouth moves, brows do not.
 - `bighead` on HK-47.
+- **A Jade Empire head on Vex, with a working mouth** (2026-09-03): dressed,
+  scaled, animated, and opening onto its own teeth and interior. §23 to §47.
 
 ## 27. Facial weights: the upper lip bound to the skull
 
@@ -1520,8 +1522,8 @@ nothing should have changed at all. The bottom lip still stretches (§42).
 
 ## 47. The bottom lip: rigid teeth, then the falloff
 
-**Status: installed as `out_vex_lipfall/`. THERE IS SOMETHING TO TEST — this is
-the first real attempt at the bottom lip since §42.**
+**Status: CONFIRMED IN GAME, 2026-09-03.** The mouth opens. Reported after
+install: "You finally fixed it."
 
 §42 left the falloff failing and named the reason: the interior pieces follow
 the shell, so grading the shell made them sample a steep field, and a
@@ -1551,5 +1553,25 @@ called** — the bridge spans the whole opening and draws in front of the teeth
 and tongue, so the mouth seals but stops having anything in it. Sealing properly
 needs a strip following the palate rather than a flat span.
 
-**To test:** does the bottom lip drop now rather than stretching? That is the
-whole question. Everything else should look as it did.
+**Confirmed.** The bottom lip drops instead of stretching, and the mouth opens
+onto its teeth and interior.
+
+**What it took, and what that says.** The mouth thread ran from §23 to here and
+the single fix was four things that each had to be right at once:
+
+1. the face **parted** along its lip line (§37), because a converted head is
+   closed there and has no seam to open - nothing was removed, so nothing
+   showed at rest;
+2. the line **cut first** (§46), because parting at existing vertices gave
+   twelve points across the mouth and twelve points open as triangles;
+3. the head's own teeth **bound rigidly**, one bone each, as the host binds its
+   own - without this any weighting of the lip made them spike;
+4. the lip **eased** either side of the rim, so it travels with the rim rather
+   than stretching from it.
+
+Every one of those was tried on its own at some point and failed, and each
+failure was read as evidence the approach was wrong rather than incomplete.
+The order mattered too: 3 had to precede 4, and 2 had to precede everything.
+
+**Still open:** the cavity gap at wide openings (§47 above), and this is one
+head. Nothing here is confirmed to generalise to the other 135 that convert.
