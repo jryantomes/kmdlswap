@@ -275,6 +275,12 @@ def run(
                     shell, want,
                 ))
 
+            # This head has its own teeth and interior, so the host's are not
+            # wanted: two sets of teeth end up in one small space and the
+            # host's, being sized for the host, sit furthest forward and show
+            # through the lip as a white bar.
+            mesh.has_own_mouth = True
+
             upper, lower, parted = ksplit.split(mesh, pieces[0], pieces[1])
             if upper:
                 mesh.mouth_split = (upper, lower)
@@ -351,6 +357,10 @@ def _write_into(layout, node, mesh, pack, reshape, hide, r: HeadResult):
 
         from . import mouthparts as kmouth
 
+        # Keep the host's mouth interior only when the replacement has none of
+        # its own. A head that brought its own teeth does not want a second set.
+        keep_mouth = not getattr(mesh, "has_own_mouth", False)
+
         after = kl.parse(mdl, mdx)
         wanted = list(hide) if hide else [
             # Everything visible except the node just replaced. These are shaped
@@ -362,7 +372,8 @@ def _write_into(layout, node, mesh, pack, reshape, hide, r: HeadResult):
             # opens onto nothing. Reported from the game as lips that move on a
             # mouth that looks taped shut.
             n.name for n in kparts.mesh_nodes(after)
-            if n.name.lower() != node.name.lower() and not kmouth.is_mouth_part(n.name)
+            if n.name.lower() != node.name.lower()
+            and not (keep_mouth and kmouth.is_mouth_part(n.name))
         ]
         mdl, hidden = kvis.hide_nodes(after, mdl, wanted)
         if hidden:
@@ -371,8 +382,9 @@ def _write_into(layout, node, mesh, pack, reshape, hide, r: HeadResult):
 
         # Kept, but positioned for the host's face. A shallower replacement puts
         # the host's teeth in front of the new lips.
-        mdl, mdx, seated = kmouth.seat(kl.parse(mdl, mdx), mdl, mdx, node, layout)
-        r.lines.extend(seated)
+        if keep_mouth:
+            mdl, mdx, seated = kmouth.seat(kl.parse(mdl, mdx), mdl, mdx, node, layout)
+            r.lines.extend(seated)
 
     if not kv.check(kl.parse(mdl, mdx)).ok:
         r.error = "result failed validation; nothing written"

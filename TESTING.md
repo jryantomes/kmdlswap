@@ -1411,3 +1411,38 @@ once for each.
 should look as it did — this moves two pieces of geometry back by 0.0055 and
 0.0022 and changes nothing about weights. The bottom lip will still stretch;
 that is §42 and is not addressed here.
+
+
+## 44. Two sets of teeth
+
+**Status: installed as `out_vex_oneset/`. THERE IS SOMETHING TO TEST.**
+
+The white bar survived §43's clearance fix because it was never the head's own
+teeth. It was the **host's**, and they should not have been there at all.
+
+§29 kept the host's teeth and tongue on the belief that a converted head had no
+mouth interior of its own. §36 disproved that — this head's 14-vertex pieces
+sample the teeth strip of its atlas and its 11-vertex bag samples the interior
+patch — and nothing went back to undo §29. So both sets have been drawn in the
+same small space ever since, and the host's, being sized for the host, sits
+furthest forward:
+
+| | reaches forward to |
+|---|---|
+| **host `teethUa01`** | **y +0.0963** |
+| the head's own upper teeth | y +0.0950 |
+
+Thirteen ten-thousandths in front, right behind the upper lip. A white bar.
+
+The build now keeps the host's mouth interior **only when the replacement has
+none of its own**, and skips seating parts it is about to hide. On this head the
+visible mesh list is `['Head']` alone.
+
+**This is the third time in this file** that a fix has been left standing after
+the belief behind it was withdrawn: §30's cut after §31, §31's rims after §34,
+and now §29's teeth after §36. Retracting a diagnosis has to include hunting
+down what was built on it.
+
+**To test:** the white bar across the top lip should be gone. The mouth should
+still have teeth in it — the head's own, cream rather than white. The bottom lip
+will still stretch (§42, unsolved).
