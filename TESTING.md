@@ -1720,3 +1720,38 @@ carrying node before this is suspect.
 
 **To test:** does she blink? Eyes and mouth should be unchanged from the last
 build.
+
+
+## 52. The eyelids are hidden again, and blinking is given up on
+
+**Status: installed as `out_vex_nolids/`. THERE IS SOMETHING TO TEST — and it is
+a rollback, not a fix.**
+
+Reported on `out_vex_blink`: the whole eye moves around the face, still no
+blinking, **and the game freezes after talking to her**.
+
+The freeze is the reason this stops here. It was never explained. The controller
+edit reads as structurally correct against vanilla's own layout — `p_carthh`'s
+eyelid position controller is `type 8, rows 1, datakey 1, columns 3` over data
+`[time, x, y, z]`, which is exactly what was written, and the model validated.
+An unexplained hard failure in someone's game is not worth a blink.
+
+**Why keeping the host's lids cannot work anyway.** They are rigid meshes placed
+*and pivoted* for the host's eyes. A converted head's eyes are elsewhere. Seated
+by geometry, the lid swings about a pivot left behind (§51). Seated by pivot as
+well, the eye roams. There is no placement of a lid built for one face that fits
+another.
+
+**So a converted head does not blink, and the reason is in the source.** Jade
+heads carry eyeballs but no eyelid geometry, and the face does not deform to
+blink either — the host's eye region is 88% `head_g`. Blinking would need lids
+*built for this head*, which is authoring, not conversion.
+
+**What was kept from the eye work:** the eyes are still seated behind the
+eyeline (§49, corrected in §50), which was the other half of the report and does
+work.
+
+**Rolled back:** `is_eyelid` and `seat_eyelids` remain in the source, unused,
+with the reasoning attached. Visible mesh on a converted head is `Head` alone.
+
+**To test:** no freeze, and no eye wandering across her face. She will not blink.
