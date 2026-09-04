@@ -1516,3 +1516,40 @@ one z-fights), and that UVs are interpolated along the edge rather than invented
 
 **To test:** the two triangles should be a continuous mouth line. At rest,
 nothing should have changed at all. The bottom lip still stretches (§42).
+
+
+## 47. The bottom lip: rigid teeth, then the falloff
+
+**Status: installed as `out_vex_lipfall/`. THERE IS SOMETHING TO TEST — this is
+the first real attempt at the bottom lip since §42.**
+
+§42 left the falloff failing and named the reason: the interior pieces follow
+the shell, so grading the shell made them sample a steep field, and a
+14-vertex island whose vertices inherit sharply different weights spikes rather
+than deforms. Fangs.
+
+**The host settles it.** Carth's teeth are not skinned at all — `teethUa01` is
+parented to `head_g`, `teethLa01` to `f_jaw_g`, one bone each. So the head's own
+teeth are now bound the same way, rigidly, and cannot spike whatever the shell
+does. 40 vertices.
+
+With that in place the falloff works: **112 vertices either side of the rim**
+eased toward its profile over 0.0183, fading to nothing, so the lip travels with
+the rim instead of stretching from it. No fangs at any angle.
+
+**The bag is *not* rigid**, and that was found the hard way. Bound to the jaw it
+swings down and the top of the opening unseals — rendered against a green
+background, daylight straight through the head. It lines the whole cavity, so
+each of its vertices follows whichever part of the face is nearest. The host's
+own tongue is skinned rather than parented, for the same reason.
+
+**A known limit, unfixed.** With the mouth open past about four degrees of jaw
+there is still a gap at the top of the cavity: this head's interior is a bag
+lining the floor and sides, with nothing between the upper lip's inner edge and
+the top of it. `mouthsplit.seal_cavity` was written to bridge that and is **not
+called** — the bridge spans the whole opening and draws in front of the teeth
+and tongue, so the mouth seals but stops having anything in it. Sealing properly
+needs a strip following the palate rather than a flat span.
+
+**To test:** does the bottom lip drop now rather than stretching? That is the
+whole question. Everything else should look as it did.

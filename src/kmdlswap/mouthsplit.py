@@ -237,3 +237,74 @@ def split(mesh, upper_piece, lower_piece) -> tuple[list[int], list[int], list[st
         f"mouth split: cut {added} new points onto the lip line and parted the "
         f"face along it, {len(upper)} vertices duplicated (nothing removed)"
     ]
+
+
+def seal_cavity(mesh, upper_seam, bag) -> list[str]:
+    """Bridge the upper lip to the mouth interior, so the cavity has a roof.
+
+    A converted head's interior often does not span the whole mouth. Jade
+    Empire's is a 15-vertex bag lining the floor and sides; there is nothing
+    between the upper lip's inner edge and the top of that bag. Closed, the
+    shell hides it. Open by as little as four degrees of jaw, and the mouth is a
+    hole through the head - rendered against a green background, the green comes
+    through.
+
+    Carth has no such gap: his cavity is a pocket spanning the whole mouth.
+
+    So a strip is built from the upper seam back to the bag. The new vertices
+    sit on the seam's positions but carry the *bag's* texture coordinates, so
+    the roof is painted like the inside of a mouth rather than like lip, and
+    they are returned so the caller can weight them with the upper lip they
+    hang from.
+    """
+    if not upper_seam or not bag:
+        return []
+    P = np.asarray([p[:3] for p in mesh.positions], dtype=np.float64)
+    seam = sorted(upper_seam, key=lambda v: P[v][0])
+    if len(seam) < 2:
+        return []
+
+    # The bag's own top edge, taken as its rearmost points across the mouth.
+    bag_sorted = sorted(bag, key=lambda v: P[v][0])
+    has_uvs = mesh.has_uvs
+    has_normals = mesh.has_normals
+
+    # A copy of the seam that belongs to the cavity: same place, interior paint.
+    roof: list[int] = []
+    for v in seam:
+        nearest = min(bag, key=lambda b: float(np.hypot(P[b][0] - P[v][0], P[b][2] - P[v][2])))
+        index = len(mesh.positions)
+        mesh.positions.append(tuple(mesh.positions[v]))
+        if has_uvs:
+            mesh.uvs.append(tuple(mesh.uvs[nearest]))
+        if has_normals:
+            mesh.normals.append(tuple(mesh.normals[nearest]))
+        roof.append(index)
+
+    def partner(v):
+        return min(bag_sorted, key=lambda b: abs(P[b][0] - P[v][0]))
+
+    added = 0
+    for i in range(len(seam) - 1):
+        a, b = roof[i], roof[i + 1]
+        c, d = partner(seam[i]), partner(seam[i + 1])
+        for tri in ((a, b, c), (b, d, c)):
+            if len(set(tri)) < 3:
+                continue
+            q = np.asarray([mesh.positions[x][:3] for x in tri], dtype=np.float64)
+            n = np.cross(q[1] - q[0], q[2] - q[0])
+            # The roof of a mouth faces down into it.
+            if n[2] > 0:
+                tri = (tri[0], tri[2], tri[1])
+            mesh.faces.append(tri)
+            if mesh.materials:
+                mesh.materials.append(mesh.materials[0])
+            added += 1
+
+    if not added:
+        return []
+    mesh.mouth_roof = roof
+    return [
+        f"mouth roof: bridged the upper lip to the interior with {added} faces, "
+        f"so an open mouth is a cavity rather than a hole through the head"
+    ]

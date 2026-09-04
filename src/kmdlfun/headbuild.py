@@ -271,6 +271,13 @@ def run(
             if upper:
                 mesh.mouth_split = (upper, lower)
                 r.lines.extend(parted)
+                # `ksplit.seal_cavity` would bridge the upper lip to the
+                # interior and close the hole an open mouth otherwise shows.
+                # Not called: the bridge spans the whole opening and draws in
+                # front of the teeth and tongue, so the mouth seals but stops
+                # having anything in it. Sealing needs a strip that follows the
+                # palate rather than a flat span, which is more geometry than
+                # this has any business inventing.
 
         against = headspec.check_against_target(mesh, layout, target)
         r.lines.extend(against.lines())

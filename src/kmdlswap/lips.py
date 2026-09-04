@@ -84,6 +84,16 @@ BAG_PROFILE = {"jaw": 0.700, "near_lower": 0.300}
 # tear away from.
 SPLIT_LOWER_PROFILE = {"jaw": 0.550, "near_lower": 0.350, "near_corner": 0.100}
 
+# How far either side of the rim the lip is eased toward the rim's profile, as a
+# multiple of the mouth's half-height, fading to nothing over that distance.
+#
+# Without it the rim travels and the lip does not, so the lip stretches. With a
+# hard region assignment instead, faces span from a fully-lifted vertex to a
+# fully-dropped one and tear. Both were tried; the falloff also failed until the
+# teeth were bound rigidly, because they were sampling the very field being
+# graded and spiking through the lip.
+LIP_FALLOFF = 1.5
+
 # Where a mouth can sit, as a fraction of head height. Wide enough to be
 # generous, narrow enough to exclude the eyes above and the neck below.
 BAND = (0.18, 0.52)
@@ -332,10 +342,11 @@ def bind(
 
     centre_x = (float(P[:, 0].min()) + float(P[:, 0].max())) / 2
     out = [list(f) for f in influences]
+    mid_y_all = float(P[:, 1].min() + P[:, 1].max()) / 2
     every = islands(P, faces)
     shell_index = np.asarray(every[0], dtype=int) if every else np.asarray([], dtype=int)
 
-    def apply(island, which):
+    def apply(island, which, alpha=1.0):
         for v in island:
             x = float(P[v][0]) - centre_x
             near_corner, far_corner = near_far(CORNER_PAIR, x)
@@ -364,11 +375,52 @@ def bind(
                     JAW: BAG_PROFILE["jaw"],
                     near_lower: BAG_PROFILE["near_lower"],
                 }
-            out[v] = _finalise({by_name[n]: w for n, w in want.items()}, max_influences)
+            pool = {by_name[n]: w for n, w in want.items()}
+            if alpha < 1.0:
+                have = {f.bone_slot: f.weight for f in out[v]}
+                pool = {
+                    slot: alpha * pool.get(slot, 0.0) + (1 - alpha) * have.get(slot, 0.0)
+                    for slot in set(pool) | set(have)
+                }
+            merged = _finalise(pool, max_influences)
+            if merged:
+                out[v] = merged
 
     # The shell's own aperture first: those rims are what open the mouth.
     apply(seam_upper, "upper")
-    apply(seam_lower, "split_lower" if split is not None else "lower")
+    lower_kind = "split_lower" if split is not None else "lower"
+    apply(seam_lower, lower_kind)
+
+    # Ease the lip either side of the rim toward the rim's own profile, so the
+    # surface carries the motion instead of the rim moving alone and the lip
+    # stretching from it. Both sides, or the discontinuity just moves.
+    graded = 0
+    radius = float(box[3]) * LIP_FALLOFF
+    line = float(box[1])
+    already = set(seam_upper) | set(seam_lower) | set(upper_island) | set(lower_island)
+    already |= set(bag_island or [])
+    if radius > 0 and len(shell_index):
+        for rim_ids, kind, want_above in (
+            (seam_lower, lower_kind, False),
+            (seam_upper, "upper", True),
+        ):
+            if not rim_ids:
+                continue
+            rim = P[sorted(rim_ids)]
+            for raw in shell_index:
+                v = int(raw)
+                if v in already or P[v][1] <= mid_y_all:
+                    continue
+                if (P[v][2] > line) != want_above:
+                    continue
+                if abs(P[v][0] - box[0]) > box[2] + radius:
+                    continue
+                delta = rim - P[v]
+                d = float(np.sqrt(np.min(np.einsum("ij,ij->i", delta, delta))))
+                if d >= radius:
+                    continue
+                apply([v], kind, alpha=1.0 - d / radius)
+                graded += 1
 
     # Then the pieces lying behind the shell - lips, and the interior bag.
     #
@@ -379,8 +431,27 @@ def bind(
     # mouth pieces". A piece tucked behind the lip has to move *with* the lip in
     # front of it, whatever that lip happens to be doing, so it inherits from
     # the nearest shell vertex - after the seam above has corrected those.
+    # The head's own teeth are bound rigidly, one bone each, exactly as the
+    # host binds its own: `teethUa01` is parented to `head_g` and `teethLa01`
+    # to `f_jaw_g`, with no skinning at all. Letting them follow the shell
+    # instead is what made every attempt to weight the lower lip fail - a
+    # 14-vertex island whose few vertices sample a steep weight field does not
+    # deform, it spikes, and the mouth grew fangs.
+    # Teeth only. The interior bag lines the whole cavity and must not be
+    # rigid: bound to the jaw it swings down with it, uncovering the top of the
+    # opening, and the render showed daylight straight through the head. The
+    # host's own tongue is skinned rather than parented for the same reason.
+    rigid = 0
+    for group, bone in ((upper_island, SKULL), (lower_island, JAW)):
+        slot = by_name.get(bone)
+        if slot is None:
+            continue
+        for v in group:
+            out[v] = [Influence(slot, 1.0)]
+            rigid += 1
+
     followed = 0
-    if len(shell_index):
+    if bag_island and len(shell_index):
         line = None
         if upper_island and lower_island:
             both = P[sorted(set(upper_island) | set(lower_island))]
@@ -392,7 +463,7 @@ def bind(
         # be: a lower tooth can end up following the upper lip and then rides up
         # through it, which in game read as the teeth poking through oddly.
         def source_pool(side):
-            if line is None:
+            if line is None or side is None:
                 return shell_index
             keep = [
                 v for v in shell_index
@@ -400,11 +471,12 @@ def bind(
             ]
             return np.asarray(keep, dtype=int) if keep else shell_index
 
-        for group, side in (
-            (upper_island, "upper"),
-            (lower_island, "lower"),
-            (bag_island or [], "lower"),
-        ):
+        # The bag lines the *whole* cavity, so each of its vertices follows
+        # whichever part of the face is nearest - top with the upper lip, floor
+        # with the lower. Restricting it to one side leaves the top edge behind
+        # when the mouth opens and the cavity unseals: rendered against a green
+        # background, daylight straight through the head.
+        for group, side in ((bag_island or [], None),):
             pool = source_pool(side)
             if not len(pool):
                 continue
@@ -418,6 +490,17 @@ def bind(
                     followed += 1
 
     lines = []
+    if graded:
+        lines.append(
+            f"lips: eased {graded} vertices either side of the rim toward its "
+            f"profile over {float(box[3]) * LIP_FALLOFF:.4f}, so the lip travels "
+            f"with the rim instead of stretching from it"
+        )
+    if rigid:
+        lines.append(
+            f"teeth: bound {rigid} vertices of the head's own teeth and interior "
+            f"rigidly, one bone each, as the host binds its own"
+        )
     if followed:
         lines.append(
             f"lips: {followed} vertices of the pieces behind the face - "
