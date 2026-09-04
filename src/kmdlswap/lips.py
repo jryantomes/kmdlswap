@@ -94,6 +94,14 @@ SPLIT_LOWER_PROFILE = {"jaw": 0.550, "near_lower": 0.350, "near_corner": 0.100}
 # graded and spiking through the lip.
 LIP_FALLOFF = 1.5
 
+# A mouth is widest in the middle and closed at the corners. Weighting the whole
+# seam alike opens it as a rectangle - reported from the game as a square mouth
+# "almost like a South Park Canadian". So the rim's own strength tapers toward
+# the corners, by this power of the distance from the centre line: 0 at the
+# centre, 1 at the corner. Squared keeps the middle near full strength and drops
+# away quickly at the ends, which is the shape of a mouth.
+CORNER_TAPER = 2.0
+
 # Where a mouth can sit, as a fraction of head height. Wide enough to be
 # generous, narrow enough to exclude the eyes above and the neck below.
 BAND = (0.18, 0.52)
@@ -387,9 +395,19 @@ def bind(
                 out[v] = merged
 
     # The shell's own aperture first: those rims are what open the mouth.
-    apply(seam_upper, "upper")
+    # Taper toward the corners: full strength at the centre line, nothing at the
+    # ends, so the mouth opens as a lens rather than a rectangle.
+    half_x = float(box[2]) or 1.0
+
+    def taper(v):
+        across = min(abs(float(P[v][0]) - float(box[0])) / half_x, 1.0)
+        return max(0.0, 1.0 - across ** CORNER_TAPER)
+
+    for v in seam_upper:
+        apply([v], "upper", alpha=taper(v))
     lower_kind = "split_lower" if split is not None else "lower"
-    apply(seam_lower, lower_kind)
+    for v in seam_lower:
+        apply([v], lower_kind, alpha=taper(v))
 
     # Ease the lip either side of the rim toward the rim's own profile, so the
     # surface carries the motion instead of the rim moving alone and the lip
@@ -419,7 +437,7 @@ def bind(
                 d = float(np.sqrt(np.min(np.einsum("ij,ij->i", delta, delta))))
                 if d >= radius:
                     continue
-                apply([v], kind, alpha=1.0 - d / radius)
+                apply([v], kind, alpha=(1.0 - d / radius) * taper(v))
                 graded += 1
 
     # Then the pieces lying behind the shell - lips, and the interior bag.

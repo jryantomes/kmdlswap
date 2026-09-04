@@ -246,8 +246,44 @@ def test_the_shell_splits_at_the_lip_line():
 
     lifts = {NAMES["f_um_g"]}
     drops = {NAMES["f_llm_g"], NAMES["f_rlm_g"], NAMES["f_jaw_g"]}
-    assert all(out[v][0].bone_slot in lifts for v in above), "the upper lip does not lift"
-    assert all(out[v][0].bone_slot in drops for v in below), "the lower lip does not drop"
+
+    # Near the centre line only. The rim's strength tapers toward the corners,
+    # because a mouth is widest in the middle and closed at the ends - weighting
+    # the whole seam alike opens it as a rectangle, which in game read as a
+    # square mouth. So a corner vertex keeps most of what it had, by design.
+    def central(v):
+        return abs(P[v][0] - box[0]) < box[2] * 0.4
+
+    middle_above = [v for v in above if central(v)]
+    middle_below = [v for v in below if central(v)]
+    assert middle_above and middle_below
+    assert all(out[v][0].bone_slot in lifts for v in middle_above), "the upper lip does not lift"
+    assert all(out[v][0].bone_slot in drops for v in middle_below), "the lower lip does not drop"
+
+
+def test_the_mouth_tapers_toward_its_corners():
+    """A mouth is a lens, not a rectangle."""
+    points, faces = head_with_a_face_over_lips()
+    P = np.asarray(points, dtype=float)
+    infl = [led_by(NAMES["head_g"]) for _ in points]
+
+    out, _ = lips.bind(points, faces, infl, RIG)
+
+    from kmdlswap import mouthsplit
+
+    upper, lower = lips.find_lips(points, faces)[:2]
+    box = mouthsplit._box(points, upper, lower)
+    above, below = lips.mouth_region(points, faces, near=box)
+
+    def moved(v):
+        return sum(f.weight for f in out[v] if f.bone_slot != NAMES["head_g"])
+
+    centre = [moved(v) for v in above + below if abs(P[v][0] - box[0]) < box[2] * 0.3]
+    corner = [moved(v) for v in above + below if abs(P[v][0] - box[0]) > box[2] * 0.8]
+    assert centre and corner
+    assert sum(centre) / len(centre) > sum(corner) / len(corner) * 2, (
+        "the corners open as strongly as the centre; the mouth is a rectangle"
+    )
 
 
 def test_the_split_is_confined_to_the_mouth():

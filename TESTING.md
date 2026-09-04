@@ -1646,4 +1646,44 @@ turned out to be right), and now the eyes. Anything a head carries *behind* its
 face surface should be checked against the host's clearance for it as a matter
 of routine, not discovered from a screenshot.
 
+**The first attempt removed her eyes entirely**, and the mistake is the same
+one as §40. The host's clearance was measured **globally** — the frontmost point
+of the face over the whole eye-height band, which sweeps in the brow and the
+nose ridge — and applied against a **local** measurement taken at each eye
+vertex's own spot. Carth's eyeballs read 0.0153 that way and **0.0023** locally,
+seven times too much, so the eyes went 0.0170 back instead of 0.0040 and ended
+up inside the skull.
+
+`_local_clearance` now measures both sides the same way, vertex by vertex, and
+every seating decision uses it. Eyes back 0.0040, teeth 0.0047, lids forward
+0.0263. A `want` from one method and a `have` from another cannot be compared,
+and this is the second time that exact error has cost a build.
+
 **To test:** do her eyes sit behind the eyeline now, and does she blink?
+
+
+## 50. The square mouth
+
+**Status: fixed, installed with §49 as `out_vex_eyes2/`.**
+
+Reported on `h_mercf01_`: the mouth *"looks square opening and closing almost
+like a South Park Canadian"*.
+
+The whole seam was weighted alike, so it opened as a rectangle. A mouth is
+widest at the middle and closed at the corners. The rim's strength now tapers
+with the square of the distance from the centre line — full at the centre,
+nothing at the ends — and the eased region either side tapers with it.
+
+Measured on the seam pairs, as net downward pull separating the two halves:
+
+| | centre | corners |
+|---|---|---|
+| taper on | **1.03** | **0.09** |
+
+A lens rather than a rectangle. The visual check was useless here — two
+successive crops framed her chin and then her lips too closely to show the
+shape - and the numbers settled it.
+
+`h_common01_` was built and confirmed before the taper existed, so its mouth
+opened as a rectangle too and was not noticed. Worth a look next time it is
+installed.

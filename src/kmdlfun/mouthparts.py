@@ -77,6 +77,31 @@ def _model_space(layout, node, rest) -> np.ndarray:
     return (np.asarray(r.rotation, dtype=float) @ P.T).T + np.asarray(r.position, dtype=float)
 
 
+def _local_clearance(face: np.ndarray, part: np.ndarray, mid_y: float) -> float | None:
+    """The tightest gap between a part and the face *at the part's own spot*.
+
+    Measured locally, vertex by vertex, and it has to be: taking the face's
+    frontmost point over a whole height band instead sweeps in the brow and the
+    nose ridge, which stand far in front of an eye socket. Measured on Carth,
+    that band gives 0.0153 for his eyeballs where the local figure is 0.0023 -
+    seven times too much. Applied as a correction it buried a converted head's
+    eyes inside its skull, and the head had no eyes at all in game.
+
+    A `want` from one method and a `have` from the other cannot be compared.
+    Both sides of any seating decision use this.
+    """
+    gaps = []
+    for q in part:
+        near = face[
+            (np.abs(face[:, 2] - q[2]) < 0.005)
+            & (np.abs(face[:, 0] - q[0]) < 0.008)
+            & (face[:, 1] > mid_y)
+        ]
+        if len(near):
+            gaps.append(float(near[:, 1].max() - q[1]))
+    return min(gaps) if gaps else None
+
+
 def _face_depth(face: np.ndarray, low: float, high: float, half_width: float) -> float | None:
     """How far forward the face reaches, over the height the mouth occupies.
 
@@ -313,11 +338,8 @@ def eye_clearance(host_layout, host_node) -> float | None:
     face = _model_space(host_layout, host_node, rest)
     if not len(face) or not len(eye):
         return None
-    low, high = float(eye[:, 2].min()), float(eye[:, 2].max())
-    band = face[(face[:, 2] >= low) & (face[:, 2] <= high)]
-    if len(band) < 4:
-        return None
-    return float(band[:, 1].max() - eye[:, 1].max())
+    mid_y = (float(face[:, 1].min()) + float(face[:, 1].max())) / 2
+    return _local_clearance(face, eye, mid_y)
 
 
 def find_eyes(positions, faces, *, band=(0.50, 0.70)):
@@ -391,10 +413,8 @@ def seat_eyelids(layout, mdl: bytes, mdx: bytes, node, host_layout=None):
         face = _model_space(lay, face_node, poses)
         if not len(lid) or not len(face):
             return None, None
-        band = face[(face[:, 2] >= lid[:, 2].min()) & (face[:, 2] <= lid[:, 2].max())]
-        if len(band) < 4:
-            return None, None
-        return float(band[:, 1].max() - lid[:, 1].max()), float(lid[:, 1].max())
+        mid_y = (float(face[:, 1].min()) + float(face[:, 1].max())) / 2
+        return _local_clearance(face, lid, mid_y), float(lid[:, 1].max())
 
     want, _ = clearance(host_layout, host_lids, host_node, host_rest)
     have, front = clearance(layout, lids, node, rest)
