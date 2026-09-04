@@ -1610,3 +1610,40 @@ resref instead. Not fixed here.
 **To test:** does her mouth work the way his does — parting rather than
 stretching, teeth and interior showing? That is what says the mouth work is a
 property of the pipeline rather than of one model.
+
+
+## 49. Eyes on the surface, and no blinking
+
+**Status: both fixed, installed as `out_vex_eyes/` (`h_mercf01_`). THERE IS
+SOMETHING TO TEST.**
+
+Reported on both converted heads: the eyes sit on the surface of the face rather
+than behind the eyeline, and neither head has ever blinked.
+
+**Blinking.** A KOTOR head blinks with separate eyelid *meshes* — `eyeLlid` and
+`eyeRlid`, 18 vertices each, **not skinned**, parented to `head_g` and moved by
+the engine. The face does not deform to blink: the host's eye region is **88%
+`head_g`**. The build hid those lids along with everything else that was not the
+replaced node, so no converted head could ever blink. They are now always kept.
+
+Keeping them where they were is not enough. Measured on `h_mercf01_`, the lids
+sat at y +0.0977 while the head's own eyeballs reached +0.1162 — lids *behind*
+eyes, 0.0396 back from a face reaching +0.1373. They would have blinked inside
+the skull. `seat_eyelids` moves them to the clearance the host gives its own:
+forward 0.0254, to 0.0142 behind the new face, which puts them in front of the
+eyeballs where a lid belongs. Geometry rather than node position, because lids
+carry a position controller and the engine reads that over the header — the same
+trap as §29's teeth.
+
+**Eyes on the surface.** The replacement's own eyeballs cleared the face by
+**−0.0017** at their tightest — through it — against the **+0.0153** the host
+keeps. Exactly the teeth failure from §43, on a different part. `seat_islands`
+already existed for it; the eyes now go through the same path, moved back 0.0170.
+
+**This is the fourth part of a converted head found sitting at the wrong depth**
+— host teeth (§29), the head's own teeth (§43), the mouth interior (§40, which
+turned out to be right), and now the eyes. Anything a head carries *behind* its
+face surface should be checked against the host's clearance for it as a matter
+of routine, not discovered from a screenshot.
+
+**To test:** do her eyes sit behind the eyeline now, and does she blink?

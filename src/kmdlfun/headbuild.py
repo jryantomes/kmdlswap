@@ -267,6 +267,20 @@ def run(
             # through the lip as a white bar.
             mesh.has_own_mouth = True
 
+            # The replacement's own eyeballs, seated the way its teeth are.
+            # Measured on `h_common01_` they cleared the face by -0.0017 at
+            # their tightest - through it - against the 0.0153 the host keeps.
+            # In game, eyes sitting on the surface rather than behind the
+            # eyeline.
+            eye_want = kmouth3.eye_clearance(layout, target)
+            eyes = kmouth3.find_eyes(mesh.positions, [tuple(f)[:3] for f in mesh.faces])
+            if eyes and eye_want:
+                r.lines.extend(kmouth3.seat_islands(
+                    mesh,
+                    [(f"eye {i + 1}", g) for i, g in enumerate(eyes)],
+                    shell, eye_want, "the eyeline",
+                ))
+
             upper, lower, parted = ksplit.split(mesh, pieces[0], pieces[1])
             if upper:
                 mesh.mouth_split = (upper, lower)
@@ -367,6 +381,12 @@ def _write_into(layout, node, mesh, pack, reshape, hide, r: HeadResult):
             n.name for n in kparts.mesh_nodes(after)
             if n.name.lower() != node.name.lower()
             and not (keep_mouth and kmouth.is_mouth_part(n.name))
+            # The eyelids always stay. They are separate rigid meshes that the
+            # engine moves, and they are the only thing that blinks - the face
+            # itself does not deform to do it. Hiding them, as everything but
+            # the replaced node was hidden, is why no converted head has ever
+            # blinked.
+            and not kmouth.is_eyelid(n.name)
         ]
         mdl, hidden = kvis.hide_nodes(after, mdl, wanted)
         if hidden:
@@ -378,6 +398,11 @@ def _write_into(layout, node, mesh, pack, reshape, hide, r: HeadResult):
         if keep_mouth:
             mdl, mdx, seated = kmouth.seat(kl.parse(mdl, mdx), mdl, mdx, node, layout)
             r.lines.extend(seated)
+
+        # The eyelids are kept for blinking, and have to be moved onto the new
+        # face or they blink inside the skull.
+        mdl, mdx, lids = kmouth.seat_eyelids(kl.parse(mdl, mdx), mdl, mdx, node, layout)
+        r.lines.extend(lids)
 
     if not kv.check(kl.parse(mdl, mdx)).ok:
         r.error = "result failed validation; nothing written"

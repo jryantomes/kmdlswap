@@ -201,7 +201,7 @@ def seat(layout, mdl: bytes, mdx: bytes, node, host_layout=None):
 # conversion fault, and repainting it is editing the artist's intent.
 
 
-def seat_islands(mesh, pieces, shell, want: float) -> list[str]:
+def seat_islands(mesh, pieces, shell, want: float, what: str = "the lip") -> list[str]:
     """Push a head's *own* teeth back to the clearance the host's teeth have.
 
     `seat` above moves the host's teeth, which are separate nodes. A converted
@@ -248,8 +248,8 @@ def seat_islands(mesh, pieces, shell, want: float) -> list[str]:
             x, y, z = mesh.positions[v][:3]
             mesh.positions[v] = (x, y - shift, z)
         lines.append(
-            f"{name}: moved back {shift:.4f} to clear the lip by {want:.4f}, "
-            f"the clearance the host's teeth get (was {have:.4f})"
+            f"{name}: moved back {shift:.4f} to clear {what} by {want:.4f}, "
+            f"the clearance the host keeps (was {have:.4f})"
         )
     return lines
 
@@ -272,3 +272,169 @@ def teeth_clearance(host_positions, host_layout, host_node) -> float | None:
     if depth is None:
         return None
     return float(depth - stacked[:, 1].max())
+
+
+# --- eyes --------------------------------------------------------------------
+#
+# A KOTOR head blinks with separate eyelid *meshes*: `eyeLlid` and `eyeRlid`,
+# 18 vertices each, not skinned, parented to `head_g` and moved by the engine.
+# The face itself does not deform to blink - the host's eye region is 88%
+# `head_g`. So hiding those lids, as the build did for every part that was not
+# the replaced node, removes blinking altogether. Reported from the game as
+# neither converted head ever blinking.
+#
+# The eyeballs are the other half. Carth's clear his face surface by 0.0153 at
+# their tightest; a converted head's own eyes came out at -0.0017, which is
+# through the face. That is the same failure as the teeth in the mouth, and it
+# reads the same way: eyes sitting on the surface rather than behind the eyeline.
+
+EYELIDS = ("eyellid", "eyerlid")
+
+
+def is_eyelid(name: str) -> bool:
+    """Whether a node is an eyelid, which is what does the blinking."""
+    return name.lower() in EYELIDS
+
+
+def eyelids(layout) -> list:
+    return [n for n in kparts.mesh_nodes(layout) if is_eyelid(n.name)]
+
+
+def eye_clearance(host_layout, host_node) -> float | None:
+    """How far the host keeps its eyeballs behind its face at the eye line."""
+    balls = [
+        n for n in kparts.mesh_nodes(host_layout)
+        if n.name.lower() in ("eyela", "eyera")
+    ]
+    if not balls:
+        return None
+    rest = space.rest_pose(host_layout)
+    eye = np.concatenate([_model_space(host_layout, n, rest) for n in balls])
+    face = _model_space(host_layout, host_node, rest)
+    if not len(face) or not len(eye):
+        return None
+    low, high = float(eye[:, 2].min()), float(eye[:, 2].max())
+    band = face[(face[:, 2] >= low) & (face[:, 2] <= high)]
+    if len(band) < 4:
+        return None
+    return float(band[:, 1].max() - eye[:, 1].max())
+
+
+def find_eyes(positions, faces, *, band=(0.50, 0.70)):
+    """The replacement's own eyeballs: a pair of like-sized islands up front.
+
+    Returns a list of index lists, empty when the head has no eyes of its own.
+    """
+    from kmdlswap import lips as klips
+
+    P = np.asarray([p[:3] for p in positions], dtype=np.float64)
+    if len(P) < 12 or not faces:
+        return []
+    lo, hi = P.min(axis=0), P.max(axis=0)
+    height = float(hi[2] - lo[2])
+    if height <= 0:
+        return []
+    mid_y = (lo[1] + hi[1]) / 2
+    limit = max(6, int(0.10 * len(P)))
+
+    found = []
+    for island in klips.islands(P, faces)[1:]:
+        if not (6 <= len(island) <= limit):
+            continue
+        q = P[island]
+        centre = q.mean(axis=0)
+        if not (band[0] <= (centre[2] - lo[2]) / height <= band[1]):
+            continue
+        if centre[1] <= mid_y:
+            continue
+        found.append(island)
+    # A pair, left and right, of comparable size.
+    if len(found) < 2:
+        return []
+    found.sort(key=len, reverse=True)
+    a, b = found[0], found[1]
+    if len(b) < 0.5 * len(a):
+        return []
+    return [a, b]
+
+
+def seat_eyelids(layout, mdl: bytes, mdx: bytes, node, host_layout=None):
+    """Move the host's eyelids onto the replacement's face.
+
+    Keeping them is what restores blinking; keeping them *where they were* is
+    not enough. Measured on `h_mercf01_`, the lids sat at y +0.0977 while the
+    head's own eyeballs reached +0.1162 - lids behind eyes, 0.0396 back from a
+    face that reaches +0.1373. They would blink inside the skull.
+
+    So they are moved to the clearance the host gives them, measured the same
+    way `seat` measures the mouth: the host's own face at lid height against its
+    own lids. Geometry rather than node position, because the lids carry a
+    position controller and the engine reads that over the header.
+    """
+    host_layout = host_layout if host_layout is not None else layout
+    lids = eyelids(layout)
+    if not lids:
+        return mdl, mdx, []
+
+    rest = space.rest_pose(layout)
+    host_rest = space.rest_pose(host_layout)
+    host_lids = eyelids(host_layout)
+    host_node = next(
+        (n for n in kparts.mesh_nodes(host_layout) if n.name.lower() == node.name.lower()),
+        None,
+    )
+    if not host_lids or host_node is None:
+        return mdl, mdx, []
+
+    def clearance(lay, lid_nodes, face_node, poses):
+        lid = np.concatenate([_model_space(lay, n, poses) for n in lid_nodes])
+        face = _model_space(lay, face_node, poses)
+        if not len(lid) or not len(face):
+            return None, None
+        band = face[(face[:, 2] >= lid[:, 2].min()) & (face[:, 2] <= lid[:, 2].max())]
+        if len(band) < 4:
+            return None, None
+        return float(band[:, 1].max() - lid[:, 1].max()), float(lid[:, 1].max())
+
+    want, _ = clearance(host_layout, host_lids, host_node, host_rest)
+    have, front = clearance(layout, lids, node, rest)
+    if want is None or have is None:
+        return mdl, mdx, []
+    shift = have - want
+    if abs(shift) < 1e-4:
+        return mdl, mdx, []
+
+    from kmdlswap import edit as ke
+    from kmdlswap import layout as kl
+
+    out, current_mdx, names = mdl, None, []
+    for lid in lids:
+        after = kl.parse(out, current_mdx) if current_mdx is not None else layout
+        target = next(
+            (n for n in kparts.mesh_nodes(after) if n.name.lower() == lid.name.lower()),
+            None,
+        )
+        if target is None:
+            continue
+        r = rest[lid.index]
+        local = tuple(
+            float(v)
+            for v in np.asarray(r.rotation, dtype=float).T @ np.array([0.0, shift, 0.0])
+        )
+        geo = ke.extract(after, target)
+        geo.columns["vertex"] = [
+            tuple(p[i] + local[i] for i in range(3)) for p in geo.positions
+        ]
+        out, current_mdx = ke.replace_geometry(
+            after, target, geo, moved=ke.UniformScale(1.0, local)
+        )
+        names.append(lid.name)
+
+    if not names:
+        return mdl, mdx, []
+    where = "forward" if shift > 0 else "back"
+    return out, current_mdx, [
+        f"eyelids: moved {', '.join(names)} {where} {abs(shift):.4f} to sit "
+        f"{want:.4f} behind the new face, as they do on the host - they are what "
+        f"blinks"
+    ]
