@@ -246,6 +246,7 @@ def bind(
     host_positions=None,
     host_influences=None,
     *,
+    split=None,
     max_influences: int = MAX_INFLUENCES,
 ) -> tuple[list[list[Influence]], list[str]]:
     """Bind separate lip pieces to the bones that move a mouth.
@@ -272,7 +273,14 @@ def bind(
             float(rim[:, 0].max() - rim[:, 0].min()) / 2 * 1.6,
             float(rim[:, 2].max() - rim[:, 2].min()) / 2 * 2.0,
         )
-        seam_upper, seam_lower = mouth_region(positions, faces, near=box)
+        if split is not None:
+            # The face was parted along its lip line, so which side a vertex is
+            # on is known exactly rather than inferred from its height. The two
+            # halves sit on identical coordinates and nothing else can tell them
+            # apart.
+            seam_upper, seam_lower = split
+        else:
+            seam_upper, seam_lower = mouth_region(positions, faces, near=box)
     if found is None and not seam_upper:
         return influences, []
     if found is None:
@@ -367,7 +375,7 @@ def bind(
         )
     if seam_upper:
         lines.append(
-            f"mouth: split the shell's lip area at the lip line - "
+            f"mouth: {'parted' if split is not None else 'split'} the lip line - "
             f"{len(seam_upper)} vertices above it lift, {len(seam_lower)} below it "
             f"drop - so the surface stretches apart the way a KOTOR mouth does"
         )

@@ -231,6 +231,20 @@ def run(
             )
             r.lines.extend(opened)
 
+        # Part the face along its lip line so the head's own teeth and mouth
+        # interior - modelled behind a closed shell - can be seen once the two
+        # halves are weighted apart. Nothing is removed, so this is invisible
+        # until it moves.
+        from kmdlswap import lips as klips
+        from kmdlswap import mouthsplit as ksplit
+
+        pieces = klips.find_lips(mesh.positions, [tuple(f)[:3] for f in mesh.faces])
+        if pieces is not None:
+            upper, lower, parted = ksplit.split(mesh, pieces[0], pieces[1])
+            if upper:
+                mesh.mouth_split = (upper, lower)
+                r.lines.extend(parted)
+
         against = headspec.check_against_target(mesh, layout, target)
         r.lines.extend(against.lines())
         verdict.findings.extend(against.findings)

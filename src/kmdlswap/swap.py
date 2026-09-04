@@ -277,6 +277,7 @@ def build_replacement(
             {slot: n.name for slot, n in kmdx.bone_slot_nodes(layout, node).items()},
             original.positions,
             original.influences,
+            split=getattr(mesh, "mouth_split", None),
             max_influences=max_influences,
         )
         report.mouth_lines = list(report.mouth_lines) + lip_lines

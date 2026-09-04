@@ -1149,3 +1149,41 @@ change.
 **State:** installed as `out_vex_nocut/` — stretch weighting, mouth interior
 seated, interior following the shell, no cut. Animations work and the mouth line
 smears rather than opening, which is where §34 left it.
+
+
+## 37. The topological split
+
+**Status: built and installed, awaiting in-game confirmation.**
+
+The mouth is parted rather than cut. The vertices along the lip line are
+duplicated, the faces above the line point at the copies, and the two halves sit
+on identical coordinates — invisible at rest, no gap, nothing removed, so none
+of §36's triangular holes. Weighted apart by §34's stretch, they separate and
+the head's own teeth and mouth interior become visible.
+
+This is the zero-width aperture §31 wrongly believed was already in the mesh.
+It was not there; now it is.
+
+**Split by plane, not by row.** The rows of vertices near the lip line are
+ragged — scattered over 0.008 in z, two to twelve vertices apiece — so there is
+no clean loop to walk. Faces are classified against the lip-line plane and the
+vertices that end up on both sides are duplicated, which follows the existing
+edges wherever they run.
+
+**Two guards keep it from running away**, both learned from failures already in
+this file:
+
+- Only a vertex whose *every* face is inside the mouth box is duplicated. One
+  that also touches a face outside anchors the end of the slit, so the mouth
+  corners stay joined.
+- The box is **1.0×** the teeth's own half-width. At 1.6× the split ran past the
+  lips and parted the cheek: rendered, a dark slash out to either side of the
+  face.
+
+12 vertices duplicated, 742 → 765. Rendered with culling: closed at rest, and
+opening onto a dark interior with teeth.
+
+**To validate:** installed as `out_vex_topo/`; previous build backed up at
+`out_vex_topo/backup-before/`. At rest the mouth should look shut with no line
+or gap. Talking, it should part and show teeth and interior rather than smearing
+skin — and nothing should tear at the corners or run into the cheeks.
