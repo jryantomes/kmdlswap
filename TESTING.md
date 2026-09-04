@@ -1575,3 +1575,38 @@ The order mattered too: 3 had to precede 4, and 2 had to precede everything.
 
 **Still open:** the cavity gap at wide openings (§47 above), and this is one
 head. Nothing here is confirmed to generalise to the other 135 that convert.
+
+
+## 48. A second head, and how far the mouth work generalises
+
+**Status: `h_mercf01_` installed as `out_vex_mercf01/`. THERE IS SOMETHING TO
+TEST.**
+
+§47 was confirmed on one head. Swept across the whole Jade catalogue:
+
+| | |
+|---|---|
+| heads | 148 |
+| **teeth pieces found, so the mouth can be located** | **142** |
+| **parted successfully** | **142** |
+| no teeth pieces found | 6 |
+| errored | 0 |
+
+Seam density after cutting the line: minimum 10 points, median 35, maximum 64.
+The minimum is worth watching — 12 points is what produced the row of triangles
+in §46, so `h_bandit02_` at 10 may show that failure even with the cut.
+
+Installed for testing: **`h_mercf01_`**, a female head, deliberately chosen to
+differ structurally from `h_common01_`. 882 vertices against 765, 35 seam points
+either side, 121 vertices eased around the rim, 34 bound rigidly.
+
+**A collision found on the way.** Both heads name their texture **`j01`**, with
+different content (md5 `1ab39e7c` against `269c6906`). Installing two converted
+Jade heads at once means the second silently overwrites the first's texture and
+one of them wears the other's face. The texture resref comes from the Jade
+material and is not unique per head; it needs deriving from the head's own
+resref instead. Not fixed here.
+
+**To test:** does her mouth work the way his does — parting rather than
+stretching, teeth and interior showing? That is what says the mouth work is a
+property of the pipeline rather than of one model.
