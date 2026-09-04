@@ -178,3 +178,24 @@ def seat(layout, mdl: bytes, mdx: bytes, node, host_layout=None):
         f"mouth interior: moved {', '.join(names)} {direction} by {abs(shift):.4f} "
         f"to sit {want:.4f} behind the new lips, as on the host"
     ]
+
+
+# --- the cavity behind the lips, and a claim that did not survive measuring ---
+#
+# A KOTOR head lines the inside of its mouth with a recessed pocket. Carth's is
+# 8 vertices and 6 faces, sitting 0.0251 to 0.0515 behind his lip surface, every
+# one sampling the same flat dark patch of his texture (luminance 33.7).
+#
+# It looked as though a converted head lacked the depth, and it does not. Jade
+# Empire's `h_common01_` carries an 11-vertex interior at **0.0160 to 0.0494**
+# against Carth's 0.0251 to 0.0515 - within a few thousandths. An earlier
+# reading here made it three times shallower by comparing Carth's *deepest*
+# vertices against the Jade bag's *frontmost* point, which are not the same
+# quantity. A depth correction was written against that reading and moved the
+# interior by 0.0004, which is nothing; it is removed rather than left to look
+# like it does something.
+#
+# What does differ is how it is painted: luminance ~127 against Carth's 33.7.
+# The geometry is where it should be and reads as lip rather than as a hole
+# because it is mid-tone rather than dark. That is a texture difference, not a
+# conversion fault, and repainting it is editing the artist's intent.

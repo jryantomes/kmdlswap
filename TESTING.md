@@ -1260,3 +1260,42 @@ never which of several moving bones it is bound to.**
 `out_vex_jawrim/backup-before/`. The upper sliver should stay and the lower lip
 should now drop away from it rather than stretching. If the lower lip drops too
 far, or drags the chin with it, the jaw share is too high.
+
+
+## 40. The interior is at the right depth; it is the wrong colour
+
+**Status: a measurement, not a change. The depth correction was a no-op and has
+been removed.**
+
+Asked to compare the source topology against ours. The comparison is worth
+keeping, and it retracts a claim made one section earlier.
+
+**Carth's mouth interior** is a recessed pocket: 8 vertices, 6 faces, 0.0251 to
+0.0515 behind his lip surface, every one sampling the same flat dark patch of
+his texture — luminance **33.7**, weighted `f_jaw_g` low, `f_um_g` high,
+`head_g` around, so it opens with the mouth.
+
+**The Jade head's** is 11 vertices at **0.0160 to 0.0494**, luminance **~127**.
+
+| | Carth | Jade |
+|---|---|---|
+| nearest edge behind the lips | 0.0251 | 0.0160 |
+| deepest point | 0.0515 | **0.0494** |
+| texture luminance | **33.7** | **~127** |
+
+**The depth claim was wrong.** §39's note that the Jade interior sat "three
+times shallower" compared Carth's *deepest* vertices against the Jade bag's
+*frontmost* point — not the same quantity. Measured like for like they are
+within a few thousandths. The correction written against that reading moved the
+interior by 0.0004 and has been removed rather than left looking useful.
+
+**What actually differs is the paint.** Carth's cavity is flat near-black; the
+Jade one is mid-tone pink. Geometry in the right place, four times too bright,
+so an opening mouth reveals something that reads as lip rather than as a hole.
+That is a texture difference and not a conversion fault — the head looks the way
+its artist painted it — so darkening it is a choice about intent, not a fix.
+
+**Method note.** Two measurements of "the same" thing taken from different ends
+of an object agreed with a hypothesis and were not checked against each other.
+The tell was available immediately: the correction it justified moved the mesh
+by 0.0004.
