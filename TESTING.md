@@ -1788,3 +1788,43 @@ the head carries as its own island — teeth, eyes — is bound rigidly to the b
 the host uses for it, and only the face itself is transferred.
 
 **To test:** do her eyes stay put when her brows move?
+
+
+## 54. The skin around the eyes was on the brows
+
+**Status: installed as `out_vex_eyeskin/`. THERE IS SOMETHING TO TEST.**
+
+Reported after §53: the eyeballs are rigid now, but the *skin* around them moves.
+
+Measured against the host, over the shell only:
+
+| band | Carth | Jade, before | after |
+|---|---|---|---|
+| eye socket (50-60% of head height) | brow **1%**, `head_g` 91% | brow **28%**, `head_g` 66% | brow **1%**, `head_g` 94% |
+| brow (60-70%) | brow 39%, `head_g` 61% | brow 31%, `head_g` 68% | brow **31%** |
+
+Proximity transfer gives a vertex the bone nearest it, and at the eye line the
+nearest facial bone is the brow. So a quarter of the eye socket rode the brows.
+
+**Three attempts, and the first two are worth recording.**
+
+1. *Anatomical re-sample* — blend the socket toward whatever the host has at the
+   same normalised position. Moved 28% to 24% and no further. Box normalisation
+   maps equal fractions of head height to each other, and this head's brows sit
+   at 61% against Carth's 64%, so "the same place" is a different part of the
+   face on each. The sample came back brow-heavy too.
+2. *Cap by how far down the host's brows reach* — corrected **2 vertices**.
+   Carth's brow bones do reach that low, just weakly. The difference is a
+   share, not an extent.
+3. *Cap the share* against the host's own in the same band, excess to the skull.
+   This works, and the band has to stop at 0.60 where the brow band begins: at
+   0.62 it took the brows themselves, 31% down to 9%, and they stopped moving.
+
+**The pattern across §49-§54.** Every one of these was proximity transfer giving
+a rigid or near-static part the nearest *moving* bone: the eyeballs took the
+brow, the teeth took whatever was closest, the interior followed the shell. The
+face itself is the only thing that should be transferred; everything else needs
+binding by what it *is*.
+
+**To test:** does the skin around her eyes stay still now, and do her brows still
+move?
