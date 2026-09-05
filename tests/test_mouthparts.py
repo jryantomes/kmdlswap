@@ -267,3 +267,29 @@ class TestLidsAcrossHeads:
             nodes = ()
 
         assert km.can_seat_eyelids(Empty(), Node()) is False
+
+
+class TestWhereTheLidGoes:
+    """A converted head's eyeball is a full sphere, and its centre is not its eye.
+
+    `h_bandit04_`'s spans 0.0324 top to bottom against Carth's 0.0193, reaching
+    from brow to cheek, while what shows through the skin is a slit low on it.
+    Carrying the lid to that sphere's centre put it on his eyebrow, and the game
+    showed exactly that.
+    """
+
+    @staticmethod
+    def test_height_comes_from_lower_than_the_middle():
+        from kmdlfun import mouthparts as km
+
+        assert 25 <= km.EYE_HEIGHT < 50, (
+            "the centre of the ball sits above the eye that shows"
+        )
+
+    @staticmethod
+    def test_height_and_reach_are_separate_questions():
+        """One says how far up the eye is, the other how far out it bulges.
+        Sharing a constant between them would tie two unrelated fixes together."""
+        from kmdlfun import mouthparts as km
+
+        assert km.EYE_HEIGHT != km.REACH
