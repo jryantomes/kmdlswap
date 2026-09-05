@@ -17,6 +17,11 @@ dist/
 /out_fbx/
 /reports/support_matrix.json
 /reports/catalogue.json
+# Diagnostic renders. Every one is a picture of BioWare's own geometry - faces,
+# heads, characters on game bodies - and this repository already needs its
+# history scrubbed of game data before it can go public. They are reproducible
+# from the scripts that drew them, so there is nothing to keep.
+/reports/*.png
 /catalogue/
 /catalogue_*/
 /out_swap/

@@ -28,9 +28,22 @@ SIZE = 96
 CACHE_VERSION = "v1"
 
 
+def cache_dir(name: str) -> Path:
+    """A durable cache folder that is neither the game nor the project.
+
+    Anything the app can redraw or rebuild belongs out here rather than in the
+    repository, and the caches are siblings rather than nested: `heads` holds
+    whole converted models and `preview` holds one throwaway picture, and
+    neither is a thumbnail. They were living inside the thumbnail tree, which
+    made a folder of content-keyed files meant to be kept indistinguishable
+    from a folder of scratch.
+    """
+    return Path.home() / ".kmdlfun" / name
+
+
 def cache_root() -> Path:
     """Somewhere durable that is neither the game nor the project."""
-    return Path.home() / ".kmdlfun" / "thumbs" / CACHE_VERSION
+    return cache_dir("thumbs") / CACHE_VERSION
 
 
 def key_for(mdl: bytes, mdx: bytes, size: int = SIZE) -> str:

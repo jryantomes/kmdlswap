@@ -2152,3 +2152,50 @@ class TestTheCatalogueKnowsWhereHeadsCameFrom:
 
         assert app.status.cget("text") == "preview only: 1/1 would transfer"
         assert "328 heads" in app.log.get("1.0", "end")
+
+
+class TestThePreviewDoesNotPileUp:
+    """A character preview is a picture of a choice, not a build.
+
+    These went into the thumbnail cache under a job number that only climbs, so
+    every preview left a file behind - 42 of them after one session, of which
+    one was ever wanted, sitting among real thumbnails that are keyed by content
+    and meant to be kept.
+    """
+
+    @staticmethod
+    def test_only_the_newest_survives(tmp_path):
+        from kmdlfun.gui import App
+
+        for job in (1, 2, 3):
+            (tmp_path / f"character_{job}.png").write_bytes(b"x")
+
+        App._prune_previews(tmp_path, 3)
+
+        left = sorted(p.name for p in tmp_path.glob("character_*.png"))
+        assert left == ["character_3.png"]
+
+    @staticmethod
+    def test_a_preview_still_being_drawn_is_left_alone(tmp_path):
+        """Two previews can be in flight at once; the older one must not delete
+        the newer one's file out from under it."""
+        from kmdlfun.gui import App
+
+        for job in (1, 5):
+            (tmp_path / f"character_{job}.png").write_bytes(b"x")
+
+        App._prune_previews(tmp_path, 1)
+
+        assert (tmp_path / "character_5.png").is_file()
+
+    @staticmethod
+    def test_it_leaves_anything_it_did_not_name(tmp_path):
+        from kmdlfun.gui import App
+
+        keep = tmp_path / "0123456789abcdef.png"
+        keep.write_bytes(b"x")
+        (tmp_path / "character_1.png").write_bytes(b"x")
+
+        App._prune_previews(tmp_path, 2)
+
+        assert keep.is_file(), "it deleted a real thumbnail"

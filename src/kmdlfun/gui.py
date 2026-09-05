@@ -1438,12 +1438,19 @@ class App(ttk.Frame):
                     worn = kl.parse(*lib.read(head)) if head else None
                 scene = krender.character(body, worn, texture_lookup=look)
                 pixels = krender.render(scene, size=PREVIEW_SIZE, cull=True)
-                # Beside the thumbnails rather than in the output folder: it is
-                # a picture of a choice, not a build, and it would otherwise be
-                # swept into whatever gets installed.
-                out = _Path(kthumbs.cache_root()) / f"character_{job}.png"
+                # Beside the thumbnails rather than in the output folder: it
+                # is a picture of a choice, not a build, and it would otherwise
+                # be swept into whatever gets installed.
+                #
+                # In its own folder, and pruned. These went into the thumbnail
+                # cache under a job number that only ever climbs, so every
+                # preview left a file behind: 42 of them after one session, of
+                # which one was ever wanted, sitting among real thumbnails that
+                # are keyed by content and meant to be kept.
+                out = kthumbs.cache_dir("preview") / f"character_{job}.png"
                 out.parent.mkdir(parents=True, exist_ok=True)
                 krender.to_png(pixels, out)
+                App._prune_previews(out.parent, job)
                 if job == self._character_job:
                     self.events.put(("character_drawn", (job, str(out))))
             except Exception:  # noqa: BLE001
@@ -1546,6 +1553,21 @@ class App(ttk.Frame):
             self.events.put(("done_text", lines))
         except Exception as exc:  # noqa: BLE001
             self.events.put(("error", f"{type(exc).__name__}: {exc}"))
+
+    @staticmethod
+    def _prune_previews(folder, job: int) -> None:
+        """Drop previews older than `job`, and touch nothing else.
+
+        By job number rather than by age, so a preview still being drawn beside
+        this one is not deleted out from under it, and by name pattern so a real
+        thumbnail - keyed by content and meant to be kept - is never caught.
+        """
+        for stale in folder.glob("character_*.png"):
+            try:
+                if int(stale.stem.split("_")[-1]) < job:
+                    stale.unlink()
+            except (ValueError, OSError):
+                pass
 
     @staticmethod
     def _ship_jade_head(head: str, jade_install: str, install: str,

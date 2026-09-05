@@ -561,7 +561,7 @@ def as_head(resref: str, jade_install, install, host: str, *, root=None):
     """
     from . import headbuild, thumbs as kthumbs
 
-    folder = Path(root) if root else Path(kthumbs.cache_root()).parent / "heads" / BUILD_VERSION
+    folder = Path(root) if root else kthumbs.cache_dir("heads") / BUILD_VERSION
     out = folder / f"{resref.strip('_').lower()}-{host.lower()}"
     mdl, mdx = out / f"{host}.mdl", out / f"{host}.mdx"
     if mdl.is_file() and mdx.is_file():
@@ -607,7 +607,7 @@ def thumbnail(entry: Entry, *, size: int = 96, root=None):
     # promises are the same size.
     # `jade-v2` because v1 drew these flat: the key is the model's bytes, which
     # have not changed, so a textured redraw needs a new folder to land in.
-    folder = Path(root) if root else Path(kthumbs.cache_root()) / "jade-v2"
+    folder = Path(root) if root else kthumbs.cache_dir("thumbs") / "jade-v2"
     out = folder / f"{digest}-{size}.png"
     if out.is_file():
         return out
