@@ -431,20 +431,19 @@ LID_SCALE = (0.70, 1.10)
 # the ninetieth percentile they read 1.135 and 1.131.
 REACH = 90
 
-# Which height of an eye the lid is carried to. Not its centre: a Jade eyeball
-# is a full sphere reaching from brow to cheek - `h_bandit04_`'s spans 0.0324
-# against Carth's 0.0193 - while the part that shows through the skin is a slit
-# low on it. Carrying the lid to the sphere's centre put it on his eyebrow, and
-# that is what the game showed.
+# Where the lid's lower edge rests, as a fraction of the eye's height measured
+# down from its top.
 #
-# Chosen by rendering, not derived, and the honest reason is that every
-# geometric anchor tried first failed its own check: the island centroid, the
-# forward pole, the nearest-to-skin points and the hole in the shell all read as
-# nearly correct while the picture showed a lid on a brow. Rendering the lid at
-# a range of heights says `h_mercf01_` wants 0.004 to 0.008 lower and
-# `h_bandit04_` 0 to 0.004; p40 gives 0.0037 and 0.0016-0.0026, and p30
-# overshoots. Applied to host and target alike, as every measurement here is.
-EYE_HEIGHT = 40
+# A Jade eyeball is a full sphere reaching from brow to cheek - `h_bandit04_`'s
+# spans 0.0324 against Carth's 0.0193 - and only its lower part shows through
+# the skin. So the lid's resting edge belongs at the top of *that*, not at some
+# height of the ball as a whole.
+#
+# An earlier version took the fortieth percentile of the eye's vertices, which
+# is not the same thing: vertices are not spread evenly up a sphere, so a
+# percentile of them is not a fraction of its height, and it left the lid barely
+# moved. This positions the edge itself, which is the thing being looked at.
+VISIBLE_BELOW = 0.60
 
 
 def seat_eyelids(layout, mdl: bytes, mdx: bytes, node, host_layout=None):
@@ -597,9 +596,6 @@ def _lid_plan(layout, node, host_layout) -> dict:
         if side not in host_balls or side not in new_balls or side not in host_lids:
             continue
         delta = new_balls[side].mean(axis=0) - host_balls[side].mean(axis=0)
-        # Height comes from `EYE_HEIGHT`, not the centre of the ball.
-        delta[2] = (np.percentile(new_balls[side][:, 2], EYE_HEIGHT)
-                    - np.percentile(host_balls[side][:, 2], EYE_HEIGHT))
         mine = _model_space(layout, lid, rest)
         if not len(mine):
             continue
@@ -612,8 +608,17 @@ def _lid_plan(layout, node, host_layout) -> dict:
         have = reach(mine + delta, pivot) / reach(new_balls[side], pivot)
         factor = float(np.clip(want / have if have else 1.0, *LID_SCALE))
 
-        # Never through the skin, measured on the lid as it will finally be.
+        # The lid's lower edge belongs at the top of the part of the eye that
+        # shows. Height is set here rather than carried from the ball's centre,
+        # because a sphere's centre is nowhere near the eye on these heads.
         centre = np.asarray(rest[lid.index].position, dtype=float)
+        ball = new_balls[side][:, 2]
+        top, bottom = float(ball.max()), float(ball.min())
+        want_edge = top - (top - bottom) * VISIBLE_BELOW
+        scaled_edge = float(centre[2] + (mine[:, 2].min() - centre[2]) * factor)
+        delta[2] = want_edge - scaled_edge
+
+        # Never through the skin, measured on the lid as it will finally be.
         final = (mine - centre) * factor + centre + delta
         # Two walls, and on a converted head they can be closer together than
         # the host's lid is thick. Forward is the skin - through it is the pale

@@ -279,17 +279,20 @@ class TestWhereTheLidGoes:
     """
 
     @staticmethod
-    def test_height_comes_from_lower_than_the_middle():
+    def test_the_resting_edge_sits_below_the_middle_of_the_ball():
+        """Only the lower part of the sphere shows through the skin, so the
+        lid's resting edge belongs below its centre - above it and the lid rests
+        on the brow, which is what the game showed twice."""
         from kmdlfun import mouthparts as km
 
-        assert 25 <= km.EYE_HEIGHT < 50, (
-            "the centre of the ball sits above the eye that shows"
-        )
+        assert 0.5 < km.VISIBLE_BELOW < 0.8
 
     @staticmethod
-    def test_height_and_reach_are_separate_questions():
-        """One says how far up the eye is, the other how far out it bulges.
-        Sharing a constant between them would tie two unrelated fixes together."""
-        from kmdlfun import mouthparts as km
+    def test_a_fraction_of_height_not_a_percentile_of_vertices():
+        """Vertices are not spread evenly up a sphere, so the fortieth
+        percentile of them is not forty percent of its height. Taking the
+        percentile left the lid barely moved."""
+        import numpy as np
 
-        assert km.EYE_HEIGHT != km.REACH
+        ring = np.array([0.0, 0.9, 0.95, 0.98, 1.0])   # dense near the top
+        assert abs(np.percentile(ring, 40) - 0.4) > 0.4
