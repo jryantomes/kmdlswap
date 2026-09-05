@@ -2126,3 +2126,29 @@ class TestAJadeHeadInTheCreator:
         model, _notes = App._ship_jade_head("h_bandit04_", jade_path, k1_path,
                                             "a_very_long_character_name", tmp_path)
         assert len(model) <= 16
+
+
+class TestTheCatalogueKnowsWhereHeadsCameFrom:
+    @staticmethod
+    def test_it_counts_the_two_borrowed_games_apart(stocked):
+        """With Jade heads on offer the summary called all 222 borrowed heads
+        KOTOR II's, and 148 of them are from a different game entirely."""
+        log = stocked.log.get("1.0", "end")
+        line = next((l for l in log.splitlines() if "to build a character from" in l), "")
+
+        assert line, log[-400:]
+        if "Jade Empire" in line:
+            assert "from KOTOR II" in line, line
+            assert line.count("from ") >= 2, line
+
+    @staticmethod
+    def test_loading_does_not_steal_the_status_line(app, tmp_path):
+        """The catalogue loads in the background. Once it became fast enough to
+        finish mid-task it started overwriting the status of whatever the user
+        was actually doing."""
+        app._set_status("preview only: 1/1 would transfer")
+        app._say("36 bodies, 117 outfits and 328 heads to build a character from",
+                 status=False)
+
+        assert app.status.cget("text") == "preview only: 1/1 would transfer"
+        assert "328 heads" in app.log.get("1.0", "end")

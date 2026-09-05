@@ -1173,10 +1173,17 @@ class App(ttk.Frame):
 
     def _show_catalogue(self, cat):
         self.catalogue = cat
-        borrowed = sum(1 for h in cat.heads if getattr(h, "game", ""))
+        # Counted by where each head came from, not merely by whether it was
+        # borrowed: with Jade heads on offer the summary called all 222 of them
+        # KOTOR II's, and 148 were from a different game entirely.
+        from_k2 = sum(1 for h in cat.heads if getattr(h, "source", "") == "k2")
+        from_jade = sum(1 for h in cat.heads if getattr(h, "source", "") == "jade")
+        lent = [f"{n} from {game}" for n, game in
+                ((from_k2, "KOTOR II"), (from_jade, "Jade Empire")) if n]
         self._say(f"{len(cat.bodies)} bodies, {len(cat.outfits)} outfits and "
                   f"{len(cat.heads)} heads to build a character from"
-                  + (f" ({borrowed} of them from KOTOR II)" if borrowed else ""))
+                  + (f" ({', '.join(lent)})" if lent else ""),
+                  status=False)
         for key in PART_KINDS:
             self._refresh_parts(key)
 
@@ -3135,14 +3142,21 @@ class App(ttk.Frame):
         self.log.see("end")
         self.log.configure(state="disabled")
 
-    def _say(self, text: str):
+    def _say(self, text: str, *, status: bool = True):
         self.log.configure(state="normal")
         self.log.insert("end", text + "\n")
         self.log.see("end")
         self.log.configure(state="disabled")
         # Progress messages route through here too, so the status line
         # follows the work without needing its own plumbing.
-        self._set_status(text)
+        #
+        # `status=False` is for work nobody asked for just now. The
+        # catalogue loads in the background, and once it became fast enough
+        # to finish mid-task it started overwriting the status line of
+        # whatever the user *was* doing - a preview would report its result
+        # and be replaced a second later by a head count.
+        if status:
+            self._set_status(text)
 
     def _check_install(self) -> bool:
         if not (Path(self.install.get().strip()) / "chitin.key").is_file():
