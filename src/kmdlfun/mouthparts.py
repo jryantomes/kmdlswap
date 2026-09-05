@@ -391,6 +391,10 @@ def find_eyes(positions, faces, *, band=(0.50, 0.70)):
 # host's own margin (0.0059) is more than any converted head is guaranteed.
 LID_MARGIN = 0.0010
 
+# How far a lid may be resized to fit the eye it covers. A factor outside this
+# says the two eyes are not comparable and the answer is not a bigger lid.
+LID_SCALE = (0.80, 1.50)
+
 
 def seat_eyelids(layout, mdl: bytes, mdx: bytes, node, host_layout=None):
     """Carry the host's eyelids onto the eyes the replacement brought with it.
@@ -400,82 +404,144 @@ def seat_eyelids(layout, mdl: bytes, mdx: bytes, node, host_layout=None):
     between its lids and its own face skin - and that is the wrong invariant. It
     moves the lid in depth only, and the eyes of a converted head are rarely at
     the host's eye *height*. Measured on `h_mercf01_`: her eyeballs sit 0.0140
-    above Carth's and 0.0352 in front of them, so a depth-only correction left
-    the lid at y +0.1206 with the eyeball at +0.1292 - the lid behind the eye it
-    is supposed to close over, and below it as well. It would have blinked
-    inside the skull, which is what the two earlier attempts looked like.
+    above Carth's and 0.0352 in front, so a depth-only correction left the lid
+    at y +0.1206 with the eyeball at +0.1292 - behind the eye it is supposed to
+    close over, and below it. It blinked inside the skull.
 
-    So the lid is translated by the vector that carries the host's own eyeball
-    onto the replacement's, per side. That preserves the whole lid-to-eye
-    relationship the blink animation was authored against - Carth's lid centre
-    sits 0.0029 in front of his eyeball's and 0.0049 above it - instead of
-    reconstructing it from one measurement. On `h_mercf01_` it lands the lid
-    front at +0.1329 against an eyeball front of +0.1292, still 0.0032 behind
-    the face skin at that spot.
+    So the lid is translated by the vector carrying the host's own eyeball onto
+    the replacement's, which preserves the whole lid-to-eye relationship the
+    blink animation was authored against.
 
-    The move is made to the node position, header *and* controller, not to the
-    geometry: a lid blinks by rotating about its own pivot, so moving its
-    vertices and leaving the pivot behind swings it through an arc.
+    **And resized, because a lid sweeps a shell.** Translation alone got a blink
+    in game that clipped into the eye halfway down. A lid blinks by rotating
+    about its own pivot, which sits at the eyeball's centre, so what has to
+    clear the eye is not the lid's resting position but its *radius*. Carth's
+    lid reaches 0.0162 from that pivot against an eyeball reaching 0.0147 -
+    clear by 0.0016. Her eyeball reaches 0.0156, so the same lid cleared it by
+    0.0006, less than half the margin, and the eye came through the arc. Each
+    lid is scaled about its own pivot until it clears by the ratio the host
+    keeps, per side, because the host's own two differ.
     """
     host_layout = host_layout if host_layout is not None else layout
-    lids = eyelids(layout)
-    if not lids:
+    if not eyelids(layout):
         return mdl, mdx, []
 
-    host_rest = space.rest_pose(host_layout)
-    host_balls = {
-        n.name.lower()[3]: _model_space(host_layout, n, host_rest)
-        for n in kparts.mesh_nodes(host_layout)
-        if n.name.lower() in ("eyela", "eyera")
-    }
-    if len(host_balls) != 2:
+    plan = _lid_plan(layout, node, host_layout)
+    if not plan:
         return mdl, mdx, []
 
-    rest = space.rest_pose(layout)
-    # `node` is the host's; the built model is a different parse of a different
-    # file, so its indices are not interchangeable. Find it again by name.
-    here = next(
-        (n for n in kparts.mesh_nodes(layout) if n.name.lower() == node.name.lower()),
-        None,
-    )
-    if here is None:
-        return mdl, mdx, []
-    face = _model_space(layout, here, rest)
-    eyes = _own_eyes(layout, here, rest)
-    if len(eyes) != 2 or not len(face):
-        return mdl, mdx, []
-    # Left is -x, matching the `eyeL`/`eyeR` naming on the host.
-    eyes.sort(key=lambda A: float(A[:, 0].mean()))
-    new_balls = {"l": eyes[0], "r": eyes[1]}
-    mid_y = (float(face[:, 1].min()) + float(face[:, 1].max())) / 2
+    # Resizing splices geometry and moves every offset after it, so the scales
+    # go in first, one re-parse each, and the position writes follow on a layout
+    # that is finally stable.
+    from kmdlswap import edit as kedit
+    from kmdlswap import layout as klayout
 
+    for name, entry in plan.items():
+        factor = entry["scale"]
+        if abs(factor - 1.0) < 0.01:
+            continue
+        current = klayout.parse(mdl, mdx)
+        lid = next((n for n in kparts.mesh_nodes(current)
+                    if n.name.lower() == name.lower()), None)
+        if lid is None:
+            continue
+        try:
+            geo = kedit.extract(current, lid)
+        except ValueError:
+            continue
+        from . import apply as kapply
+
+        kapply.scale_geometry(geo, factor)
+        try:
+            mdl, mdx = kedit.replace_geometry(
+                current, lid, geo, moved=kedit.UniformScale(factor, (0.0, 0.0, 0.0)))
+        except ValueError:
+            continue
+
+    current = klayout.parse(mdl, mdx)
     out = bytearray(mdl)
     lines = []
-    for lid in lids:
-        side = lid.name.lower()[3]
-        if side not in host_balls or side not in new_balls:
+    for name, entry in plan.items():
+        lid = next((n for n in kparts.mesh_nodes(current)
+                    if n.name.lower() == name.lower()), None)
+        if lid is None or not _shift_position_controller(out, lid, entry["local"]):
             continue
-        delta = new_balls[side].mean(axis=0) - host_balls[side].mean(axis=0)
-        here = _model_space(layout, lid, rest)
-        if not len(here):
-            continue
-        # Never through the skin. Depth is the only axis worth clamping: it is
-        # the one the face varies in.
-        gap = _local_clearance(face, here + delta, mid_y)
-        if gap is not None and gap < LID_MARGIN:
-            delta[1] -= LID_MARGIN - gap
-            gap = LID_MARGIN
-        local = _to_parent(layout, rest, lid, delta)
-        if not _shift_position_controller(out, lid, local):
-            continue
-        where = (f"({delta[0]:+.4f}, {delta[1]:+.4f}, {delta[2]:+.4f}), the "
-                 f"vector from the host's eyeball to this one")
-        behind = "" if gap is None else f" - it sits {gap:.4f} behind the face there"
-        lines.append(f"{lid.name}: moved onto the head's own eye by {where}{behind}")
+        delta, factor, gap = entry["delta"], entry["scale"], entry["gap"]
+        said = (f"{name}: moved onto the head's own eye by "
+                f"({delta[0]:+.4f}, {delta[1]:+.4f}, {delta[2]:+.4f}), the vector "
+                f"from the host's eyeball to this one")
+        if abs(factor - 1.0) >= 0.01:
+            said += f", and resized {factor:.3f}x to sweep clear of it"
+        if gap is not None:
+            said += f" - it sits {gap:.4f} behind the face there"
+        lines.append(said)
 
     if not lines:
         return mdl, mdx, []
     return bytes(out), mdx, ["eyelids: they are what blinks"] + lines
+
+
+def _lid_plan(layout, node, host_layout) -> dict:
+    """Per lid: how far to move it, how much to resize it, and what it clears."""
+    host_rest = space.rest_pose(host_layout)
+    host_balls, host_lids = {}, {}
+    for n in kparts.mesh_nodes(host_layout):
+        lowered = n.name.lower()
+        if lowered in ("eyela", "eyera"):
+            host_balls[lowered[3]] = _model_space(host_layout, n, host_rest)
+        elif is_eyelid(lowered):
+            host_lids[lowered[3]] = (n, _model_space(host_layout, n, host_rest))
+    if len(host_balls) != 2:
+        return {}
+
+    rest = space.rest_pose(layout)
+    here = next((n for n in kparts.mesh_nodes(layout)
+                 if n.name.lower() == node.name.lower()), None)
+    if here is None:
+        return {}
+    face = _model_space(layout, here, rest)
+    eyes = _own_eyes(layout, here, rest)
+    if len(eyes) != 2 or not len(face):
+        return {}
+    eyes.sort(key=lambda A: float(A[:, 0].mean()))     # left is -x, as `eyeL`
+    new_balls = {"l": eyes[0], "r": eyes[1]}
+    mid_y = (float(face[:, 1].min()) + float(face[:, 1].max())) / 2
+
+    def reach(points, pivot):
+        return float(np.linalg.norm(points - np.asarray(pivot, dtype=float), axis=1).max())
+
+    plan = {}
+    for lid in eyelids(layout):
+        side = lid.name.lower()[3]
+        if side not in host_balls or side not in new_balls or side not in host_lids:
+            continue
+        delta = new_balls[side].mean(axis=0) - host_balls[side].mean(axis=0)
+        mine = _model_space(layout, lid, rest)
+        if not len(mine):
+            continue
+
+        # The shell the lid sweeps, as a multiple of the eye it sweeps over.
+        host_node, host_lid = host_lids[side]
+        host_pivot = host_rest[host_node.index].position
+        want = reach(host_lid, host_pivot) / reach(host_balls[side], host_pivot)
+        pivot = np.asarray(rest[lid.index].position, dtype=float) + delta
+        have = reach(mine + delta, pivot) / reach(new_balls[side], pivot)
+        factor = float(np.clip(want / have if have else 1.0, *LID_SCALE))
+
+        # Never through the skin, measured on the lid as it will finally be.
+        centre = np.asarray(rest[lid.index].position, dtype=float)
+        final = (mine - centre) * factor + centre + delta
+        gap = _local_clearance(face, final, mid_y)
+        if gap is not None and gap < LID_MARGIN:
+            delta[1] -= LID_MARGIN - gap
+            gap = LID_MARGIN
+        plan[lid.name] = {
+            "delta": delta,
+            "scale": factor,
+            "gap": gap,
+            "local": _to_parent(layout, rest, lid, delta),
+        }
+    return plan
 
 
 def _own_eyes(layout, node, rest) -> list:
