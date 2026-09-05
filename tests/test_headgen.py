@@ -190,9 +190,16 @@ def test_placing_moves_without_resizing():
     assert min(p[0] for p in moved) > 9.0, "it was not moved"
 
 
-def test_fitting_resizes_by_the_tightest_axis():
-    """The behaviour that costs a head its height, kept and named rather than
-    quietly changed - it is right for a sculpt arriving at an arbitrary size."""
+def test_fitting_resizes_by_height():
+    """Height is the axis a viewer judges a head by, and the only one that
+    cannot hide.
+
+    It used to be the tightest axis, and on a host of different proportions that
+    costs about a tenth of the head: a Jade head is the same depth as a KOTOR
+    one while being taller and broader, so depth binds and drags height down
+    with it. Onto Bastila the head came out at 91% of her head's height, and it
+    was reported from the game as looking about ten percent small.
+    """
     from kmdlfun import headgen
 
     # Wider than the node allows, shorter than it could be.
@@ -200,12 +207,27 @@ def test_fitting_resizes_by_the_tightest_axis():
     fitted = headgen.fit_to(mesh, size=[1.0, 4.0, 4.0], centre=[0.0, 0.0, 0.0])
 
     got = span(fitted)
-    assert got[0] == pytest.approx(1.0), "the tightest axis should just fit"
-    assert got[2] < 4.0, "and everything else shrinks with it"
+    assert got[2] == pytest.approx(4.0), "height should land exactly on the node"
+    assert got[0] > 1.0, "and a wider head is allowed to overhang rather than shrink"
 
 
-def test_a_head_the_right_size_already_is_left_alone():
-    """The Jade case. Placing keeps 100% of the height; fitting keeps 50%."""
+def test_the_face_keeps_its_own_proportions():
+    """One factor for every axis. Scaling them apart would match the node
+    exactly and squash the face 13% front-to-back, which changes whose face it
+    is."""
+    from kmdlfun import headgen
+
+    mesh = a_head(width=1.02, depth=1.0, height=2.0)
+    before = span(mesh)
+    fitted = span(headgen.fit_to(mesh, [1.0, 1.4, 2.0], [0.0, 0.0, 0.0]))
+
+    ratios = [fitted[i] / before[i] for i in range(3)]
+    assert ratios[0] == pytest.approx(ratios[1]) == pytest.approx(ratios[2])
+
+
+def test_a_head_the_right_size_already_keeps_its_height():
+    """The Jade case: a head that already knows how big it should be comes
+    through at full height whether it is placed or fitted."""
     from kmdlfun import headgen
 
     mesh = a_head(width=1.02, depth=1.0, height=2.0)
@@ -215,7 +237,7 @@ def test_a_head_the_right_size_already_is_left_alone():
     fitted = headgen.fit_to(mesh, node, [0.0, 0.0, 0.0])
 
     assert span(placed)[2] == pytest.approx(2.0)
-    assert span(fitted)[2] < 2.0, "fitting gives away height for width"
+    assert span(fitted)[2] == pytest.approx(2.0), "fitting gave away height again"
 
 
 def test_both_anchor_the_chin_to_the_same_place():

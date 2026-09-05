@@ -197,18 +197,37 @@ def place_at(positions, size, centre, anchor="chin"):
     return moved
 
 
-def fit_to(positions, size, centre, anchor="chin"):
-    """Scale uniformly into `size` and place at `centre`, chin-anchored.
+# Which axis a fit is measured against. Height, because it is the one a viewer
+# judges a head by and the only one that cannot hide.
+#
+# The alternative was the tightest axis, and on a host of different proportions
+# it costs about a tenth of the head. A Jade head is the same depth as a KOTOR
+# one while being taller and broader - measured across 158 of them against 105
+# of KOTOR's, height matches at 0.858 and width at 0.831 but depth at 0.994 -
+# so depth is what binds, and it drags height and width down with it: onto
+# Bastila the head came out 91% of her head's height and 85% of its width.
+#
+# Reported from the game as converted heads looking about ten percent small,
+# which is what it was. Fitting by height instead lets the back of the skull
+# overhang the node by around a tenth, where hair usually is, and keeps the
+# face's own proportions - scaling each axis separately would match the box
+# exactly and squash the face 13% front-to-back, which changes whose face it is.
+FIT_AXIS = 2
 
-    The scale is by the tightest axis, which keeps the head inside the node's
-    box at the cost of shrinking it whenever the proportions differ. Right for
-    a sculpt or a scan arriving at an arbitrary size; wrong for anything that
-    already knows how big it should be - see `place_at`.
+
+def fit_to(positions, size, centre, anchor="chin"):
+    """Scale uniformly to `size` on `FIT_AXIS` and place at `centre`.
+
+    Right for a sculpt or a scan arriving at an arbitrary size; wrong for
+    anything that already knows how big it should be - see `place_at`.
     """
     lo = [min(p[i] for p in positions) for i in range(3)]
     hi = [max(p[i] for p in positions) for i in range(3)]
     span = [hi[i] - lo[i] for i in range(3)]
-    factor = min(size[i] / span[i] for i in range(3) if span[i] > 1e-9)
+    if span[FIT_AXIS] > 1e-9:
+        factor = size[FIT_AXIS] / span[FIT_AXIS]
+    else:
+        factor = min(size[i] / span[i] for i in range(3) if span[i] > 1e-9)
     mid = [(hi[i] + lo[i]) / 2 for i in range(3)]
 
     moved = [
