@@ -381,22 +381,18 @@ def _write_into(layout, node, mesh, pack, reshape, hide, r: HeadResult):
             n.name for n in kparts.mesh_nodes(after)
             if n.name.lower() != node.name.lower()
             and not (keep_mouth and kmouth.is_mouth_part(n.name))
-            # The host's eyelids are hidden again. They are the only thing
-            # that blinks, so keeping them was worth trying, and it does not
-            # work: they are rigid meshes placed and pivoted for the *host's*
-            # eyes, and a converted head's are elsewhere. Seated by geometry
-            # the lid swings about a pivot left behind; seated by pivot as
-            # well, the eye was reported roaming across the face and the game
-            # froze after the conversation. The freeze was never explained -
-            # the controller edit reads as structurally correct against
-            # vanilla's own layout - and an unexplained hard failure in
-            # someone's game is not worth a blink.
+            # The host's eyelids are kept. They are the only thing that
+            # blinks - a Jade head brings eyeballs but no lids, and the face
+            # does not deform to blink either (the host's eye region is 88%
+            # head_g), so hiding them hides blinking altogether.
             #
-            # So a converted head does not blink, and the reason is in the
-            # source: Jade heads carry eyeballs but no eyelid geometry, and the
-            # face does not deform to blink either (the host's eye region is
-            # 88% head_g). Blinking would need lids built for this head.
-            and not False
+            # Two earlier attempts at keeping them failed, and that was read as
+            # proof that a lid built for one face cannot fit another. It was an
+            # over-reading. Both seated the lid against the *face*, which
+            # corrects depth and nothing else, and both predate the local
+            # clearance measurement they would have needed. A lid belongs to an
+            # eye, not to a face - see `kmouth.seat_eyelids`.
+            and not kmouth.is_eyelid(n.name)
         ]
         mdl, hidden = kvis.hide_nodes(after, mdl, wanted)
         if hidden:
@@ -409,8 +405,10 @@ def _write_into(layout, node, mesh, pack, reshape, hide, r: HeadResult):
             mdl, mdx, seated = kmouth.seat(kl.parse(mdl, mdx), mdl, mdx, node, layout)
             r.lines.extend(seated)
 
-        # `kmouth.seat_eyelids` is not called: the lids are hidden again, for
-        # the reasons above.
+        # The lids are the host's, and sit over the host's eyes. Carried onto
+        # the eyes this head brought with it, or they blink inside the skull.
+        mdl, mdx, lidded = kmouth.seat_eyelids(kl.parse(mdl, mdx), mdl, mdx, node, layout)
+        r.lines.extend(lidded)
 
     if not kv.check(kl.parse(mdl, mdx)).ok:
         r.error = "result failed validation; nothing written"

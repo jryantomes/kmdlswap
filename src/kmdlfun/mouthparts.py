@@ -386,70 +386,132 @@ def find_eyes(positions, faces, *, band=(0.50, 0.70)):
     return [a, b]
 
 
+# How close a seated lid may come to the new face before it is pulled back.
+# A lid is meant to sit just under the skin; through it is a defect, and the
+# host's own margin (0.0059) is more than any converted head is guaranteed.
+LID_MARGIN = 0.0010
+
+
 def seat_eyelids(layout, mdl: bytes, mdx: bytes, node, host_layout=None):
-    """Move the host's eyelids onto the replacement's face.
+    """Carry the host's eyelids onto the eyes the replacement brought with it.
 
-    Keeping them is what restores blinking; keeping them *where they were* is
-    not enough. Measured on `h_mercf01_`, the lids sat at y +0.0977 while the
-    head's own eyeballs reached +0.1162 - lids behind eyes, 0.0396 back from a
-    face that reaches +0.1373. They would blink inside the skull.
+    **The lid belongs to an eye, not to a face.** An earlier version seated the
+    lids the way the teeth are seated - by matching the clearance the host keeps
+    between its lids and its own face skin - and that is the wrong invariant. It
+    moves the lid in depth only, and the eyes of a converted head are rarely at
+    the host's eye *height*. Measured on `h_mercf01_`: her eyeballs sit 0.0140
+    above Carth's and 0.0352 in front of them, so a depth-only correction left
+    the lid at y +0.1206 with the eyeball at +0.1292 - the lid behind the eye it
+    is supposed to close over, and below it as well. It would have blinked
+    inside the skull, which is what the two earlier attempts looked like.
 
-    So they are moved to the clearance the host gives them, measured the same
-    way `seat` measures the mouth: the host's own face at lid height against its
-    own lids. Geometry rather than node position, because the lids carry a
-    position controller and the engine reads that over the header.
+    So the lid is translated by the vector that carries the host's own eyeball
+    onto the replacement's, per side. That preserves the whole lid-to-eye
+    relationship the blink animation was authored against - Carth's lid centre
+    sits 0.0029 in front of his eyeball's and 0.0049 above it - instead of
+    reconstructing it from one measurement. On `h_mercf01_` it lands the lid
+    front at +0.1329 against an eyeball front of +0.1292, still 0.0032 behind
+    the face skin at that spot.
+
+    The move is made to the node position, header *and* controller, not to the
+    geometry: a lid blinks by rotating about its own pivot, so moving its
+    vertices and leaving the pivot behind swings it through an arc.
     """
     host_layout = host_layout if host_layout is not None else layout
     lids = eyelids(layout)
     if not lids:
         return mdl, mdx, []
 
-    rest = space.rest_pose(layout)
     host_rest = space.rest_pose(host_layout)
-    host_lids = eyelids(host_layout)
-    host_node = next(
-        (n for n in kparts.mesh_nodes(host_layout) if n.name.lower() == node.name.lower()),
+    host_balls = {
+        n.name.lower()[3]: _model_space(host_layout, n, host_rest)
+        for n in kparts.mesh_nodes(host_layout)
+        if n.name.lower() in ("eyela", "eyera")
+    }
+    if len(host_balls) != 2:
+        return mdl, mdx, []
+
+    rest = space.rest_pose(layout)
+    # `node` is the host's; the built model is a different parse of a different
+    # file, so its indices are not interchangeable. Find it again by name.
+    here = next(
+        (n for n in kparts.mesh_nodes(layout) if n.name.lower() == node.name.lower()),
         None,
     )
-    if not host_lids or host_node is None:
+    if here is None:
         return mdl, mdx, []
-
-    def clearance(lay, lid_nodes, face_node, poses):
-        lid = np.concatenate([_model_space(lay, n, poses) for n in lid_nodes])
-        face = _model_space(lay, face_node, poses)
-        if not len(lid) or not len(face):
-            return None, None
-        mid_y = (float(face[:, 1].min()) + float(face[:, 1].max())) / 2
-        return _local_clearance(face, lid, mid_y), float(lid[:, 1].max())
-
-    want, _ = clearance(host_layout, host_lids, host_node, host_rest)
-    have, front = clearance(layout, lids, node, rest)
-    if want is None or have is None:
+    face = _model_space(layout, here, rest)
+    eyes = _own_eyes(layout, here, rest)
+    if len(eyes) != 2 or not len(face):
         return mdl, mdx, []
-    shift = have - want
-    if abs(shift) < 1e-4:
-        return mdl, mdx, []
+    # Left is -x, matching the `eyeL`/`eyeR` naming on the host.
+    eyes.sort(key=lambda A: float(A[:, 0].mean()))
+    new_balls = {"l": eyes[0], "r": eyes[1]}
+    mid_y = (float(face[:, 1].min()) + float(face[:, 1].max())) / 2
 
     out = bytearray(mdl)
-    names = []
+    lines = []
     for lid in lids:
-        r = rest[lid.index]
-        local = tuple(
-            float(v)
-            for v in np.asarray(r.rotation, dtype=float).T @ np.array([0.0, shift, 0.0])
-        )
-        if _shift_position_controller(out, lid, local):
-            names.append(lid.name)
-    out, current_mdx = bytes(out), mdx
+        side = lid.name.lower()[3]
+        if side not in host_balls or side not in new_balls:
+            continue
+        delta = new_balls[side].mean(axis=0) - host_balls[side].mean(axis=0)
+        here = _model_space(layout, lid, rest)
+        if not len(here):
+            continue
+        # Never through the skin. Depth is the only axis worth clamping: it is
+        # the one the face varies in.
+        gap = _local_clearance(face, here + delta, mid_y)
+        if gap is not None and gap < LID_MARGIN:
+            delta[1] -= LID_MARGIN - gap
+            gap = LID_MARGIN
+        local = _to_parent(layout, rest, lid, delta)
+        if not _shift_position_controller(out, lid, local):
+            continue
+        where = (f"({delta[0]:+.4f}, {delta[1]:+.4f}, {delta[2]:+.4f}), the "
+                 f"vector from the host's eyeball to this one")
+        behind = "" if gap is None else f" - it sits {gap:.4f} behind the face there"
+        lines.append(f"{lid.name}: moved onto the head's own eye by {where}{behind}")
 
-    if not names:
+    if not lines:
         return mdl, mdx, []
-    where = "forward" if shift > 0 else "back"
-    return out, current_mdx, [
-        f"eyelids: moved {', '.join(names)} {where} {abs(shift):.4f} to sit "
-        f"{want:.4f} behind the new face, as they do on the host - they are what "
-        f"blinks"
-    ]
+    return bytes(out), mdx, ["eyelids: they are what blinks"] + lines
+
+
+def _own_eyes(layout, node, rest) -> list:
+    """The replacement's own eyeballs, as model-space point sets."""
+    from kmdlswap import edit as kedit
+
+    P = kmdx.positions(layout, node)
+    try:
+        faces = [f.vertices for f in kedit.extract(layout, node).faces]
+    except Exception:
+        return []
+    islands = find_eyes(P, faces)
+    if not islands:
+        return []
+    r = rest[node.index]
+    R = np.asarray(r.rotation, dtype=float)
+    t = np.asarray(r.position, dtype=float)
+    out = []
+    for island in islands:
+        A = np.asarray([P[i][:3] for i in island], dtype=float)
+        out.append((R @ A.T).T + t)
+    return out
+
+
+def _to_parent(layout, rest, node, delta) -> tuple:
+    """A model-space translation in the space the node's position is stored in.
+
+    Which is the *parent's*, not the node's own - a node's position places it
+    inside its parent. Using the node's own rotation happens to agree whenever
+    the node carries no local rotation of its own, and quietly does not when it
+    does.
+    """
+    parent = getattr(node, "parent", None)
+    R = (np.asarray(rest[parent].rotation, dtype=float)
+         if parent is not None and parent in rest else np.eye(3))
+    return tuple(float(v) for v in R.T @ np.asarray(delta, dtype=float))
 
 
 def _shift_position_controller(mdl: bytearray, node, delta) -> bool:
