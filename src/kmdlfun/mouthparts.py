@@ -560,18 +560,14 @@ def _lid_plan(layout, node, host_layout) -> dict:
     # What the host keeps between its own lids and its own skin. Matching that
     # is the invariant the teeth, the eyes and the brows are all held to, and a
     # fixed constant here was the one place it was not applied.
+    # A constant, and not the host's own figure, which is the one place in this
+    # module where matching the host is the wrong move. Measured over every lid
+    # vertex his lids clear his skin by 0.0002 - they graze it and get away with
+    # it, because they were modelled for that face and follow it. A lid borrowed
+    # onto another face crosses its surface at different angles and needs real
+    # room, which is what the game showed: a sliver of lid above one eyebrow at
+    # a clearance the host is perfectly happy with.
     margin = LID_MARGIN
-    host_node = next((n for n in kparts.mesh_nodes(host_layout)
-                      if n.name.lower() == node.name.lower()), None)
-    if host_node is not None and host_lids:
-        host_face = _model_space(host_layout, host_node, host_rest)
-        if len(host_face):
-            host_mid = (float(host_face[:, 1].min())
-                        + float(host_face[:, 1].max())) / 2
-            gaps = [g for g in (_local_clearance(host_face, pts, host_mid)
-                                for _n, pts in host_lids.values()) if g is not None]
-            if gaps:
-                margin = min(gaps)
 
     rest = space.rest_pose(layout)
     here = next((n for n in kparts.mesh_nodes(layout)
@@ -629,10 +625,14 @@ def _lid_plan(layout, node, host_layout) -> dict:
         #
         # So the lid is pulled back toward the host's margin only as far as the
         # eye allows, and whichever wall it ends against is reported.
-        gap = _local_clearance(face, final, mid_y)
+        # Back to the margin the host keeps from its own skin. The eyeball is
+        # behind the lid and a little overlap there is hidden; the skin is in
+        # front and a lid through it is the pale patch that was reported. So the
+        # skin wins, and the pull is capped at the host's own figure so a lid can
+        # never sink into the head.
+        gap = _lid_clearance(face, final)
         if gap is not None and gap < margin:
-            room = _eye_room(final, new_balls[side], pivot)
-            pull = min(margin - gap, max(0.0, room))
+            pull = min(margin - gap, margin)
             delta[1] -= pull
             gap += pull
         # And if neither wall can be honoured, this head cannot wear this lid.
@@ -674,18 +674,89 @@ def _own_eyes(layout, node, rest) -> list:
     return out
 
 
-def _eye_room(lid: np.ndarray, ball: np.ndarray, pivot) -> float:
+# How much of the blink to check when asking whether the eye comes through the
+# lid: the resting pose, the deepest key, and three steps between.
+BLINK_STEPS = 5
+
+
+def _pierces(lid: np.ndarray, ball: np.ndarray, pivot: np.ndarray) -> bool:
+    """Is any of the eye outside the lid - poking through it?
+
+    Ray-wise from the pivot the lid turns about: an eye vertex is through when
+    every lid vertex near its own direction is closer in than it is.
+    """
+    L = lid - pivot
+    B = ball - pivot
+    lr = np.linalg.norm(L, axis=1)
+    br = np.linalg.norm(B, axis=1)
+    if not len(lr) or not len(br):
+        return False
+    Ln = L / np.where(lr[:, None] > 1e-9, lr[:, None], 1.0)
+    Bn = B / np.where(br[:, None] > 1e-9, br[:, None], 1.0)
+    for i in range(len(B)):
+        near = lr[Ln @ Bn[i] > 0.75]
+        if len(near) and near.max() < br[i] - 1e-5:
+            return True
+    return False
+
+
+def _lid_clearance(face: np.ndarray, lid: np.ndarray, k: int = 4) -> float | None:
+    """The tightest gap between a lid and the skin, over *every* lid vertex.
+
+    `_local_clearance` samples the face in a fixed window and skips any vertex
+    that finds nothing in it. For teeth, which sit behind a dense lip, that is
+    harmless. For a lid at the edge of the brow it is not: the vertices that
+    stand proudest are exactly the ones over sparse geometry, so they were the
+    ones being skipped, and a lid reporting 0.0098 of clearance was poking
+    through the skin in game.
+
+    So this asks the nearest few face vertices in x and z instead of a window,
+    which cannot skip anything.
+    """
+    if not len(face) or not len(lid):
+        return None
+    flat = face[:, [0, 2]]
+    worst = None
+    for q in lid:
+        d = np.hypot(flat[:, 0] - q[0], flat[:, 1] - q[2])
+        near = face[np.argsort(d)[:k]]
+        gap = float(near[:, 1].max() - q[1])
+        if worst is None or gap < worst:
+            worst = gap
+    return worst
+
+
+def _eye_room(lid: np.ndarray, ball: np.ndarray, pivot, blink: float = 0.671) -> float:
     """How far a lid can be pulled back before the eye it covers comes through.
 
-    Measured the way the blink moves: both as distances from the pivot the lid
-    turns about, so the answer holds through the sweep and not only at rest.
+    Searched rather than derived from radii. An earlier version compared the
+    lid's innermost reach against the eyeball's outermost, which is negative for
+    any lid that hugs a sphere at all closely - it forbade every pull-back while
+    the eye was in fact nowhere through the lid, and left a lid grazing the skin
+    with 0.0002 to spare, showing through it in game.
+
+    Checked through the sweep, not only at rest, because a lid that clears the
+    eye open can still catch it halfway down.
     """
     pivot = np.asarray(pivot, dtype=float)
-    lid_reach = np.linalg.norm(lid - pivot, axis=1)
-    ball_reach = np.linalg.norm(ball - pivot, axis=1)
-    if not len(lid_reach) or not len(ball_reach):
+    if not len(lid) or not len(ball):
         return 0.0
-    return float(np.percentile(lid_reach, 10) - np.percentile(ball_reach, REACH))
+    angles = np.linspace(0.0, -blink, BLINK_STEPS)
+    best = 0.0
+    for step in np.arange(0.0005, 0.0105, 0.0005):
+        moved = lid - np.array([0.0, step, 0.0])
+        here = pivot - np.array([0.0, step, 0.0])
+        ok = True
+        for a in angles:
+            c, sn = np.cos(a), np.sin(a)
+            R = np.array([[1.0, 0.0, 0.0], [0.0, c, -sn], [0.0, sn, c]])
+            if _pierces((R @ (moved - here).T).T + here, ball, here):
+                ok = False
+                break
+        if not ok:
+            break
+        best = float(step)
+    return best
 
 
 def _to_parent(layout, rest, node, delta) -> tuple:
