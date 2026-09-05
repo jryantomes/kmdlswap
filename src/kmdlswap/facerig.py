@@ -187,19 +187,44 @@ def _brow_bones(host_influences, unit_host: np.ndarray, skull: int) -> set[int]:
     return {slot for slot, w in tally.items() if w >= strongest * 0.2}
 
 
-def _band_share(host_influences, unit_host: np.ndarray, bones: set[int]) -> float:
-    """What share of the host's own eye band those bones carry."""
+def _band_share(host_influences, unit_host: np.ndarray, bones: set[int],
+                band: tuple[float, float] | None = None) -> float:
+    """What share of one of the host's own bands those bones carry."""
+    band = HOST_EYE_BAND if band is None else band
     total = on = 0.0
     for index, infl in enumerate(host_influences):
         if index >= len(unit_host) or unit_host[index][1] <= FRONT:
             continue
-        if not (HOST_EYE_BAND[0] <= unit_host[index][2] <= HOST_EYE_BAND[1]):
+        if not (band[0] <= unit_host[index][2] <= band[1]):
             continue
         for f in infl:
             total += f.weight
             if f.bone_slot in bones:
                 on += f.weight
     return (on / total) if total else 0.0
+
+
+def _brow_mix(host_influences, unit_host: np.ndarray, bones: set[int],
+              band: tuple[float, float], left: bool) -> dict[int, float]:
+    """How the host splits its brow band between brow bones, on one side.
+
+    Per side, because the brows are a left bone and a right one, and handing a
+    vertex the average of the two would drive it from the wrong side of the
+    face.
+    """
+    tally: dict[int, float] = {}
+    for index, infl in enumerate(host_influences):
+        if index >= len(unit_host) or unit_host[index][1] <= FRONT:
+            continue
+        if not (band[0] <= unit_host[index][2] <= band[1]):
+            continue
+        if (unit_host[index][0] < 0.5) != left:
+            continue
+        for f in infl:
+            if f.bone_slot in bones:
+                tally[f.bone_slot] = tally.get(f.bone_slot, 0.0) + f.weight
+    scale = sum(tally.values())
+    return {slot: w / scale for slot, w in tally.items()} if scale else {}
 
 
 def rebalance(
@@ -324,7 +349,59 @@ def rebalance(
                 out[index] = merged
                 eyed += 1
 
-    if not moved and not eyed:
+    # And the brows' own band, held *up* to the host's share. The cap above has
+    # the skull take work back from the brows over the eye; this is the same
+    # measurement one band higher, where the failure runs the other way.
+    # Proximity gives a converted head's brow ridge whatever bone is nearest,
+    # and on a head whose brow sits higher than the host's that is the skull:
+    # measured on `h_mercf01_`, 16% of her brow band sat on brow bones against
+    # Carth's 39%, and in game her brows barely moved.
+    # The brow band is as tall as the eye band and sits directly on top of it,
+    # on each head in its own frame. Running it to the top of the skull instead
+    # reads 15% on the host where the brow region itself is 39%, because most of
+    # a skull is skull and the average drowns the brows.
+    browed = 0
+    brow_band = (band[1], band[1] + (band[1] - band[0]))
+    host_brow_band = (HOST_EYE_BAND[1],
+                      HOST_EYE_BAND[1] + (HOST_EYE_BAND[1] - HOST_EYE_BAND[0]))
+    brow_want = (_band_share(host_influences, unit_h, brow, host_brow_band)
+                 if brow else 0.0)
+    mixes = {}
+    if brow and brow_want > 0:
+        mixes = {
+            side: _brow_mix(host_influences, unit_h, brow, host_brow_band, side)
+            for side in (True, False)
+        }
+    if mixes:
+        for index in range(len(P)):
+            if not (brow_band[0] <= float(unit_p[index][2]) <= brow_band[1]):
+                continue
+            if float(unit_p[index][1]) <= FRONT:
+                continue
+            have = {f.bone_slot: f.weight for f in out[index]}
+            total = sum(have.values()) or 1.0
+            on_brow = sum(w for s, w in have.items() if s in brow) / total
+            if on_brow >= brow_want - 0.02:
+                continue
+            spare = sum(w for s, w in have.items() if s not in brow)
+            if spare <= 1e-9:
+                continue
+            take = min((brow_want - on_brow) * total, spare)
+            # Taken from everything that is not a brow, in proportion, so a
+            # vertex that is mostly skull gives up mostly skull.
+            pool = {s: (w if s in brow else w - take * w / spare)
+                    for s, w in have.items()}
+            mix = mixes[bool(unit_p[index][0] < 0.5)] or mixes[True] or mixes[False]
+            if not mix:
+                continue
+            for slot, part in mix.items():
+                pool[slot] = pool.get(slot, 0.0) + take * part
+            merged = _finalise(pool, max_influences)
+            if merged:
+                out[index] = merged
+                browed += 1
+
+    if not moved and not eyed and not browed:
         return influences, []
     lines = []
     if moved:
@@ -337,6 +414,11 @@ def rebalance(
         lines.append(
             f"eye rig: {eyed} vertices around the eyes held to the host's own brow "
             f"share ({want:.0%}) - the brow was carrying the eye socket"
+        )
+    if browed:
+        lines.append(
+            f"brow rig: {browed} vertices of the brow band lifted to the host's own "
+            f"brow share ({brow_want:.0%}) - the skull was carrying the brows"
         )
     return out, lines
 
