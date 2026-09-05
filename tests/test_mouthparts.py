@@ -214,3 +214,40 @@ class TestDeepeningAgainstTheGame:
         assert kv.check(kl.parse(deeper, mdx)).ok
         after = km.blink_angle(deeper, mdx)
         assert abs(after - angle * 1.30) < 0.5, (angle, after)
+
+
+class TestLidsAcrossHeads:
+    """The lid resize is bounded, and the bounds were measured.
+
+    Across the 34 Jade Empire heads that build cleanly onto `p_carthh`, the
+    factor each needs runs 0.737 to 1.282, median 1.107. An earlier floor of
+    0.80 clipped exactly the three child heads - all of which want about 0.74 -
+    and left their lids a fifth too big for the eyes they cover, which is the
+    clipping the resize exists to prevent.
+    """
+
+    @staticmethod
+    def test_the_bounds_admit_every_measured_head():
+        from kmdlfun import mouthparts as km
+
+        low, high = km.LID_SCALE
+        assert low <= 0.737, "the child heads want 0.74 and would be clamped"
+        assert high >= 1.282, "the widest measured head would be clamped"
+        # Still a guard, not an open door: a factor this far out means the two
+        # eyes are not comparable and the answer is not a different lid.
+        assert low >= 0.5 and high <= 2.0
+
+    @staticmethod
+    def test_lids_are_not_kept_when_they_cannot_be_seated():
+        """A head with no eyes of its own leaves the lids nowhere to go. Keeping
+        them anyway strands two rigid meshes at the *host's* eye position on a
+        face that has none there - a lid hung on a cheek."""
+        from kmdlfun import mouthparts as km
+
+        class Node:
+            name = "Head"
+
+        class Empty:
+            nodes = ()
+
+        assert km.can_seat_eyelids(Empty(), Node()) is False

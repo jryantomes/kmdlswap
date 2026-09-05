@@ -369,6 +369,8 @@ def _write_into(layout, node, mesh, pack, reshape, hide, r: HeadResult):
         keep_mouth = not getattr(mesh, "has_own_mouth", False)
 
         after = kl.parse(mdl, mdx)
+        # Only worth keeping the lids if they can actually be put somewhere.
+        blinks = kmouth.can_seat_eyelids(after, node, layout)
         wanted = list(hide) if hide else [
             # Everything visible except the node just replaced. These are shaped
             # for the face that is gone, so they float.
@@ -392,7 +394,7 @@ def _write_into(layout, node, mesh, pack, reshape, hide, r: HeadResult):
             # corrects depth and nothing else, and both predate the local
             # clearance measurement they would have needed. A lid belongs to an
             # eye, not to a face - see `kmouth.seat_eyelids`.
-            and not kmouth.is_eyelid(n.name)
+            and not (blinks and kmouth.is_eyelid(n.name))
         ]
         mdl, hidden = kvis.hide_nodes(after, mdl, wanted)
         if hidden:

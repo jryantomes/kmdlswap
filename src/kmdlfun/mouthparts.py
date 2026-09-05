@@ -392,8 +392,15 @@ def find_eyes(positions, faces, *, band=(0.50, 0.70)):
 LID_MARGIN = 0.0010
 
 # How far a lid may be resized to fit the eye it covers. A factor outside this
-# says the two eyes are not comparable and the answer is not a bigger lid.
-LID_SCALE = (0.80, 1.50)
+# says the two eyes are not comparable and the answer is not a different lid.
+#
+# The bounds are measured, not chosen. Across the 34 Jade Empire heads that
+# build cleanly onto `p_carthh`, the factor each one needs runs 0.737 to 1.282
+# with a median of 1.107. An earlier floor of 0.80 clipped exactly the three
+# child heads - `h_boy01_`, `h_boy01gh_` and `h_boy03_` all want about 0.74 -
+# and left their lids a fifth too big for the eyes they cover, which is the
+# clipping this resize exists to prevent.
+LID_SCALE = (0.70, 1.50)
 
 
 def seat_eyelids(layout, mdl: bytes, mdx: bytes, node, host_layout=None):
@@ -479,6 +486,19 @@ def seat_eyelids(layout, mdl: bytes, mdx: bytes, node, host_layout=None):
     if not lines:
         return mdl, mdx, []
     return bytes(out), mdx, ["eyelids: they are what blinks"] + lines
+
+
+def can_seat_eyelids(layout, node, host_layout=None) -> bool:
+    """Whether the host's lids can be placed on this head at all.
+
+    They can only be carried onto eyes that can be found. A head with none of
+    its own - `h_cappy01_` and `h_eatenf1_` among the Jade heads - leaves the
+    lids nowhere to go, and keeping them anyway strands two rigid meshes at the
+    *host's* eye position on a face that has none there. Better to hide them and
+    lose the blink than to hang them on the cheek.
+    """
+    host_layout = host_layout if host_layout is not None else layout
+    return bool(eyelids(layout)) and bool(_lid_plan(layout, node, host_layout))
 
 
 def _lid_plan(layout, node, host_layout) -> dict:
