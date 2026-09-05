@@ -560,3 +560,37 @@ class TestBuiltIntoAHost:
         from kmdlfun import jade
 
         assert jade.as_head("no_such_head", jade_path, k1_path, "p_carthh") is None
+
+
+class TestHostsAreNotAllOneSize:
+    @staticmethod
+    def test_a_smaller_host_still_takes_the_head(k1_path, jade_path):
+        """Carth's head node is 0.161x0.225x0.281 and Bastila's is
+        0.137x0.187x0.231, so a Jade head that drops straight into his is 1.4x
+        too big for hers. It failed the size check outright and the creator
+        could offer only male hosts."""
+        from kmdlfun import jade
+
+        made = jade.as_head("h_mercf01_", jade_path, k1_path, "P_BastilaH")
+
+        assert made is not None, "a smaller host was refused the head"
+        mdl_at, mdx_at, _texture = made
+        assert mdl_at.is_file() and mdx_at.is_file()
+
+    @staticmethod
+    def test_a_host_with_room_is_not_shrunk(k1_path, jade_path):
+        """Fitting is a fallback, not the default: a host the head already fits
+        keeps it at full size."""
+        import numpy as np
+
+        from kmdlfun import jade, parts as kparts, space
+        from kmdlfun import mouthparts as km
+        from kmdlswap import layout as kl
+
+        made = jade.as_head("h_mercf01_", jade_path, k1_path, "p_carthh")
+        lay = kl.parse(made[0].read_bytes(), made[1].read_bytes())
+        node = next(n for n in kparts.mesh_nodes(lay) if n.name.lower() == "head")
+        P = km._model_space(lay, node, space.rest_pose(lay))
+        height = float(P[:, 2].max() - P[:, 2].min())
+
+        assert height > 0.27, f"the head was fitted when it did not need to be ({height:.3f})"

@@ -579,6 +579,16 @@ def as_head(resref: str, jade_install, install, host: str, *, root=None):
         to_pack(entry, pack, install=jade_install)
         result = headbuild.run(str(pack), install=str(install), host=host,
                                node="Head", repair=True, hide=[], build=True)
+        # Hosts are not all the same size. Carth's head node is
+        # 0.161x0.225x0.281 and Bastila's is 0.137x0.187x0.231, so a Jade head
+        # that drops straight into his is 1.4x too big for hers and would clip
+        # through the body. Fitting scales it onto the node, which is what the
+        # spec's own failure message says to do - but only reach for it when
+        # the head does not fit, so a host with room keeps its full size.
+        if any(f.check == "size" for f in result.failures):
+            result = headbuild.run(str(pack), install=str(install), host=host,
+                                   node="Head", repair=True, hide=[], fit=True,
+                                   build=True)
     except Exception:  # noqa: BLE001
         return None
     if result.error or result.failures or result.mdl is None:
