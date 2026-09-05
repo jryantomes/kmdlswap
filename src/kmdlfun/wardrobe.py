@@ -55,10 +55,15 @@ class Head:
     row: int
     look: str = "unknown"
     game: str = ""
+    # "" for a head this install already has, "k2" for one borrowed from KOTOR
+    # II, "jade" for one that has to be converted before it is a head at all.
+    source: str = ""
 
     @property
     def label(self) -> str:
-        return self.model if not self.game else f"{self.model}  (KOTOR II)"
+        if not self.game:
+            return self.model
+        return f"{self.model}  ({'Jade Empire' if self.source == 'jade' else 'KOTOR II'})"
 
 
 @dataclass
@@ -325,6 +330,28 @@ def _classify(cat: Catalogue, install, library) -> None:
                  for h in cat.heads]
 
 
+def jade_heads(jade_install, *, limit: int | None = None) -> list[Head]:
+    """Heads Jade Empire has, which no KOTOR install does.
+
+    Different from `heads_from` in the one way that matters: a KOTOR II head is
+    already a KOTOR model and only has to be copied, while a Jade head is not a
+    model this engine can load at all. Every structure in the format is a
+    different size, so it has to be converted to geometry and built into a host
+    head before the game has anything to name. The row is filled in at build
+    time like any other borrowed head.
+    """
+    from . import jade as kjade
+
+    try:
+        entries = kjade.catalogue(jade_install, kinds=(kjade.HEAD,))
+    except Exception:  # noqa: BLE001 - no Jade install is not an error
+        return []
+    if limit is not None:
+        entries = entries[:limit]
+    return [Head(model=e.resref, row=-1, look="unknown",
+                 game=str(jade_install), source="jade") for e in entries]
+
+
 def heads_from(other_install, *, avoiding=(), library=None) -> list[Head]:
     """Heads the *other* game has that this one does not.
 
@@ -360,4 +387,4 @@ def heads_from(other_install, *, avoiding=(), library=None) -> list[Head]:
     # Row -1: it has no row in *this* game's table yet. `register_look` adds one
     # when the character is created.
     return [Head(model=m, row=-1, look=looks.get(m, "unknown"),
-                 game=str(other_install)) for m in names]
+                 game=str(other_install), source="k2") for m in names]

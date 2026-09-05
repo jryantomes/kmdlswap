@@ -499,6 +499,96 @@ def _install_of(entry: Entry):
 # --- pictures ---------------------------------------------------------------
 
 
+def scene(entry: Entry, *, install=None, scale: float | None = None):
+    """A drawable, *textured* scene for one Jade model.
+
+    `render.from_mesh` draws flat colour, which is enough to tell one silhouette
+    from another and not enough to choose a face: Jade heads carry their eyes,
+    brows and mouth in the texture, and untextured they are all the same grey
+    mask. The atlas is not in the model - a mesh names a material by number and
+    both the material and its image live in the archives - so this is the one
+    place that has to reach back into the install to draw.
+    """
+    import io
+
+    import numpy as _np
+    from PIL import Image
+
+    from . import render as krender
+
+    if scale is None:
+        scale = scale_for(entry.kind)
+    found = mesh(*read(entry), scale=scale)
+    built = krender.from_mesh(found.positions, found.faces)
+    if not len(built.faces) or not found.uvs:
+        return built
+
+    got = texture_for(install or _install_of(entry), found)
+    if not got:
+        return built
+    _name, data = got
+    try:
+        with Image.open(io.BytesIO(data)) as im:
+            image = _np.asarray(im.convert("RGB"), dtype=_np.uint8)
+    except Exception:  # noqa: BLE001 - an unreadable atlas is not worth raising
+        return built
+
+    uvs = _np.asarray(found.uvs, dtype=_np.float64)
+    if len(uvs) != len(built.positions):
+        return built
+    built.uvs = uvs
+    built.textures = [image]
+    built.face_texture = _np.zeros(len(built.faces), dtype=_np.int32)
+    return built
+
+
+# Bump when the build pipeline changes what a converted head looks like, so
+# cached ones are redrawn rather than shown stale.
+BUILD_VERSION = "v1"
+
+
+def as_head(resref: str, jade_install, install, host: str, *, root=None):
+    """Convert one Jade head and build it into `host`, cached on disk.
+
+    A KOTOR II head can be copied into a character as it is; a Jade head cannot
+    be loaded by this engine at all, so "using" one means running the whole
+    conversion - geometry out, pack in, weights transferred, mouth split, lids
+    seated - before there is a model to name. That takes a few seconds, which is
+    fine once and not fine every time a picker is clicked, so the result is kept.
+
+    Returns `(mdl_path, mdx_path, texture_path | None)`, or None if the head
+    will not build.
+    """
+    from . import headbuild, thumbs as kthumbs
+
+    folder = Path(root) if root else Path(kthumbs.cache_root()).parent / "heads" / BUILD_VERSION
+    out = folder / f"{resref.strip('_').lower()}-{host.lower()}"
+    mdl, mdx = out / f"{host}.mdl", out / f"{host}.mdx"
+    if mdl.is_file() and mdx.is_file():
+        textures = [p for p in out.glob("*.tga")]
+        return mdl, mdx, (textures[0] if textures else None)
+
+    import tempfile
+
+    entry = next((e for e in catalogue(jade_install, kinds=(HEAD,))
+                  if e.resref.lower() == resref.lower()), None)
+    if entry is None:
+        return None
+    pack = Path(tempfile.mkdtemp()) / "pack"
+    try:
+        to_pack(entry, pack, install=jade_install)
+        result = headbuild.run(str(pack), install=str(install), host=host,
+                               node="Head", repair=True, hide=[], build=True)
+    except Exception:  # noqa: BLE001
+        return None
+    if result.error or result.failures or result.mdl is None:
+        return None
+    out.mkdir(parents=True, exist_ok=True)
+    written = headbuild.write(result, out, host)
+    textures = [p for p in written if p.suffix.lower() == ".tga"]
+    return mdl, mdx, (textures[0] if textures else None)
+
+
 def thumbnail(entry: Entry, *, size: int = 96, root=None):
     """Draw one Jade model's face and cache it, or None.
 
@@ -515,17 +605,18 @@ def thumbnail(entry: Entry, *, size: int = 96, root=None):
     digest = hashlib.md5(mdl_bytes + (mdx_bytes or b"")).hexdigest()
     # The same scale the pack would use, so the picture and the thing it
     # promises are the same size.
-    folder = Path(root) if root else Path(kthumbs.cache_root()) / "jade"
+    # `jade-v2` because v1 drew these flat: the key is the model's bytes, which
+    # have not changed, so a textured redraw needs a new folder to land in.
+    folder = Path(root) if root else Path(kthumbs.cache_root()) / "jade-v2"
     out = folder / f"{digest}-{size}.png"
     if out.is_file():
         return out
 
     try:
-        found = mesh(mdl_bytes, mdx_bytes, scale=scale_for(entry.kind))
-        scene = krender.from_mesh(found.positions, found.faces)
-        if not len(scene.faces):
+        built = scene(entry)
+        if not len(built.faces):
             return None
-        pixels = krender.render(scene, size=size, cull=True)
+        pixels = krender.render(built, size=size, cull=True)
     except Exception:  # noqa: BLE001 - a missing face is not worth raising over
         return None
 

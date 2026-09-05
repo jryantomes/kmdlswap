@@ -25,6 +25,14 @@ def jade_path():
 
 
 @pytest.fixture(scope="module")
+def k1_path():
+    found = installs.detect().get(installs.K1)
+    if not found:
+        pytest.skip("no KOTOR install on this machine")
+    return found
+
+
+@pytest.fixture(scope="module")
 def catalogue(jade_path):
     return jade.catalogue(jade_path)
 
@@ -498,3 +506,57 @@ def test_every_head_in_the_catalogue_gets_its_own_texture_name():
 
     clashing = {k: v for k, v in names.items() if len(v) > 1}
     assert not clashing, f"texture names collide: {clashing}"
+
+
+class TestDrawnWithItsTexture:
+    """A Jade head carries its eyes, brows and mouth in the atlas.
+
+    Drawn flat they are all the same grey mask, which is no help at all when the
+    picker's whole job is choosing a face.
+    """
+
+    @staticmethod
+    def test_a_scene_carries_the_atlas(a_head):
+        from kmdlfun import jade
+
+        built = jade.scene(a_head)
+
+        assert built.textured, "the head would draw as flat grey"
+        assert built.uvs is not None and len(built.uvs) == len(built.positions)
+        assert built.textures[0].ndim == 3
+
+    @staticmethod
+    def test_it_still_draws_without_one(a_head, monkeypatch):
+        """An unreadable atlas costs the texture, not the picture."""
+        from kmdlfun import jade
+
+        monkeypatch.setattr(jade, "texture_for", lambda *_a, **_k: None)
+        built = jade.scene(a_head)
+
+        assert len(built.faces) and not built.textured
+
+
+class TestBuiltIntoAHost:
+    @staticmethod
+    def test_it_builds_and_then_comes_from_the_cache(a_head, k1_path, jade_path):
+        """Converting takes a few seconds - fine once, not fine every time a
+        picker is clicked."""
+        import time
+
+        from kmdlfun import jade
+
+        made = jade.as_head(a_head.resref, jade_path, k1_path, "p_carthh")
+        assert made is not None
+        mdl_at, mdx_at, _texture = made
+        assert mdl_at.is_file() and mdx_at.is_file()
+
+        start = time.perf_counter()
+        again = jade.as_head(a_head.resref, jade_path, k1_path, "p_carthh")
+        assert again[0] == mdl_at
+        assert time.perf_counter() - start < 0.5, "the build was not cached"
+
+    @staticmethod
+    def test_an_unknown_head_is_refused_quietly(k1_path, jade_path):
+        from kmdlfun import jade
+
+        assert jade.as_head("no_such_head", jade_path, k1_path, "p_carthh") is None

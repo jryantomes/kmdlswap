@@ -2064,3 +2064,65 @@ class TestTheLoadingShade:
         assert not app._busy_reasons, "an error left the window shaded"
 
         assert "could not read the parts" in app.log.get("1.0", "end")
+
+
+
+@pytest.fixture(scope="module")
+def k1_path():
+    from kmdlfun import installs
+
+    found = installs.detect().get(installs.K1)
+    if not found:
+        pytest.skip("no KOTOR install on this machine")
+    return found
+
+
+@pytest.fixture(scope="module")
+def jade_path():
+    from kmdlfun import installs
+
+    found = installs.detect().get(installs.JADE)
+    if not found:
+        pytest.skip("no Jade Empire install on this machine")
+    return found
+
+
+class TestAJadeHeadInTheCreator:
+    @staticmethod
+    def test_it_never_ships_under_the_host_name(tmp_path, k1_path, jade_path):
+        """The conversion replaces one node inside a real KOTOR head, so what
+        comes out is that whole head. Writing it back as `p_carthh` would hand
+        this face to Carth and to everyone else who shares his head."""
+        from kmdlfun.gui import App, JADE_HOST
+
+        made = App._ship_jade_head("h_bandit04_", jade_path, k1_path,
+                                   "myguy", tmp_path)
+        assert made, "the head would not convert"
+        model, notes = made
+
+        assert model == "myguyhd"
+        assert model.lower() != JADE_HOST.lower()
+        assert not (tmp_path / f"{JADE_HOST}.mdl").exists(), "it overwrote the host"
+        assert (tmp_path / "myguyhd.mdl").is_file()
+        assert (tmp_path / "myguyhd.mdx").is_file()
+        assert any("shipped as myguyhd" in n for n in notes)
+
+    @staticmethod
+    def test_the_atlas_travels_with_it(tmp_path, k1_path, jade_path):
+        """A row can only name a texture the game can find, and a Jade atlas is
+        in neither game's files until it is written out."""
+        from kmdlfun.gui import App
+
+        model, notes = App._ship_jade_head("h_bandit04_", jade_path, k1_path,
+                                           "myguy", tmp_path)
+        assert list(tmp_path.glob("*.tga")), notes
+
+    @staticmethod
+    def test_a_resref_too_long_is_cut_to_fit(tmp_path, k1_path, jade_path):
+        """16 characters is the resref field, and a model the game cannot name
+        is a model it cannot load."""
+        from kmdlfun.gui import App
+
+        model, _notes = App._ship_jade_head("h_bandit04_", jade_path, k1_path,
+                                            "a_very_long_character_name", tmp_path)
+        assert len(model) <= 16

@@ -189,3 +189,51 @@ def test_asking_for_something_absent_gives_nothing_rather_than_raising(catalogue
     assert catalogue.head("no_such_head") is None
     assert catalogue.outfit("no_such_outfit") is None
     assert catalogue.pairs_with(None, head=catalogue.head("p_carthh")) is False
+
+
+
+@pytest.fixture(scope="module")
+def jade_install():
+    from kmdlfun import installs
+
+    found = installs.detect().get(installs.JADE)
+    if not found:
+        pytest.skip("no Jade Empire install on this machine")
+    return found
+
+
+class TestJadeHeadsOnOffer:
+    """Jade heads reach the character creator by a different road to KOTOR II's.
+
+    A KOTOR II head is already a model this engine loads and only has to be
+    copied. A Jade head is not - every structure in that format is a different
+    size - so it has to be converted and built into a host before the game has
+    anything to name.
+    """
+
+    @staticmethod
+    def test_they_are_offered_and_marked(jade_install):
+        from kmdlfun import wardrobe
+
+        heads = wardrobe.jade_heads(jade_install)
+
+        assert len(heads) > 100
+        assert all(h.source == "jade" for h in heads)
+        assert all(h.game == str(jade_install) for h in heads)
+        assert all(h.row == -1 for h in heads), "none of them has a row yet"
+
+    @staticmethod
+    def test_the_label_says_which_game(jade_install):
+        """Two borrowed games, and picking a KOTOR II head is a copy while
+        picking a Jade one is a three-second conversion. Worth telling apart."""
+        from kmdlfun import wardrobe
+
+        head = wardrobe.jade_heads(jade_install)[0]
+        assert "Jade Empire" in head.label
+        assert "KOTOR II" not in head.label
+
+    @staticmethod
+    def test_no_jade_install_is_not_an_error():
+        from kmdlfun import wardrobe
+
+        assert wardrobe.jade_heads(r"X:\not\a\game") == []

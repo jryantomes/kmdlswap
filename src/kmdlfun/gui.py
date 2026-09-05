@@ -50,6 +50,11 @@ SAME_AS_HOST = "same body as the host"
 # Not `PARTS`: that name already means the body parts of a mesh in `parts.py`,
 # and the two are nothing like each other.
 PART_KINDS = ("body", "outfit", "head")
+
+# The head model a Jade head is built into. The conversion replaces one mesh
+# node in a real KOTOR head, so it needs one to go into, and this is the head
+# every Jade conversion in this project has been built onto and tested against.
+JADE_HOST = "p_carthh"
 PART_TITLES = {"body": "Body", "outfit": "Wardrobe", "head": "Head"}
 SEEN_IN_GAME = "\u2713"          # this body already wears this in vanilla
 PREVIEW_SIZE = 260
@@ -1131,9 +1136,10 @@ class App(ttk.Frame):
         # The other game is read here, on the Tk thread, and handed over as a
         # plain string - the same rule the scan learned the hard way.
         other = self.install2.get().strip()
-        if getattr(self, "_catalogue_for", None) == (install, other):
+        jade_at = self.jade.get().strip()
+        if getattr(self, "_catalogue_for", None) == (install, other, jade_at):
             return
-        self._catalogue_for = (install, other)
+        self._catalogue_for = (install, other, jade_at)
         self._busy("catalogue", "reading heads, bodies and outfits")
 
         def work():
@@ -1155,6 +1161,10 @@ class App(ttk.Frame):
                     # picker's male/female filter hides every one of them.
                     for head in borrowed:
                         cat.looks[head.model.lower()] = head.look
+                if jade_at:
+                    # Jade heads are not models this engine can load; each is
+                    # converted and built when it is picked. See `jade.as_head`.
+                    cat.heads.extend(kwardrobe.jade_heads(jade_at))
                 self.events.put(("catalogue", cat))
             except Exception as exc:  # noqa: BLE001
                 self.events.put(("error", f"could not read the parts: {exc}"))
@@ -1239,11 +1249,12 @@ class App(ttk.Frame):
         if self.catalogue is not None:
             for head in self.catalogue.heads:
                 if getattr(head, "game", ""):
-                    homes[head.model] = head.game
+                    homes[head.model] = (head.game, getattr(head, "source", "k2"))
 
         def work():
             from pathlib import Path as _Path
 
+            from . import jade as kjade
             from . import textures as ktextures
             from . import thumbs as kthumbs
             from .library import ModelLibrary
@@ -1256,7 +1267,16 @@ class App(ttk.Frame):
                     if job != self.part_jobs[key]:
                         return
                     try:
-                        home = homes.get(model)
+                        home, source = homes.get(model, (None, ""))
+                        if source == "jade":
+                            found = kjade.thumbnail(
+                                next(e for e in kjade.catalogue(
+                                    home, kinds=(kjade.HEAD,))
+                                    if e.resref == model))
+                            if found and job == self.part_jobs[key]:
+                                self.events.put(
+                                    ("part_thumb", (key, job, label, str(found))))
+                            continue
                         if home:
                             if home not in elsewhere:
                                 elsewhere[home] = (
@@ -1362,10 +1382,16 @@ class App(ttk.Frame):
         # was swallowed, and picking a borrowed head simply did nothing, which
         # looks like the tool refusing the pairing rather than failing to draw
         # it.
-        home = ""
+        home, source = "", ""
         if head and self.catalogue is not None:
             found = self.catalogue.head(head)
-            home = getattr(found, "game", "") if found is not None else ""
+            if found is not None:
+                home = getattr(found, "game", "")
+                source = getattr(found, "source", "")
+        # A Jade head has to be built before there is anything to draw, and the
+        # build needs a host to go into. The preview shows what will ship, so it
+        # uses the same one the character will.
+        host = JADE_HOST
         self._character_job = getattr(self, "_character_job", 0) + 1
         job = self._character_job
 
@@ -1383,7 +1409,20 @@ class App(ttk.Frame):
                 lib = ModelLibrary(install)
                 look = ktextures.lookup_across([_Path(install)])
                 body = kl.parse(*lib.read(outfit))
-                if head and home:
+                if head and source == "jade":
+                    from . import jade as kjade
+
+                    made = kjade.as_head(head, home, install, host)
+                    if made is None:
+                        return          # a head that will not build, drawn as none
+                    mdl_at, mdx_at, texture_at = made
+                    worn = kl.parse(mdl_at.read_bytes(), mdx_at.read_bytes())
+                    # Its atlas was written beside the build, not into either
+                    # game, so the lookup has to be pointed at that folder.
+                    look = ktextures.lookup_across(
+                        [_Path(install)],
+                        extra=[texture_at.parent] if texture_at else None)
+                elif head and home:
                     worn = kl.parse(*ModelLibrary(home).read(head))
                     # Its textures live over there too, so the lookup has to
                     # reach both installs or the head draws untextured.
@@ -1432,11 +1471,12 @@ class App(ttk.Frame):
 
         # Where the head came from, if it is not this game's. Read here on the
         # Tk thread; the worker gets a plain string.
-        borrowed = ""
+        borrowed, source = "", ""
         if picked["head"] and self.catalogue is not None:
             for head in self.catalogue.heads:
                 if head.model == picked["head"]:
                     borrowed = getattr(head, "game", "") or ""
+                    source = getattr(head, "source", "") or ""
                     break
 
         cfg = dict(
@@ -1455,11 +1495,12 @@ class App(ttk.Frame):
         self.worker = threading.Thread(
             target=self._character_work,
             args=(self.install.get().strip(), self.out_dir.get().strip(), cfg,
-                  borrowed),
+                  borrowed, source),
             daemon=True)
         self.worker.start()
 
-    def _character_work(self, install, out_dir, cfg, borrowed: str = ""):
+    def _character_work(self, install, out_dir, cfg, borrowed: str = "",
+                        source: str = ""):
         try:
             from pathlib import Path as _Path
 
@@ -1467,9 +1508,24 @@ class App(ttk.Frame):
             from . import character as kchar
 
             out = str(_Path(out_dir or ".") / f"character_{cfg['resref']}")
+            made = []
+            if source == "jade" and cfg.get("head"):
+                # A Jade head is converted and built rather than copied, and the
+                # result cannot keep the host's name: it is a whole `p_carthh`
+                # with one node replaced, so shipping it as `p_carthh` would
+                # give every character in the game this face. It goes out under
+                # a name of the character's own.
+                made = self._ship_jade_head(
+                    cfg["head"], borrowed, install, cfg["resref"], _Path(out))
+                if not made:
+                    self.events.put(("error", f"{cfg['head']} would not convert"))
+                    return
+                cfg["head"] = made[0]
+                made = made[1]
+
             ch = kchar.assemble(install, out, **cfg)
-            lines = list(ch.notes)
-            if borrowed and cfg.get("head"):
+            lines = list(ch.notes) + made
+            if borrowed and source != "jade" and cfg.get("head"):
                 lines.extend(self._ship_head(borrowed, cfg["head"], _Path(out)))
             lines.extend(f"still yours: {x}" for x in ch.todo)
             kbuilds.adopt(out, {
@@ -1483,6 +1539,45 @@ class App(ttk.Frame):
             self.events.put(("done_text", lines))
         except Exception as exc:  # noqa: BLE001
             self.events.put(("error", f"{type(exc).__name__}: {exc}"))
+
+    @staticmethod
+    def _ship_jade_head(head: str, jade_install: str, install: str,
+                        resref: str, out):
+        """Build a Jade head into a model of this character's own.
+
+        Returns `(model_name, notes)`, or `()` if it will not build.
+
+        The name matters more than it looks. The conversion replaces one mesh
+        node inside a real KOTOR head, so what comes out is that whole head -
+        and writing it back as `p_carthh` would hand this face to Carth and to
+        everyone else who shares his head. It goes out as `<resref>hd` instead,
+        which is the pattern the hand-built heads in this project already use.
+        """
+        import shutil
+
+        from pathlib import Path as _Path
+
+        from . import jade as kjade
+
+        made = kjade.as_head(head, jade_install, install, JADE_HOST)
+        if made is None:
+            return ()
+        mdl_at, mdx_at, texture_at = made
+        # 16 characters is the resref field, and a model the game cannot name is
+        # a model it cannot load.
+        model = (resref.strip().lower().replace(" ", "_") + "hd")[:16]
+        out = _Path(out)
+        out.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(mdl_at, out / f"{model}.mdl")
+        shutil.copy2(mdx_at, out / f"{model}.mdx")
+        said = [f"converted {head} from Jade Empire and built it into "
+                f"{JADE_HOST}, shipped as {model}"]
+        if texture_at is not None:
+            shutil.copy2(texture_at, out / texture_at.name)
+            said.append(f"its atlas came too: {texture_at.name}")
+        else:
+            said.append("no atlas came across; it will wear the host's texture")
+        return model, said
 
     @staticmethod
     def _ship_head(donor_install: str, head: str, out):
