@@ -176,8 +176,58 @@ class App(ttk.Frame):
         self._build_actions()
         self._apply_mode(announce=True)
 
+        # Nothing can be clicked while the tables are being read. See `_busy`.
+        self._busy_reasons: dict[str, str] = {}
+        self._busy_panel = None
+
         self.after(100, self._drain)
         self._on_effect_change()
+
+    # ---- the shade over everything while files are read --------------------
+
+    def _busy(self, reason: str, text: str) -> None:
+        """Cover the window until `reason` is finished.
+
+        The character creator reads three tables and a model library before it
+        can show anything, and until this the window came up looking ready:
+        pickers empty, buttons live, and a click on one of them queueing work
+        against a catalogue that did not exist yet.
+
+        Reasons are counted rather than a flag, because the install scan and the
+        catalogue load overlap and whichever finished first was clearing the
+        other's shade.
+        """
+        self._busy_reasons[reason] = text
+        if self._busy_panel is None:
+            panel = tk.Frame(self, background="#f4f4f6")
+            inner = ttk.Frame(panel, padding=24)
+            inner.place(relx=0.5, rely=0.45, anchor="center")
+            self._busy_text = ttk.Label(inner, text=text, font=("", 11))
+            self._busy_text.grid(row=0, column=0, pady=(0, 10))
+            bar = ttk.Progressbar(inner, mode="indeterminate", length=280)
+            bar.grid(row=1, column=0)
+            bar.start(12)
+            # Swallow anything aimed at what is underneath. The shade covers the
+            # window, so this is belt and braces for a stray key press.
+            for sequence in ("<Button>", "<Key>", "<MouseWheel>"):
+                panel.bind(sequence, lambda _e: "break")
+            panel.focus_set()
+            self._busy_panel = (panel, bar)
+        panel, _bar = self._busy_panel
+        self._busy_text.config(text=" - ".join(self._busy_reasons.values()))
+        panel.place(x=0, y=0, relwidth=1.0, relheight=1.0)
+        panel.lift()
+
+    def _busy_done(self, reason: str) -> None:
+        self._busy_reasons.pop(reason, None)
+        if self._busy_panel is None:
+            return
+        panel, bar = self._busy_panel
+        if self._busy_reasons:
+            self._busy_text.config(text=" - ".join(self._busy_reasons.values()))
+            return
+        bar.stop()
+        panel.place_forget()
 
     # ---- shared ------------------------------------------------------------
 
@@ -327,6 +377,7 @@ class App(ttk.Frame):
         if getattr(self, "_detecting", False):
             return
         self._detecting = True
+        self._busy("installs", "looking for your games")
         if loud:
             self._say("looking for your games" + (" on every drive" if deep else ""))
 
@@ -1083,6 +1134,7 @@ class App(ttk.Frame):
         if getattr(self, "_catalogue_for", None) == (install, other):
             return
         self._catalogue_for = (install, other)
+        self._busy("catalogue", "reading heads, bodies and outfits")
 
         def work():
             try:
@@ -3617,11 +3669,14 @@ class App(ttk.Frame):
                     self.progress.config(value=100)
                     self.build_btn.config(state="normal")
                 elif kind == "installs":
+                    self._busy_done("installs")
                     self._show_installs(*payload)
                 elif kind == "installs_failed":
                     self._detecting = False
+                    self._busy_done("installs")
                     self._say("could not look for your games: " + payload)
                 elif kind == "catalogue":
+                    self._busy_done("catalogue")
                     self._show_catalogue(payload)
                 elif kind == "part_thumb":
                     self._show_part_thumb(*payload)
@@ -3648,6 +3703,9 @@ class App(ttk.Frame):
                     self.rank_btn.config(state="normal")
                     self._say("could not rank donors: " + payload)
                 elif kind == "error":
+                    # A load that failed must not leave the window shaded.
+                    for reason in list(getattr(self, "_busy_reasons", {})):
+                        self._busy_done(reason)
                     self._say("ERROR: " + payload)
                     self.build_btn.config(state="normal")
         except queue.Empty:

@@ -129,15 +129,13 @@ def _from_portraits(install) -> dict[str, str]:
     and gets party members wrong.
     """
     try:
-        from pykotor.extract.installation import Installation
-        from pykotor.resource.formats.twoda import read_2da
-        from pykotor.resource.type import ResourceType
-
-        inst = Installation(str(install))
+        from . import twoda as k2da
 
         def table(name):
-            found = inst.resource(name, ResourceType.TwoDA)
-            return read_2da(found.data) if found else None
+            try:
+                return k2da._load(install, name)
+            except Exception:  # noqa: BLE001
+                return None
 
         app, heads, port = table("appearance"), table("heads"), table("portraits")
         if not (app and heads and port):
@@ -189,15 +187,13 @@ def _from_body(install) -> dict[str, str]:
     say male, and those are consulted first.
     """
     try:
-        from pykotor.extract.installation import Installation
-        from pykotor.resource.formats.twoda import read_2da
-        from pykotor.resource.type import ResourceType
-
-        inst = Installation(str(install))
+        from . import twoda as k2da
 
         def table(name):
-            found = inst.resource(name, ResourceType.TwoDA)
-            return read_2da(found.data) if found else None
+            try:
+                return k2da._load(install, name)
+            except Exception:  # noqa: BLE001
+                return None
 
         app, heads = table("appearance"), table("heads")
         if not (app and heads):

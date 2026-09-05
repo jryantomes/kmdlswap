@@ -51,13 +51,39 @@ class Registration:
     label: str = ""
 
 
-def _load(install, name: str):
-    """The table as the game would read it: Override first, then the packs."""
+# One `Installation` per install path. Building one is cheap; what is not is
+# what it then does lazily, and throwing it away after a single lookup means
+# paying that again on the next.
+_INSTALLS: dict[str, object] = {}
+
+
+def _installation(install):
     from pykotor.extract.installation import Installation
+
+    key = str(install)
+    if key not in _INSTALLS:
+        _INSTALLS[key] = Installation(key)
+    return _INSTALLS[key]
+
+
+def _load(install, name: str):
+    """The table as the game would read it: Override first, then the packs.
+
+    **Override and the packs, and nothing else.** Left to itself PyKotor also
+    searches every module capsule, and there are 1825 of them in a KOTOR
+    install: one `appearance.2da` lookup spent 12.7 seconds opening archives
+    that cannot contain it, and the character creator made three such lookups
+    before it could show anything. A 2DA lives in Override or in the BIFs, so
+    those are the only two places worth asking.
+    """
+    from pykotor.extract.installation import SearchLocation
     from pykotor.resource.formats.twoda import read_2da
     from pykotor.resource.type import ResourceType
 
-    found = Installation(str(install)).resource(name, ResourceType.TwoDA)
+    found = _installation(install).resource(
+        name, ResourceType.TwoDA,
+        order=[SearchLocation.OVERRIDE, SearchLocation.CHITIN],
+    )
     if found is None:
         raise TwoDAError(f"{name}.2da not found in that install")
     return read_2da(found.data)

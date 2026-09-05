@@ -2006,3 +2006,61 @@ def test_a_head_from_this_game_is_not_marked_borrowed():
     head = kwardrobe.Head(model="p_carthh", row=3)
     assert head.game == ""
     assert head.label == "p_carthh"
+
+
+class TestTheLoadingShade:
+    """Nothing can be clicked while the tables are being read.
+
+    The character creator reads three tables and a model library before it can
+    show anything, and until this the window came up looking ready: pickers
+    empty, buttons live, and a click queueing work against a catalogue that did
+    not exist yet.
+    """
+
+    @staticmethod
+    def test_it_covers_the_window_and_then_goes_away(app):
+        # The app is already loading when it is built, which is the point, so
+        # this tracks one reason of its own rather than the whole set.
+        app._busy("reading", "reading the tables")
+        panel, _bar = app._busy_panel
+
+        assert panel.place_info(), "the shade is not covering anything"
+        assert float(panel.place_info()["relwidth"]) == 1.0
+        assert float(panel.place_info()["relheight"]) == 1.0
+
+        app._busy_done("reading")
+        assert "reading" not in app._busy_reasons, "the shade outlived the work"
+
+    @staticmethod
+    def test_two_loads_do_not_clear_each_other(app):
+        """The install scan and the catalogue load overlap, and whichever
+        finished first was taking the other's shade down with it."""
+        app._busy("installs", "looking for your games")
+        app._busy("catalogue", "reading heads, bodies and outfits")
+        panel, _bar = app._busy_panel
+
+        app._busy_done("installs")
+        assert "catalogue" in app._busy_reasons, "the second load was left unshaded"
+        assert panel.place_info(), "the shade came down early"
+
+        app._busy_done("catalogue")
+        assert "catalogue" not in app._busy_reasons
+
+    @staticmethod
+    def test_it_says_what_is_happening(app):
+        app._busy("catalogue", "reading heads, bodies and outfits")
+        assert "heads" in app._busy_text.cget("text")
+        app._busy_done("catalogue")
+
+    @staticmethod
+    def test_a_failed_load_does_not_leave_it_stuck(app):
+        """An error used to be reported behind a shade nothing would take down,
+        leaving the window unusable until it was restarted."""
+        app._busy("catalogue", "reading heads, bodies and outfits")
+        app.events.put(("error", "could not read the parts: nope"))
+        app._drain()
+        app.update_idletasks()
+
+        assert not app._busy_reasons, "an error left the window shaded"
+
+        assert "could not read the parts" in app.log.get("1.0", "end")
