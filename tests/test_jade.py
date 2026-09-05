@@ -594,3 +594,53 @@ class TestHostsAreNotAllOneSize:
         height = float(P[:, 2].max() - P[:, 2].min())
 
         assert height > 0.27, f"the head was fitted when it did not need to be ({height:.3f})"
+
+
+class TestHeadsThatWearTheirOwnCollar:
+    """A converted head keeps whatever its mesh had below the jaw, and on some
+    of them that is clothing - UV-mapped to a garment in the atlas rather than
+    to skin. It shows as a coloured tube standing out of a KOTOR collar.
+    """
+
+    @staticmethod
+    def test_the_head_seen_in_game_is_on_the_list():
+        from kmdlfun import jade
+
+        assert jade.wears_a_collar("h_mercf01_")
+
+    @staticmethod
+    def test_a_bare_neck_is_not():
+        from kmdlfun import jade
+
+        for name in ("h_bandit04_", "h_common01_", "h_stu01_", "h_miq01_"):
+            assert not jade.wears_a_collar(name), name
+
+    @staticmethod
+    def test_the_two_that_read_as_collars_and_are_not():
+        """A thumbnail is not enough to judge these on. `h_common01_` wears
+        shoulder plates below the jaw and `h_trogr01_` has a mane; both read as
+        a collar small and neither is one, and taking them at face value put the
+        estimate at 35 heads instead of 18."""
+        from kmdlfun import jade
+
+        assert not jade.wears_a_collar("h_common01_")
+        assert not jade.wears_a_collar("h_trogr01_")
+
+    @staticmethod
+    def test_it_is_a_minority_and_named(catalogue):
+        """If most heads were like this the feature would not be worth having."""
+        from kmdlfun import jade
+
+        heads = {e.resref.lower() for e in catalogue
+                 if jade.kind_of(e.resref) == jade.HEAD}
+        assert jade.NECK_GARMENT <= heads, (
+            jade.NECK_GARMENT - heads, "a name on the list is not a head in the game")
+        assert len(jade.NECK_GARMENT) / len(heads) < 0.20
+
+    @staticmethod
+    def test_the_name_is_matched_however_it_is_written():
+        from kmdlfun import jade
+
+        assert jade.wears_a_collar("H_MercF01_")
+        assert jade.wears_a_collar("  h_mercf01_  ")
+        assert not jade.wears_a_collar("")

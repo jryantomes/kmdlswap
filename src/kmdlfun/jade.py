@@ -547,6 +547,50 @@ def scene(entry: Entry, *, install=None, scale: float | None = None):
 BUILD_VERSION = "v1"
 
 
+# Jade heads whose geometry carries a collar rather than a neck.
+#
+# A converted head keeps whatever its own mesh had below the jaw, and on these
+# that is clothing - UV-mapped to a garment in the atlas, not to skin. It shows
+# as a coloured tube standing out of a KOTOR collar, which no amount of
+# weighting or scaling can turn into a neck; fixing one properly means re-UVing
+# the neck or trimming it away.
+#
+# Curated rather than measured, and that is worth being straight about. Three
+# colour tests were tried against the atlas and against the render, and none
+# separated: `h_common01_` reads as skin at 24 while a genuinely bare neck
+# reads 60, because a tan collar and a shadowed neck are the same colour. So
+# these are read off renders of all 148, at a size where the answer is obvious.
+#
+# 18 of 148. The estimate before they were looked at properly was about 35 -
+# shoulder plates below the jaw and a creature's mane both read as collars in a
+# thumbnail and are neither.
+NECK_GARMENT = frozenset({
+    "h_assnf01gh_",     # brown and red banded wrap
+    "h_bling01_",       # magenta collar
+    "h_bling02_",       # green striped necklace
+    "h_iguard01_",      # ribbed orange collar under shoulder plates
+    "h_isldr03_",       # maroon collar
+    "h_isldr04_",       # black banded collar
+    "h_isoldr01_",      # gold banded collar
+    "h_isoldr01gh_",    # gold banded collar
+    "h_jane01_",        # orange collar
+    "h_joe05_",         # white ruff
+    "h_laf02_",         # ornate gold collar
+    "h_lai02_",         # white collar with a clasp
+    "h_lai03_",         # layered rope collar
+    "h_mercf01_",       # red collar - the one seen in game
+    "h_mercf02_",       # black collar
+    "h_mercf02gh_",     # black collar
+    "h_piratf01_",      # dark red collar
+    "h_piratf02_",      # black collar with gold trim
+})
+
+
+def wears_a_collar(resref: str) -> bool:
+    """Whether this head brings a garment where a neck should be."""
+    return (resref or "").strip().lower() in NECK_GARMENT
+
+
 def as_head(resref: str, jade_install, install, host: str, *, root=None):
     """Convert one Jade head and build it into `host`, cached on disk.
 

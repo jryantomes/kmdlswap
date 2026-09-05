@@ -1365,11 +1365,23 @@ class App(ttk.Frame):
             if picked["outfit"] and not cat.pairs_with(
                     picked["body"], outfit=cat.outfit(picked["outfit"])):
                 odd.append("outfit")
-        self.character_warn.config(
-            text=("Nothing in the game pairs this " + " or ".join(odd)
-                  + f" with {picked['body']}. It will still build - check the "
-                    "preview for a neck that does not meet its collar."
-                  if odd else ""))
+        note = ""
+        if odd:
+            note = ("Nothing in the game pairs this " + " or ".join(odd)
+                    + f" with {picked['body']}. It will still build - check the "
+                      "preview for a neck that does not meet its collar.")
+        # Said before the build rather than after it turns up in game: this one
+        # cannot be fixed by picking a different body, so it is worth knowing
+        # while there is still a chance to pick a different head.
+        if picked["head"] and cat is not None:
+            found = cat.head(picked["head"])
+            if (found is not None and getattr(found, "source", "") == "jade"
+                    and self._jade_collar(picked["head"])):
+                worn = (f"{picked['head']} has a collar where its neck should "
+                        f"be - it is part of the head, so it will show above "
+                        f"any outfit. 18 of the 148 Jade heads are like this.")
+                note = f"{note}  {worn}" if note else worn
+        self.character_warn.config(text=note)
         self._draw_character()
 
     def _draw_character(self):
@@ -1553,6 +1565,12 @@ class App(ttk.Frame):
             self.events.put(("done_text", lines))
         except Exception as exc:  # noqa: BLE001
             self.events.put(("error", f"{type(exc).__name__}: {exc}"))
+
+    @staticmethod
+    def _jade_collar(head: str) -> bool:
+        from . import jade as kjade
+
+        return kjade.wears_a_collar(head)
 
     @staticmethod
     def _prune_previews(folder, job: int) -> None:

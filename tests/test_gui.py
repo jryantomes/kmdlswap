@@ -2199,3 +2199,58 @@ class TestThePreviewDoesNotPileUp:
         App._prune_previews(tmp_path, 2)
 
         assert keep.is_file(), "it deleted a real thumbnail"
+
+
+class TestTheCollarWarning:
+    """Said before the build rather than after it turns up in game: a collar in
+    the head's own geometry cannot be fixed by picking a different body."""
+
+    PHRASE = "collar where its neck should be"
+
+    @staticmethod
+    def offer(app, model, source, look="female", row=-1):
+        """Put one head on the catalogue and take it off again afterwards.
+
+        The app fixture is shared, so a head left behind is found by the next
+        test - which is how the first draft of these passed and lied.
+        """
+        from contextlib import contextmanager
+
+        from kmdlfun.wardrobe import Head
+
+        @contextmanager
+        def offered():
+            head = Head(model=model, row=row, look=look,
+                        game="X:/jade" if source else "", source=source)
+            app.catalogue.heads.insert(0, head)
+            try:
+                yield
+            finally:
+                app.catalogue.heads.remove(head)
+        return offered()
+
+    def test_it_says_so_before_the_build(self, stocked):
+        with self.offer(stocked, "h_mercf01_", "jade"):
+            stocked.part_pick["body"].set("PFBAM")
+            stocked.part_pick["head"].set("h_mercf01_")
+            stocked._update_character()
+
+            assert self.PHRASE in stocked.character_warn.cget("text")
+
+    def test_a_bare_necked_jade_head_is_not_warned_about(self, stocked):
+        with self.offer(stocked, "h_bandit04_", "jade", look="male"):
+            stocked.part_pick["body"].set("PMBAM")
+            stocked.part_pick["head"].set("h_bandit04_")
+            stocked._update_character()
+
+            assert self.PHRASE not in stocked.character_warn.cget("text")
+
+    def test_a_kotor_head_of_the_same_name_is_not_warned_about(self, stocked):
+        """The list is about Jade geometry. A KOTOR head that happened to share
+        a name would not have the problem."""
+        with self.offer(stocked, "h_mercf01_", "", row=3):
+            stocked.part_pick["body"].set("PFBAM")
+            stocked.part_pick["head"].set("h_mercf01_")
+            stocked._update_character()
+
+            assert self.PHRASE not in stocked.character_warn.cget("text")
