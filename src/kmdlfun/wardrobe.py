@@ -71,6 +71,9 @@ class Body:
     look: str = "unknown"
     outfits: list[Outfit] = field(default_factory=list)
     heads: list[int] = field(default_factory=list)
+    # Whether the game's own character creator offers this body. See
+    # `_player_rows`.
+    player: bool = False
 
     @property
     def build(self) -> str:
@@ -172,6 +175,7 @@ def build(install, *, library=None) -> Catalogue:
     cat = Catalogue()
     cat.heads = _read_heads(heads_table, library)
     known_rows = {h.row for h in cat.heads}
+    player_rows = _player_rows(install)
 
     bodies: dict[str, Body] = {}
     outfits: dict[tuple[str, str], list] = {}
@@ -198,10 +202,17 @@ def build(install, *, library=None) -> Catalogue:
                 entry[3] = label
             worn.append((model, texture))
 
-        if not race:
+        if not race and row in player_rows:
+            # The character-creation rows leave `race` blank - the player's
+            # base body is not a race, it is the underwear the outfit slots
+            # dress over. Slot A is that body: `PFBAS`, `PMBAM` and the rest.
+            race = appearance.get_cell(row, "modela").strip()
+        if not race or race == "****":
             continue
         body = bodies.setdefault(race.lower(), Body(model=race, label=label))
         body.rows += 1
+        if row in player_rows:
+            body.player = True
         if head_row.isdigit() and int(head_row) in known_rows:
             if int(head_row) not in body.heads:
                 body.heads.append(int(head_row))
@@ -223,6 +234,42 @@ def build(install, *, library=None) -> Catalogue:
 
     _classify(cat, install, library)
     return cat
+
+
+def _player_rows(install) -> set[int]:
+    """The `appearance.2da` rows the game's own character creator offers.
+
+    Not guessed from names. `portraits.2da` is the character-creation screen:
+    every row with `forpc = 1` is a portrait a new player can pick, and its
+    `appearance_s`, `appearancenumber` and `appearance_l` columns name that
+    portrait's small, medium and large appearance rows. In KOTOR that is 90
+    rows resolving to six bodies - `PFBA` and `PMBA` in each of three builds.
+
+    They are worth singling out because they are the best-supported bodies in
+    the game: each is paired with fifteen heads in the shipped tables and wears
+    the complete nine-class wardrobe in its own build, which no other body
+    does. Everything else is one character's costume.
+    """
+    from . import twoda as k2da
+
+    try:
+        table = k2da._load(install, "portraits")
+    except Exception:  # noqa: BLE001
+        return set()          # a catalogue without this still works
+    headers = set(table.get_headers())
+    columns = [c for c in ("appearance_s", "appearancenumber", "appearance_l")
+               if c in headers]
+    if "forpc" not in headers or not columns:
+        return set()
+    rows = set()
+    for row in range(table.get_height()):
+        if table.get_cell(row, "forpc").strip() != "1":
+            continue
+        for column in columns:
+            value = table.get_cell(row, column).strip()
+            if value.isdigit():
+                rows.add(int(value))
+    return rows
 
 
 def _read_heads(table, library) -> list[Head]:
@@ -265,6 +312,15 @@ def _classify(cat: Catalogue, install, library) -> None:
 
     for body in cat.bodies:
         body.look = cat.look_of(body.model)
+        if body.player:
+            # `P_FEM_A_LRG_01` is the row's name for itself and says nothing a
+            # person picking a body wants to know. The build has to stay in the
+            # label: pickers key on it, and "player female" alone is the same
+            # string for all three female builds, which silently collapsed six
+            # bodies into two.
+            body.label = " ".join(
+                x for x in ("player", body.look if body.look != "unknown" else "",
+                            body.build) if x)
     cat.heads = [Head(h.model, h.row, cat.look_of(h.model), h.game)
                  for h in cat.heads]
 
@@ -283,14 +339,25 @@ def heads_from(other_install, *, avoiding=(), library=None) -> list[Head]:
     are unique to KOTOR II are the ones that can be offered safely.
     """
     from . import library as klib
+    from . import who as kwho
 
     taken = {str(n).lower() for n in avoiding}
-    out = []
-    for model in sorted(klib.head_models(other_install)):
-        if model.lower() in taken:
-            continue
-        # Row -1: it has no row in *this* game's table yet. `register_look`
-        # adds one when the character is created.
-        out.append(Head(model=model, row=-1, look="unknown",
-                        game=str(other_install)))
-    return out
+    names = [m for m in sorted(klib.head_models(other_install))
+             if m.lower() not in taken]
+
+    # Sexed against the game they come from, not this one. Without it every
+    # borrowed head is "unknown", and `who.matches` reads unknown as no answer
+    # rather than any answer - so setting the picker to male or female emptied
+    # the list of all of them, which looks like the tool refusing a KOTOR II
+    # head rather than filtering it away.
+    looks = {}
+    try:
+        looks = kwho.looks(other_install, names,
+                           library=klib.ModelLibrary(other_install))
+    except Exception:  # noqa: BLE001
+        pass            # unknown is still a usable answer, just a worse one
+
+    # Row -1: it has no row in *this* game's table yet. `register_look` adds one
+    # when the character is created.
+    return [Head(model=m, row=-1, look=looks.get(m, "unknown"),
+                 game=str(other_install)) for m in names]

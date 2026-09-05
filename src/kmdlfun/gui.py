@@ -1027,6 +1027,20 @@ class App(ttk.Frame):
             note.pack(side="left", padx=(10, 0))
             setattr(self, f"part_note_{key}", note)
 
+            if key == "body":
+                # Every other body in `appearance.2da` is one character's
+                # costume - a body that fits three heads and one outfit. The
+                # six the game's own creator offers fit fifteen heads and the
+                # whole wardrobe, so they are what this picker shows. The rest
+                # are still there for anyone who wants Bastila's figure.
+                self.bodies_all = tk.BooleanVar(value=False)
+                ttk.Checkbutton(
+                    bar, text="every body, not just the six the game lets you "
+                              "create with",
+                    variable=self.bodies_all,
+                    command=lambda: self._refresh_parts("body"),
+                ).pack(side="left", padx=(12, 0))
+
             grid = kgallery.Gallery(frame, cell=kthumbs.SIZE,
                                     on_pick=lambda label, k=key:
                                     self._on_part_pick(k, label))
@@ -1082,8 +1096,13 @@ class App(ttk.Frame):
                     # A borrowed head's model has to ship with the character;
                     # `_character_work` does that when it sees `head.game`.
                     mine = {h.model.lower() for h in cat.heads}
-                    cat.heads.extend(
-                        kwardrobe.heads_from(other, avoiding=mine))
+                    borrowed = kwardrobe.heads_from(other, avoiding=mine)
+                    cat.heads.extend(borrowed)
+                    # `look_of` reads the catalogue's own table, not the item,
+                    # so a borrowed head's sex has to land there too or the
+                    # picker's male/female filter hides every one of them.
+                    for head in borrowed:
+                        cat.looks[head.model.lower()] = head.look
                 self.events.put(("catalogue", cat))
             except Exception as exc:  # noqa: BLE001
                 self.events.put(("error", f"could not read the parts: {exc}"))
@@ -1106,7 +1125,11 @@ class App(ttk.Frame):
             return []
         body = self.part_pick["body"].get()
         if key == "body":
-            return list(cat.bodies)
+            if getattr(self, "bodies_all", None) and self.bodies_all.get():
+                return list(cat.bodies)
+            # `or` rather than an empty list: a modded install whose
+            # `portraits.2da` we cannot read should show every body, not none.
+            return [b for b in cat.bodies if b.player] or list(cat.bodies)
         if key == "outfit":
             return cat.outfits_for(body or None)
         return cat.heads_for(body or None)
@@ -1282,6 +1305,15 @@ class App(ttk.Frame):
         install = self.install.get().strip()
         if not install or not outfit:
             return
+        # A KOTOR II head is not in this game's files. Read it from its own, the
+        # way the thumbnails do - without this the preview raised on the read,
+        # was swallowed, and picking a borrowed head simply did nothing, which
+        # looks like the tool refusing the pairing rather than failing to draw
+        # it.
+        home = ""
+        if head and self.catalogue is not None:
+            found = self.catalogue.head(head)
+            home = getattr(found, "game", "") if found is not None else ""
         self._character_job = getattr(self, "_character_job", 0) + 1
         job = self._character_job
 
@@ -1299,7 +1331,13 @@ class App(ttk.Frame):
                 lib = ModelLibrary(install)
                 look = ktextures.lookup_across([_Path(install)])
                 body = kl.parse(*lib.read(outfit))
-                worn = kl.parse(*lib.read(head)) if head else None
+                if head and home:
+                    worn = kl.parse(*ModelLibrary(home).read(head))
+                    # Its textures live over there too, so the lookup has to
+                    # reach both installs or the head draws untextured.
+                    look = ktextures.lookup_across([_Path(install), _Path(home)])
+                else:
+                    worn = kl.parse(*lib.read(head)) if head else None
                 scene = krender.character(body, worn, texture_lookup=look)
                 pixels = krender.render(scene, size=PREVIEW_SIZE, cull=True)
                 # Beside the thumbnails rather than in the output folder: it is

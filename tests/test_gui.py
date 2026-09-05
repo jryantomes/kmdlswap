@@ -1387,19 +1387,48 @@ def test_the_tab_is_there_and_has_three_pickers(app):
 
 
 def test_the_pickers_fill_from_the_install(stocked):
-    assert len(stocked.part_labels["body"]) > 20
     assert len(stocked.part_labels["outfit"]) > 80
     assert len(stocked.part_labels["head"]) > 90
+
+
+def test_the_body_picker_offers_the_ones_the_game_creates_with(stocked):
+    """Six: two sexes across three builds. Every other body in the table is one
+    character's costume - it fits a couple of heads and wears one outfit, where
+    these fit fifteen heads and the whole wardrobe."""
+    offered = stocked.part_labels["body"]
+
+    assert len(offered) == 6, offered
+    assert set(offered.values()) == {
+        "PFBAS", "PFBAM", "PFBAL", "PMBAS", "PMBAM", "PMBAL"}
+
+
+def test_each_player_body_is_listed_separately(stocked):
+    """The three builds share a sex and nearly share a name. Labelling them all
+    `player female` keyed three entries to one string and quietly dropped two of
+    them - the picker showed two bodies where the game offers six."""
+    offered = stocked.part_labels["body"]
+
+    assert len(set(offered)) == len(set(offered.values()))
+
+
+def test_every_body_is_still_reachable(stocked):
+    """Restricting the list is a default, not a rule. Somebody who wants
+    Bastila's figure has to be able to ask for it."""
+    stocked.bodies_all.set(True)
+    stocked._refresh_parts("body")
+
+    assert len(stocked.part_labels["body"]) > 20
+    assert "P_CarthBB" in stocked.part_labels["body"].values()
 
 
 def test_picking_a_body_dresses_it_and_gives_it_a_face(stocked):
     """Somebody who only picks a body should still end up with a character,
     not a naked headless one."""
     label = next(k for k, v in stocked.part_labels["body"].items()
-                 if v == "P_CarthBB")
+                 if v == "PMBAM")
     stocked._on_part_pick("body", label)
 
-    assert stocked.part_pick["body"].get() == "P_CarthBB"
+    assert stocked.part_pick["body"].get() == "PMBAM"
     assert stocked.part_pick["outfit"].get(), "left undressed"
     assert stocked.part_pick["head"].get(), "left headless"
 
@@ -1408,7 +1437,7 @@ def test_what_the_game_already_pairs_is_marked_and_comes_first(stocked):
     from kmdlfun.gui import SEEN_IN_GAME
 
     label = next(k for k, v in stocked.part_labels["body"].items()
-                 if v == "P_CarthBB")
+                 if v == "PMBAM")
     stocked._on_part_pick("body", label)
 
     heads = list(stocked.part_labels["head"])
@@ -1420,6 +1449,10 @@ def test_what_the_game_already_pairs_is_marked_and_comes_first(stocked):
 
 def test_a_combination_the_game_never_ships_is_still_offered(stocked):
     """Forbidding those would forbid the reason to open the tool."""
+    # Carth and the Twi'lek are outside the six the picker shows by
+    # default; this is about pairing, not about that default.
+    stocked.bodies_all.set(True)
+    stocked._refresh_parts("body")
     body = next(k for k, v in stocked.part_labels["body"].items()
                 if v == "N_TwilekF")
     stocked._on_part_pick("body", body)
@@ -1428,6 +1461,10 @@ def test_a_combination_the_game_never_ships_is_still_offered(stocked):
 
 
 def test_an_odd_combination_says_so_rather_than_waiting_for_the_game(stocked):
+    # Carth and the Twi'lek are outside the six the picker shows by
+    # default; this is about pairing, not about that default.
+    stocked.bodies_all.set(True)
+    stocked._refresh_parts("body")
     body = next(k for k, v in stocked.part_labels["body"].items()
                 if v == "N_TwilekF")
     stocked._on_part_pick("body", body)
@@ -1439,6 +1476,10 @@ def test_an_odd_combination_says_so_rather_than_waiting_for_the_game(stocked):
 
 
 def test_a_pairing_the_game_ships_is_not_warned_about(stocked):
+    # Carth and the Twi'lek are outside the six the picker shows by
+    # default; this is about pairing, not about that default.
+    stocked.bodies_all.set(True)
+    stocked._refresh_parts("body")
     body = next(k for k, v in stocked.part_labels["body"].items()
                 if v == "P_CarthBB")
     stocked._on_part_pick("body", body)
