@@ -227,15 +227,31 @@ class TestLidsAcrossHeads:
     """
 
     @staticmethod
-    def test_the_bounds_admit_every_measured_head():
+    def test_the_bounds_are_not_symmetric():
+        """Shrinking a lid is free; enlarging one is not.
+
+        Scaling is radial about the pivot, so a lid made bigger to clear a
+        bigger eye also rises - `h_bandit04_`'s right lid took 1.308 and turned
+        up in game sitting on his brow. The floor is wide enough for the child
+        heads, which all want about 0.74 and were being clipped by an earlier
+        floor of 0.80; the ceiling is deliberately close to 1.
+        """
         from kmdlfun import mouthparts as km
 
         low, high = km.LID_SCALE
         assert low <= 0.737, "the child heads want 0.74 and would be clamped"
-        assert high >= 1.282, "the widest measured head would be clamped"
-        # Still a guard, not an open door: a factor this far out means the two
-        # eyes are not comparable and the answer is not a different lid.
-        assert low >= 0.5 and high <= 2.0
+        assert high <= 1.15, "enlarging this far puts the lid on the brow"
+        assert high > low and low >= 0.5
+
+    @staticmethod
+    def test_reach_is_not_the_furthest_vertex():
+        """One vertex is not a shell. On `h_bandit04_`'s right eye the furthest
+        stands 0.0015 beyond the ninetieth percentile and set the whole factor
+        on its own; the host is the proof, his two near-mirror lids reading
+        1.106 and 1.157 by the furthest vertex but 1.135 and 1.131 by p90."""
+        from kmdlfun import mouthparts as km
+
+        assert 50 < km.REACH < 100
 
     @staticmethod
     def test_lids_are_not_kept_when_they_cannot_be_seated():

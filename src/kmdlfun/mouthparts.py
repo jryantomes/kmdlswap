@@ -386,10 +386,24 @@ def find_eyes(positions, faces, *, band=(0.50, 0.70)):
     return [a, b]
 
 
-# How close a seated lid may come to the new face before it is pulled back.
-# A lid is meant to sit just under the skin; through it is a defect, and the
-# host's own margin (0.0059) is more than any converted head is guaranteed.
-LID_MARGIN = 0.0010
+# How close a seated lid may come to the new face before it is pulled back,
+# used only when the host's own margin cannot be measured.
+#
+# It used to be this constant always, and 0.0010 was far too little. The host
+# keeps 0.0059 between his lids and his own skin; at a sixth of that a lid sits
+# hard against the inside of the face and comes through wherever the mesh is
+# coarse - reported from the game as a pale patch on `h_bandit04_`'s brow, which
+# is the lid showing through his forehead. Two builds reported landing at
+# exactly this floor, which should have been the tell.
+LID_MARGIN = 0.0040
+
+# How far through the skin a seated lid may end up before the head is judged
+# unable to wear it at all. Not zero: `_local_clearance` is a worst case over
+# every lid vertex, so a single vertex grazing the surface would condemn a head
+# that is fine everywhere else - at zero it dropped eighteen of twenty-seven,
+# `h_common01_` among them, which is the first head this pipeline ever got
+# working. Set from the measured spread below.
+LID_THROUGH = -0.0010
 
 # How far a lid may be resized to fit the eye it covers. A factor outside this
 # says the two eyes are not comparable and the answer is not a different lid.
@@ -400,7 +414,22 @@ LID_MARGIN = 0.0010
 # child heads - `h_boy01_`, `h_boy01gh_` and `h_boy03_` all want about 0.74 -
 # and left their lids a fifth too big for the eyes they cover, which is the
 # clipping this resize exists to prevent.
-LID_SCALE = (0.70, 1.50)
+#
+# The ceiling is tight for the opposite reason. Scaling is radial about the
+# pivot, so a lid enlarged to clear a bigger eye also rises: `h_bandit04_`'s
+# right lid took 1.308 and turned up in game sitting on his brow. Measured on
+# the built models, the eye already comes through the lid nowhere in the sweep
+# on any head tested - so past a small correction the enlargement buys nothing
+# and costs a lid on the forehead. Shrinking has no such cost, which is why the
+# bounds are not symmetric.
+LID_SCALE = (0.70, 1.10)
+
+# Which vertex speaks for a shell's reach. The furthest one does not: on
+# `h_bandit04_`'s right eye it stands 0.0015 beyond the ninetieth percentile and
+# on its own set the whole factor. The host is the proof - his two lids are near
+# mirror images, and by the furthest vertex they read 1.106 and 1.157 while by
+# the ninetieth percentile they read 1.135 and 1.131.
+REACH = 90
 
 
 def seat_eyelids(layout, mdl: bytes, mdx: bytes, node, host_layout=None):
@@ -514,6 +543,22 @@ def _lid_plan(layout, node, host_layout) -> dict:
     if len(host_balls) != 2:
         return {}
 
+    # What the host keeps between its own lids and its own skin. Matching that
+    # is the invariant the teeth, the eyes and the brows are all held to, and a
+    # fixed constant here was the one place it was not applied.
+    margin = LID_MARGIN
+    host_node = next((n for n in kparts.mesh_nodes(host_layout)
+                      if n.name.lower() == node.name.lower()), None)
+    if host_node is not None and host_lids:
+        host_face = _model_space(host_layout, host_node, host_rest)
+        if len(host_face):
+            host_mid = (float(host_face[:, 1].min())
+                        + float(host_face[:, 1].max())) / 2
+            gaps = [g for g in (_local_clearance(host_face, pts, host_mid)
+                                for _n, pts in host_lids.values()) if g is not None]
+            if gaps:
+                margin = min(gaps)
+
     rest = space.rest_pose(layout)
     here = next((n for n in kparts.mesh_nodes(layout)
                  if n.name.lower() == node.name.lower()), None)
@@ -528,7 +573,8 @@ def _lid_plan(layout, node, host_layout) -> dict:
     mid_y = (float(face[:, 1].min()) + float(face[:, 1].max())) / 2
 
     def reach(points, pivot):
-        return float(np.linalg.norm(points - np.asarray(pivot, dtype=float), axis=1).max())
+        return float(np.percentile(
+            np.linalg.norm(points - np.asarray(pivot, dtype=float), axis=1), REACH))
 
     plan = {}
     for lid in eyelids(layout):
@@ -551,10 +597,29 @@ def _lid_plan(layout, node, host_layout) -> dict:
         # Never through the skin, measured on the lid as it will finally be.
         centre = np.asarray(rest[lid.index].position, dtype=float)
         final = (mine - centre) * factor + centre + delta
+        # Two walls, and on a converted head they can be closer together than
+        # the host's lid is thick. Forward is the skin - through it is the pale
+        # patch that showed on a brow in game. Back is the eyeball the lid
+        # covers - into it and the eye comes through the lid mid-blink, which
+        # is what pulling all the way back to the host's margin actually did:
+        # 22 of 36 eye vertices on `h_bandit04_`.
+        #
+        # So the lid is pulled back toward the host's margin only as far as the
+        # eye allows, and whichever wall it ends against is reported.
         gap = _local_clearance(face, final, mid_y)
-        if gap is not None and gap < LID_MARGIN:
-            delta[1] -= LID_MARGIN - gap
-            gap = LID_MARGIN
+        if gap is not None and gap < margin:
+            room = _eye_room(final, new_balls[side], pivot)
+            pull = min(margin - gap, max(0.0, room))
+            delta[1] -= pull
+            gap += pull
+        # And if neither wall can be honoured, this head cannot wear this lid.
+        # `h_bandit04_` is the case: pulled back far enough to clear his skin
+        # the lid enters his eyeball, and left forward enough to clear the eye
+        # it stands through his brow, which is what the game showed. A head that
+        # does not blink is better than one with a patch of lid on its forehead,
+        # and `headbuild` hides the lids when the plan comes back empty.
+        if gap is not None and gap < LID_THROUGH:
+            return {}
         plan[lid.name] = {
             "delta": delta,
             "scale": factor,
@@ -584,6 +649,20 @@ def _own_eyes(layout, node, rest) -> list:
         A = np.asarray([P[i][:3] for i in island], dtype=float)
         out.append((R @ A.T).T + t)
     return out
+
+
+def _eye_room(lid: np.ndarray, ball: np.ndarray, pivot) -> float:
+    """How far a lid can be pulled back before the eye it covers comes through.
+
+    Measured the way the blink moves: both as distances from the pivot the lid
+    turns about, so the answer holds through the sweep and not only at rest.
+    """
+    pivot = np.asarray(pivot, dtype=float)
+    lid_reach = np.linalg.norm(lid - pivot, axis=1)
+    ball_reach = np.linalg.norm(ball - pivot, axis=1)
+    if not len(lid_reach) or not len(ball_reach):
+        return 0.0
+    return float(np.percentile(lid_reach, 10) - np.percentile(ball_reach, REACH))
 
 
 def _to_parent(layout, rest, node, delta) -> tuple:
