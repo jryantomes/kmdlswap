@@ -274,6 +274,53 @@ def _sides(host_influences, slot_names: dict[int, str], host_positions: np.ndarr
     return {k: float(np.mean(v)) for k, v in got.items() if v}
 
 
+def _eye_islands(P: np.ndarray, candidates) -> list:
+    """The head's own eyeballs among its islands: a pair of small front ones
+    sitting where eyes sit."""
+    limit = max(6, int(MAX_ISLAND * len(P)))
+    lo, hi = P.min(axis=0), P.max(axis=0)
+    height = float(hi[2] - lo[2])
+    mid_y = float(lo[1] + hi[1]) / 2
+    found = []
+    for island in candidates:
+        if not (6 <= len(island) <= limit):
+            continue
+        centre = P[island].mean(axis=0)
+        if height <= 0 or not (
+            EYE_BAND[0] <= (centre[2] - lo[2]) / height <= EYE_BAND[1]
+        ):
+            continue
+        if centre[1] <= mid_y:
+            continue
+        found.append(island)
+    return found
+
+
+def eye_extent(positions, faces) -> tuple[float, float] | None:
+    """How far up the head its own eyes reach, as a fraction of its height.
+
+    A converted head's eyes are not where the host's are - `h_mercf01_` puts
+    hers at 0.567-0.662 against Carth's 0.541-0.610 - and a correction aimed at
+    the host's eye line then lands on the wrong part of hers. Returns None for a
+    head with no eyes of its own, where there is nothing to aim at.
+    """
+    P = np.asarray([p[:3] for p in positions], dtype=np.float64)
+    if len(P) < 12 or not faces:
+        return None
+    every = islands(P, faces)
+    if len(every) < 2:
+        return None
+    found = _eye_islands(P, every[1:])
+    if len(found) < 2:
+        return None
+    lo, hi = P.min(axis=0), P.max(axis=0)
+    height = float(hi[2] - lo[2])
+    if height <= 0:
+        return None
+    z = P[sorted(set().union(*(set(i) for i in found)))][:, 2]
+    return (float(z.min() - lo[2]) / height, float(z.max() - lo[2]) / height)
+
+
 def bind(
     positions,
     faces,
@@ -472,23 +519,7 @@ def bind(
     # `f_lbrw_g` and `f_rbrw_g`. Every brow movement then swings the eyes, and
     # in game the eyes were seen roaming around the face when only the brow
     # should move. An eyeball does not deform and does not follow a brow.
-    eye_islands = []
-    if len(shell_index):
-        limit = max(6, int(MAX_ISLAND * len(P)))
-        lo_all, hi_all = P.min(axis=0), P.max(axis=0)
-        height = float(hi_all[2] - lo_all[2])
-        mid_y = float(lo_all[1] + hi_all[1]) / 2
-        for island in every[1:]:
-            if not (6 <= len(island) <= limit):
-                continue
-            centre = P[island].mean(axis=0)
-            if height <= 0 or not (
-                EYE_BAND[0] <= (centre[2] - lo_all[2]) / height <= EYE_BAND[1]
-            ):
-                continue
-            if centre[1] <= mid_y:
-                continue
-            eye_islands.append(island)
+    eye_islands = _eye_islands(P, every[1:]) if len(shell_index) else []
 
     rigid = 0
     for group, bone in (

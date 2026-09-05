@@ -259,12 +259,18 @@ def build_replacement(
         # the new face sits off the host's surface it inherits skull rather than
         # the small mobile bones, and that part of the face then never moves.
         # Take a second opinion in anatomical space over the lower front.
+        # Aimed at this head's own eyes, not the host's. A converted head puts
+        # them elsewhere - `h_mercf01_` 0.567-0.662 against Carth's 0.541-0.610
+        # - and a socket correction fixed to the host's eye line then lands on
+        # the bottom of hers and leaves the upper lid on the brow.
+        eyes = lips.eye_extent(mesh.positions, [tuple(f)[:3] for f in mesh.faces])
         influences_out, report.mouth_lines = facerig.rebalance(
             mesh.positions,
             influences_out,
             original.positions,
             original.influences,
             max_influences=max_influences,
+            eye_band=(eyes[0] - facerig.SOCKET, eyes[1]) if eyes else None,
         )
         # Lips modelled as their own pieces sit recessed behind the face, so the
         # nearest host surface to them is skull rather than lip. They are also

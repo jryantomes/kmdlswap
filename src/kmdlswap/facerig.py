@@ -71,24 +71,33 @@ EYE_LINE = 0.5
 # Front half only. The back of the head is skull, and it is genuinely head_g.
 FRONT = 0.5
 
-# The band around the eyes, as a fraction of head height, and how much of the
-# host's answer to take there.
+# The eye socket, as a fraction of head height, and how much of the host's
+# answer the brows may carry there.
 #
 # This region has the opposite problem to the lower face. There, proximity gives
 # the skull work that belongs to a mobile bone. Here it gives a mobile bone -
 # the brow, which is the nearest thing to an eye - work that belongs to the
-# skull: measured on `h_mercf01_`, 28% of the skin around the eyes sits on brow
-# bones against Carth's 1%, so the whole eye socket moved whenever the brows
+# skull: measured on `h_mercf01_`, 28% of the skin around the eyes sat on brow
+# bones against Carth's 5%, so the whole eye socket moved whenever the brows
 # did. Reported from the game as the skin around the eyes moving.
-# The eye socket, and the share of it the brows may carry.
 #
 # It is a share, not an extent. Capping by how far down the host's brows reach
-# corrects almost nothing - his reach that low too, just weakly - while his eye
-# band is 1% brow against a converted head's 26%. The band stops at 0.60, where
-# the brow band begins, because a wider one takes the brows themselves: at 0.62
-# the brow band fell from 31% to 9% against the host's 39% and the brows stopped
-# moving.
-EYE_BAND = (0.50, 0.60)
+# corrects almost nothing - his reach that low too, just weakly.
+#
+# **The host's band and the target's are not the same band.** This was the
+# defect behind the second report, of the brow lifting the top eyelid: the
+# constant was 0.50-0.60 for both, and while Carth's eyeballs span 0.541-0.610,
+# `h_mercf01_`'s span 0.567-0.662. So the cap landed on the bottom third of her
+# eye and left the top two thirds - the upper lid, carrying more weight than the
+# part that was corrected - at 24.8% brow. The host's band is a constant here
+# because the K1 facial rig is identical across all 101 skinned heads; the
+# target's is measured from its own eyes and passed in.
+HOST_EYE_BAND = (0.500, 0.610)
+
+# How far below the eyes the socket reaches, as a fraction of head height. It is
+# the distance the host's band already ran below his own eyeballs, applied to
+# the target's eyes so both bands cover the same anatomy.
+SOCKET = HOST_EYE_BAND[1] - HOST_EYE_BAND[0] - 0.069   # his eyes are 0.069 tall
 
 # How much of the anatomical opinion to take on a vertex that qualifies. These
 # are vertices the skull has taken from a mobile bone, so there is nothing worth
@@ -167,7 +176,7 @@ def _brow_bones(host_influences, unit_host: np.ndarray, skull: int) -> set[int]:
     for index, infl in enumerate(host_influences):
         if index >= len(unit_host):
             continue
-        if unit_host[index][2] < 0.60 or unit_host[index][1] <= FRONT:
+        if unit_host[index][2] < HOST_EYE_BAND[1] or unit_host[index][1] <= FRONT:
             continue
         for f in infl:
             if f.bone_slot != skull:
@@ -184,7 +193,7 @@ def _band_share(host_influences, unit_host: np.ndarray, bones: set[int]) -> floa
     for index, infl in enumerate(host_influences):
         if index >= len(unit_host) or unit_host[index][1] <= FRONT:
             continue
-        if not (EYE_BAND[0] <= unit_host[index][2] <= EYE_BAND[1]):
+        if not (HOST_EYE_BAND[0] <= unit_host[index][2] <= HOST_EYE_BAND[1]):
             continue
         for f in infl:
             total += f.weight
@@ -201,6 +210,7 @@ def rebalance(
     *,
     neighbours: int = NEIGHBOURS,
     max_influences: int = MAX_INFLUENCES,
+    eye_band: tuple[float, float] | None = None,
 ) -> tuple[list[list[Influence]], list[str]]:
     """Re-sample lower-face vertices the skull has taken from a mobile bone.
 
@@ -293,10 +303,11 @@ def rebalance(
     eyed = 0
     brow = _brow_bones(host_influences, unit_h, skull)
     want = _band_share(host_influences, unit_h, brow) if brow else 0.0
+    band = eye_band if eye_band is not None else HOST_EYE_BAND
     if brow:
         for index in range(len(P)):
             height = float(unit_p[index][2])
-            if not (EYE_BAND[0] <= height <= EYE_BAND[1]):
+            if not (band[0] <= height <= band[1]):
                 continue
             if float(unit_p[index][1]) <= FRONT:
                 continue
