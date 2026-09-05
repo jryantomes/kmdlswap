@@ -141,3 +141,76 @@ class TestAgainstTheGame:
             for n in mouthparts.mouth_parts(after_layout)
         }
         assert after == before
+
+
+class TestTheBlinkItself:
+    """The blink is a fixed rotation authored for the host's eye opening.
+
+    Decoded from `p_carthh`: 21 keys on each lid, orientation only, no position
+    channel, turning through 38.47 degrees at the widest. A converted head's eye
+    opening is a different size - measured as the boundary loop where the face
+    skin parts, Carth's is 0.0180 tall against `h_mercf01_`'s 0.0271 - so the
+    same sweep stops partway down hers.
+    """
+
+    @staticmethod
+    def test_the_compressed_quaternion_round_trips():
+        """Every blink key in the vanilla model, back to the exact same word.
+
+        The format packs x and y in 11 bits and z in 10 and derives w, so a
+        codec that is merely close would drift the animation a little on every
+        rebuild.
+        """
+        from kmdlfun import mouthparts as km
+
+        for word in (0x7FDFFBFF, 0x7FDFFBDC, 0x7FDFFB9A,
+                     0x7FDFFAAE, 0x7FDFFB11, 0x7FDFFBD5):
+            assert km._pack_quat(km._unpack_quat(word)) == word
+
+    @staticmethod
+    def test_resting_stays_resting():
+        """The key that holds the eye open is identity, and scaling an angle by
+        anything leaves it identity. If it did not, the lid would sit part-closed
+        whenever the animation was not playing."""
+        from kmdlfun import mouthparts as km
+
+        assert km._pack_quat(km._unpack_quat(0x7FDFFBFF)) == 0x7FDFFBFF
+        w, x, y, z = km._unpack_quat(0x7FDFFBFF)
+        assert abs(w - 1.0) < 1e-6 and max(abs(x), abs(y), abs(z)) < 1e-6
+
+    @staticmethod
+    def test_deepening_by_one_changes_nothing():
+        from kmdlfun import mouthparts as km
+
+        out, lines = km.deepen_blink(b"not a model", b"", 1.0)
+        assert out == b"not a model" and lines == []
+
+
+class TestDeepeningAgainstTheGame:
+    @staticmethod
+    @pytest.fixture(scope="class")
+    def k1_install():
+        from kmdlfun import installs
+
+        path = installs.detect().get(installs.K1)
+        if not path:
+            pytest.skip("no K1 install detected")
+        return path
+
+    @staticmethod
+    def test_the_host_blink_reads_and_deepens(k1_install):
+        from kmdlfun import mouthparts as km
+        from kmdlfun.library import ModelLibrary
+        from kmdlswap import layout as kl
+        from kmdlswap import validate as kv
+
+        mdl, mdx = ModelLibrary(k1_install).read("p_carthh")
+        angle = km.blink_angle(mdl, mdx)
+        assert angle is not None and 38.0 < angle < 39.0, angle
+
+        deeper, lines = km.deepen_blink(mdl, mdx, 1.30)
+        assert lines and "blink" in lines[0]
+        assert len(deeper) == len(mdl), "an in-place key edit must not resize"
+        assert kv.check(kl.parse(deeper, mdx)).ok
+        after = km.blink_angle(deeper, mdx)
+        assert abs(after - angle * 1.30) < 0.5, (angle, after)

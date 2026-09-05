@@ -580,6 +580,123 @@ def _to_parent(layout, rest, node, delta) -> tuple:
     return tuple(float(v) for v in R.T @ np.asarray(delta, dtype=float))
 
 
+ORIENTATION_CONTROLLER = 20
+
+
+def _unpack_quat(v: int) -> tuple[float, float, float, float]:
+    """Odyssey's 32-bit compressed quaternion: x and y in 11 bits, z in 10.
+
+    ``w`` is not stored - it is recovered from the unit constraint, which is why
+    only the sign-positive hemisphere is representable. Checked against every
+    blink key in `p_carthh`: all 21 round-trip to the exact original word.
+    """
+    x = ((v & 0x7FF) / 1023.0) - 1.0
+    y = (((v >> 11) & 0x7FF) / 1023.0) - 1.0
+    z = (((v >> 22) & 0x3FF) / 511.0) - 1.0
+    n = x * x + y * y + z * z
+    return ((1.0 - n) ** 0.5 if n < 1.0 else 0.0, x, y, z)
+
+
+def _pack_quat(q) -> int:
+    _w, x, y, z = q
+    xr = min(2047, max(0, round((x + 1.0) * 1023.0)))
+    yr = min(2047, max(0, round((y + 1.0) * 1023.0)))
+    zr = min(1023, max(0, round((z + 1.0) * 511.0)))
+    return (zr << 22) | (yr << 11) | xr
+
+
+def blink_angle(mdl: bytes, mdx: bytes) -> float | None:
+    """The widest angle the model's own blink turns through, in degrees."""
+    from kmdlswap import layout as klayout
+
+    lay = klayout.parse(mdl, mdx)
+    widest = 0.0
+    for node in lay.nodes:
+        if node.in_animation is None or not is_eyelid(node.name):
+            continue
+        for _at, q in _blink_keys(lay, node):
+            widest = max(widest, float(np.degrees(2 * np.arccos(min(1.0, abs(q[0]))))))
+    return widest or None
+
+
+def _blink_keys(lay, node):
+    """(byte offset, quaternion) for each key of a node's orientation track."""
+    at = MDL_BASE + node.offset
+    controllers, count = struct.unpack_from("<II", lay.mdl, at + 56)
+    data, _length = struct.unpack_from("<II", lay.mdl, at + 68)
+    if not count or controllers >= 0xFFFFFF00:
+        return []
+    out = []
+    for i in range(count):
+        entry = MDL_BASE + controllers + i * 16
+        kind, _unknown, rows, _timekey, datakey, columns = struct.unpack_from(
+            "<IhHHHB", lay.mdl, entry)
+        if kind != ORIENTATION_CONTROLLER or rows < 1:
+            continue
+        step = max(1, (columns & 0x0F) - 1)
+        for row in range(rows):
+            where = MDL_BASE + data + (datakey + row * step) * 4
+            out.append((where, _unpack_quat(struct.unpack_from("<I", lay.mdl, where)[0])))
+    return out
+
+
+def deepen_blink(mdl: bytes, mdx: bytes, factor: float) -> tuple[bytes, list[str]]:
+    """Turn the eyelids further through their own blink, by ``factor``.
+
+    The lid is a rigid mesh cut for the host's eye opening and swept by a fixed
+    rotation - 38.47 degrees on `p_carthh`, in 21 keys with no position channel.
+    A converted head's opening is a different size: measured as the boundary
+    loop where the face skin opens, Carth's is 0.0180 tall and `h_mercf01_`'s is
+    0.0271, half again as much. The same lid at the same angle stops partway
+    down, which is what the game showed.
+
+    Scaling the lid instead does not work - it changes the radius it sweeps, not
+    the arc, so the only size that closes the eye also stands out over the brow
+    when open. Turning further is the lever that moves the leading edge.
+
+    Every key is scaled about identity, so the resting key stays exactly
+    identity and the lid is still hidden when the eye is open.
+    """
+    from kmdlswap import layout as klayout
+
+    if abs(factor - 1.0) < 1e-3:
+        return mdl, []
+    lay = klayout.parse(mdl, mdx)
+    out = bytearray(mdl)
+    done: set[int] = set()
+    touched: dict[str, int] = {}
+    for node in lay.nodes:
+        if node.in_animation is None or not is_eyelid(node.name):
+            continue
+        for where, q in _blink_keys(lay, node):
+            # Two nodes can point at one data block; scaling it twice would
+            # square the correction.
+            if where in done:
+                continue
+            done.add(where)
+            w = min(1.0, max(-1.0, q[0]))
+            half = np.arccos(w)
+            if half < 1e-6:
+                continue        # the resting key: identity stays identity
+            axis = np.asarray(q[1:], dtype=float)
+            length = float(np.linalg.norm(axis))
+            if length < 1e-9:
+                continue
+            turned = half * factor
+            packed = _pack_quat((np.cos(turned), *(axis / length * np.sin(turned))))
+            struct.pack_into("<I", out, where, packed)
+            touched[node.name] = touched.get(node.name, 0) + 1
+
+    if not touched:
+        return mdl, []
+    return bytes(out), [
+        "blink: turned {} further through the sweep - {}".format(
+            f"{factor:.2f}x",
+            ", ".join(f"{name} {n} keys" for name, n in sorted(touched.items())),
+        )
+    ]
+
+
 def _shift_position_controller(mdl: bytearray, node, delta) -> bool:
     """Move a node's rest position: header *and* position controller.
 
