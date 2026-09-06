@@ -714,3 +714,59 @@ class TestBodiesStandUp:
         P = np.asarray(jade.mesh(*jade.read(a_head), kind=a_head.kind,
                                  scale=jade.scale_for(a_head.kind)).positions, float)
         assert np.ptp(P[:, 2]) > np.ptp(P[:, 1]), "the head is not upright"
+
+
+class TestTheJadeSkeleton:
+    """Jade bodies carry a full named skeleton, and it answers what the mesh
+    will not.
+
+    The arms' rest pose is the question that matters for porting a body: KOTOR's
+    rest at 52-55 degrees below horizontal, and a mesh bound to those bones in a
+    different pose puts its arms nowhere near them.
+    """
+
+    @staticmethod
+    def bodies(catalogue):
+        return [e for e in catalogue if jade.kind_of(e.resref) == jade.BODY]
+
+    def test_a_body_carries_named_bones(self, catalogue):
+        entry = next((e for e in self.bodies(catalogue)
+                      if e.resref.lower() == "n_bandit_"), None)
+        if entry is None:
+            pytest.skip("n_bandit_ not present")
+        bones = jade.skeleton(entry)
+
+        assert len(bones) > 30
+        for name in ("BLArmUppeL01", "HandL", "LegUppeL", "SpinBone0"):
+            assert name in bones, name
+
+    def test_every_mapped_bone_is_really_there(self, catalogue):
+        """The map is only worth having if the names in it exist."""
+        for entry in self.bodies(catalogue)[:6]:
+            try:
+                bones = jade.skeleton(entry)
+            except jade.JadeError:
+                continue
+            missing = [k for k in jade.BONE_NAMES if k not in bones]
+            assert not missing, (entry.resref, missing)
+
+    def test_the_arms_rest_where_kotor_s_do_not(self, catalogue):
+        """5.7 degrees against KOTOR's 52-55 - a T-pose against an A-pose.
+
+        Measured off the geometry this came out between -20 and +11 and could
+        not be found at all on a robed figure or a child, because a robe's hem
+        is wider than any arm. Off the bones it is the same number every time.
+        """
+        seen = []
+        for entry in self.bodies(catalogue)[:8]:
+            try:
+                angle = jade.arm_rest(entry)
+            except jade.JadeError:
+                continue
+            if angle is not None:
+                seen.append((entry.resref, angle))
+        assert len(seen) >= 4, seen
+        for resref, angle in seen:
+            assert 0 < angle < 20, (resref, angle)
+        spread = max(a for _r, a in seen) - min(a for _r, a in seen)
+        assert spread < 2.0, f"the rest pose should be a constant, got {seen}"

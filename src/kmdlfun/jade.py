@@ -529,6 +529,97 @@ def _install_of(entry: Entry):
 # --- pictures ---------------------------------------------------------------
 
 
+# What Jade calls the bones KOTOR names differently. Both games descend from
+# the same engine and the skeletons correspond limb for limb - `hturn_g` even
+# survives under its own name.
+BONE_NAMES = {
+    "BLClavL01": "lcollar_g", "BLArmUppeL01": "lbicep_g",
+    "UlnaL01": "lforearm_g", "HandL": "lhand_g",
+    "BLClavR01": "rcollar_g", "BLArmUppeR01": "rbicep_g",
+    "UlnaR01": "rforearm_g", "HandR": "rhand_g",
+    "LegUppeL": "lthigh_g", "LegLoweL": "lshin_g", "FootBallL": "lfoot_g",
+    "LegUppeR": "rthigh_g", "LegLoweR": "rshin_g", "FootBallR": "rfoot_g",
+    "SpinBone0": "pelvis_g", "SpinBone2": "torso_g", "SpinBone3": "torsoupr_g",
+}
+
+
+def _quaternion_matrix(q) -> np.ndarray:
+    w, x, y, z = q
+    n = w * w + x * x + y * y + z * z
+    if n < 1e-12:
+        return np.eye(3)
+    s = 2.0 / n
+    return np.array([
+        [1 - s * (y * y + z * z), s * (x * y - z * w), s * (x * z + y * w)],
+        [s * (x * y + z * w), 1 - s * (x * x + z * z), s * (y * z - x * w)],
+        [s * (x * z - y * w), s * (y * z + x * w), 1 - s * (x * x + y * y)],
+    ])
+
+
+def skeleton(entry: Entry) -> dict:
+    """Every named bone of one Jade model, in its own model space.
+
+    Jade bodies carry a full skeleton - 73 nodes on `n_bandit_`, named limb by
+    limb - and it answers questions the mesh will not. The rest pose of the arms
+    is the one that matters: measured off the geometry it came out anywhere
+    between -20 and +11 degrees and could not be found at all on a robed figure
+    or a child, because a robe's hem is wider than any arm. Measured off the
+    bones it is 5.7 degrees below horizontal on every body tried, robe and child
+    included. KOTOR's own arms rest at 52 to 55.
+
+    Positions are relative to the parent in the file, so this walks the tree.
+    """
+    import tempfile
+
+    from .vendor.jade import parse_jade_mdl
+
+    mdl_bytes, mdx_bytes = read(entry)
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        mdl_path = root / "model.mdl"
+        mdl_path.write_bytes(mdl_bytes)
+        mdx_path = None
+        if mdx_bytes:
+            mdx_path = root / "model.mdx"
+            mdx_path.write_bytes(mdx_bytes)
+        try:
+            model = parse_jade_mdl(mdl_path, mdx_path)
+        except Exception as exc:  # noqa: BLE001 - the reader raises many kinds
+            raise JadeError(f"could not read the model: {exc}") from exc
+
+        found: dict[str, np.ndarray] = {}
+
+        def walk(node, rotation, offset):
+            position = np.asarray(node.position or (0.0, 0.0, 0.0), dtype=float)
+            here = offset + rotation @ position
+            turned = rotation @ _quaternion_matrix(node.orientation or (1, 0, 0, 0))
+            if node.name:
+                found[node.name] = here
+            for child in node.children or []:
+                walk(child, turned, here)
+
+        walk(model.root, np.eye(3), np.zeros(3))
+        return found
+
+
+def arm_rest(entry: Entry) -> float | None:
+    """How far below horizontal this model's arms rest, in degrees.
+
+    KOTOR's own bodies rest at 52-55; Jade's at about 6, which is the gap a
+    ported body has to close before its arms land where the bones are.
+    """
+    bones = skeleton(entry)
+    shoulder, hand = bones.get("BLArmUppeL01"), bones.get("HandL")
+    if shoulder is None or hand is None:
+        return None
+    v = hand - shoulder
+    length = float(np.linalg.norm(v))
+    if length < 1e-6:
+        return None
+    v = v / length
+    return float(np.degrees(np.arctan2(-v[2], abs(v[0]))))
+
+
 def scene(entry: Entry, *, install=None, scale: float | None = None):
     """A drawable, *textured* scene for one Jade model.
 
