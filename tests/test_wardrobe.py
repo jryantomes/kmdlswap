@@ -237,3 +237,80 @@ class TestJadeHeadsOnOffer:
         from kmdlfun import wardrobe
 
         assert wardrobe.jade_heads(r"X:\not\a\game") == []
+
+
+
+@pytest.fixture(scope="module")
+def k1_install():
+    from kmdlfun import installs
+
+    found = installs.detect().get(installs.K1)
+    if not found:
+        pytest.skip("no KOTOR install on this machine")
+    return found
+
+
+class TestPartsInWords:
+    """`PMBIM` says everything and says it to nobody.
+
+    The player models encode sex, equipment slot and build, and a picker showing
+    five letters asks a person to have memorised the scheme rather than read it.
+    """
+
+    @staticmethod
+    def test_a_player_outfit_reads_as_what_it_is():
+        from kmdlfun import wardrobe
+
+        assert wardrobe.describe("PMBIM") == "Jedi robe - male, medium"
+        assert wardrobe.describe("PFBCS") == "armour, class 4 - female, small"
+        assert wardrobe.describe("PMBHL") == "armour, class 9 - male, large"
+
+    @staticmethod
+    def test_the_word_build_is_left_out():
+        """Every entry in the picker says build, so it distinguishes nothing -
+        and it cost the room that cut "female, large build" to "female, large"
+        beside a "male, large build" that happened to fit."""
+        from kmdlfun import wardrobe
+
+        assert "build" not in wardrobe.describe("PFBAL", slot=False)
+
+    @staticmethod
+    def test_a_body_is_not_described_by_what_it_wears():
+        """A body is always slot A, and calling it 'underwear' describes the
+        clothes rather than the person."""
+        from kmdlfun import wardrobe
+
+        assert wardrobe.describe("PFBAM", slot=False) == "female, medium"
+        assert "underwear" in wardrobe.describe("PFBAM", slot=True)
+
+    @staticmethod
+    def test_anything_else_falls_back_to_the_name_the_game_gave_it():
+        from kmdlfun import wardrobe
+
+        assert wardrobe.describe("N_CommF", "Commoner_01_Fem_Asian") == \
+            "Commoner 01 Fem Asian"
+        assert wardrobe.describe("N_TwilekF", "") == "N_TwilekF"
+        assert wardrobe.describe("", "") == ""
+
+    @staticmethod
+    def test_the_slot_names_are_the_games_own(k1_install):
+        """Not invented: `baseitems.2da` names the slot every item type draws
+        with, and C through H are Armor_Class_4 to Armor_Class_9."""
+        from kmdlfun import twoda as k2da
+        from kmdlfun import wardrobe
+
+        table = k2da._load(k1_install, "baseitems")
+        seen = {}
+        for row in range(table.get_height()):
+            var = table.get_cell(row, "bodyvar").strip().upper()
+            if var and var != "****":
+                seen.setdefault(var, table.get_cell(row, "label").strip())
+
+        assert "Jedi_Robe" in seen.get("I", ""), seen.get("I")
+        assert seen.get("B", "").startswith("Basic_Clothing")
+        for letter in "CDEFGH":
+            assert letter in wardrobe.SLOT_NAMES, letter
+        # Every armour slot reads differently. They were all "armour" or
+        # "heavy armour" and six classes collapsed into two words.
+        armour = [wardrobe.SLOT_NAMES[x] for x in "CDEFGH"]
+        assert len(set(armour)) == len(armour), armour

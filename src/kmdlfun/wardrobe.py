@@ -40,6 +40,54 @@ SELF_CONTAINED = "F"     # carries its own head and can never wear another
 # P M B C M  ->  player, male, body, armour class C, medium build
 BUILDS = {"S": "small", "M": "medium", "L": "large"}
 
+# What each equipment slot is, in the words the game uses for it.
+#
+# Not invented: `baseitems.2da` carries a `bodyvar` column naming the slot every
+# item type draws with, and these are its own labels. B is `Basic_Clothing` and
+# `Disguise_Item`, C through H are `Armor_Class_4` to `Armor_Class_9`, and I is
+# `Jedi_Robe`, `Jedi_Knight_Robe` and `Jedi_Master_Robe`. A appears nowhere,
+# because nothing is equipped to be naked.
+#
+# `PMBIM` says all of this already and says it to nobody: a picker showing five
+# letters is asking a person to have memorised a scheme instead of reading one.
+SLOT_NAMES = {
+    "A": "underwear",
+    "B": "clothing",
+    "C": "armour, class 4",
+    "D": "armour, class 5",
+    "E": "armour, class 6",
+    "F": "armour, class 7",
+    "G": "armour, class 8",
+    "H": "armour, class 9",
+    "I": "Jedi robe",
+}
+
+
+def describe(model: str, label: str = "", *, slot: bool = True) -> str:
+    """A part in words, from its own name where the name means something.
+
+    The player models encode sex, equipment slot and build - `P{M|F}B{A..I}{S|M|L}`
+    - and everything else falls back to the label its `appearance.2da` row
+    carries, which is a real name written by the people who made the game.
+
+    `slot=False` for a body, where the slot is always A and saying "underwear"
+    describes what it is wearing rather than who it is.
+    """
+    name = (model or "").strip()
+    upper = name.upper()
+    if len(upper) == 5 and upper.startswith(("PMB", "PFB")):
+        who = "male" if upper[1] == "M" else "female"
+        build = BUILDS.get(upper[4], "")
+        # "medium" rather than "medium build": every entry in the picker says
+        # build, so the word distinguishes nothing and costs the room that put
+        # "female, large build" one character over the line and cut it to
+        # "female, large" beside a "male, large build" that happened to fit.
+        person = ", ".join(x for x in (who, build) if x)
+        if not slot:
+            return person
+        return f"{SLOT_NAMES.get(upper[3], 'outfit')} - {person}"
+    return (label or "").strip().replace("_", " ") or name
+
 
 @dataclass(frozen=True)
 class Head:
@@ -87,6 +135,11 @@ class Body:
         if len(name) == 5 and name.startswith(("PMB", "PFB")):
             return BUILDS.get(name[4], "")
         return ""
+
+    @property
+    def described(self) -> str:
+        """What this body is, in words. See `describe`."""
+        return describe(self.model, self.label, slot=False)
 
     @property
     def display(self) -> str:

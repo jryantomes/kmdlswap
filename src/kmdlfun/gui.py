@@ -1041,27 +1041,36 @@ class App(ttk.Frame):
         self.part_jobs = {k: 0 for k in PART_KINDS}
         self.catalogue = None
 
-        # What is chosen, always on screen. Flipping between three tabs to
-        # remember what you picked is how a picker stops being one.
-        chosen = ttk.LabelFrame(page, text="This character", padding=8)
-        chosen.grid(row=0, column=0, sticky="ew")
+        # The figure beside the choices rather than above them, and never off
+        # screen. It was a strip across the top with the pickers below, so the
+        # thing being made competed for height with the thing making it, and on
+        # a short window the preview was the part that went.
+        side = ttk.Frame(page)
+        side.grid(row=0, column=0, sticky="nsw", padx=(0, 12))
+        page.columnconfigure(0, weight=0)
+        page.columnconfigure(1, weight=1)
+        page.rowconfigure(0, weight=1)
+
+        self.character_preview = ttk.Label(side, text="")
+        self.character_preview.grid(row=0, column=0, sticky="n")
+
+        chosen = ttk.LabelFrame(side, text="This character", padding=8)
+        chosen.grid(row=1, column=0, sticky="ew", pady=(8, 0))
         chosen.columnconfigure(1, weight=1)
         self.part_summary = {}
         for i, key in enumerate(PART_KINDS):
             ttk.Label(chosen, text=PART_TITLES[key]).grid(row=i, column=0,
-                                                          sticky="w", padx=(0, 8))
-            label = ttk.Label(chosen, text="nothing picked", foreground="#666")
+                                                          sticky="nw", padx=(0, 8))
+            label = ttk.Label(chosen, text="nothing picked", foreground="#666",
+                              wraplength=210, justify="left")
             label.grid(row=i, column=1, sticky="w")
             self.part_summary[key] = label
-        self.character_preview = ttk.Label(chosen, text="")
-        self.character_preview.grid(row=0, column=2, rowspan=3, padx=(12, 0))
-        self.character_warn = ttk.Label(chosen, text="", foreground="#a35",
-                                        wraplength=520)
-        self.character_warn.grid(row=3, column=0, columnspan=3, sticky="w",
-                                 pady=(6, 0))
+        self.character_warn = ttk.Label(side, text="", foreground="#a35",
+                                        wraplength=300, justify="left")
+        self.character_warn.grid(row=2, column=0, sticky="w", pady=(6, 0))
 
         inner = ttk.Notebook(page)
-        inner.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
+        inner.grid(row=0, column=1, sticky="nsew")
         self.part_gallery = {}
         for key in PART_KINDS:
             frame = ttk.Frame(inner, padding=6)
@@ -1079,6 +1088,12 @@ class App(ttk.Frame):
             box.bind("<<ComboboxSelected>>",
                      lambda _e, k=key: self._refresh_parts(k))
             setattr(self, f"part_filter_{key}", var)
+            ttk.Label(bar, text="Find").pack(side="left", padx=(12, 4))
+            found = tk.StringVar(value="")
+            ttk.Entry(bar, textvariable=found, width=14).pack(side="left")
+            found.trace_add("write", lambda *_a, k=key: self._refresh_parts(k))
+            setattr(self, f"part_search_{key}", found)
+
             note = ttk.Label(bar, text="", foreground="#666")
             note.pack(side="left", padx=(10, 0))
             setattr(self, f"part_note_{key}", note)
@@ -1104,7 +1119,7 @@ class App(ttk.Frame):
             self.part_gallery[key] = grid
 
         who = ttk.Frame(page)
-        who.grid(row=2, column=0, sticky="w", pady=(8, 0))
+        who.grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
         ttk.Label(who, text="Called").pack(side="left", padx=(0, 6))
         self.new_name = tk.StringVar(value="")
         ttk.Entry(who, textvariable=self.new_name, width=20).pack(side="left")
@@ -1118,7 +1133,8 @@ class App(ttk.Frame):
                             variable=self.new_kind).pack(side="left", padx=(10, 0))
 
         ttk.Button(page, text="Create the character",
-                   command=self._character_start).grid(row=3, column=0,
+                   command=self._character_start).grid(row=2, column=0,
+                                                       columnspan=2,
                                                        sticky="w", pady=(8, 0))
         ttk.Label(
             page,
@@ -1127,7 +1143,7 @@ class App(ttk.Frame):
                   "A tick means the game already puts that part on this body; "
                   "the rest are yours to try, which is the point of the tool."),
             foreground="#666", wraplength=780,
-        ).grid(row=4, column=0, sticky="w", pady=(4, 0))
+        ).grid(row=3, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
     # ---- filling the pickers ----------------------------------------------
 
@@ -1203,12 +1219,63 @@ class App(ttk.Frame):
             return cat.outfits_for(body or None)
         return cat.heads_for(body or None)
 
+    def _part_label(self, key: str, item) -> str:
+        """A part in words, with its resref still there.
+
+        `PMBIM` is a Jedi robe on a medium male build, and a picker showing five
+        letters asks a person to have memorised the scheme rather than read it.
+        The resref stays because it is what the game and every other tool call
+        the thing, and it also keeps the label unique - two bodies that describe
+        the same way collapsed into one entry once already.
+        """
+        from . import wardrobe as kwardrobe
+
+        model = item.model
+        said = self._part_said(key, item)
+        # An outfit is a model *and* a texture: `PFBAM` is worn in two colours
+        # and both are on offer, so without the texture they describe
+        # identically and one of them is silently dropped when the labels go
+        # into a dict. The same trap that collapsed six player bodies into two.
+        skin = getattr(item, "texture", "") if key == "outfit" else ""
+        if skin and skin.lower() != model.lower():
+            said = f"{said}   {skin}" if said else skin
+        return f"{model}   {said}" if said else model
+
+    def _part_said(self, key: str, item) -> str:
+        """What a part is, without repeating what it is called."""
+        from . import wardrobe as kwardrobe
+
+        if item is None:
+            return ""
+        if key == "head":
+            look = getattr(item, "look", "")
+            game = ("Jade Empire" if getattr(item, "source", "") == "jade"
+                    else "KOTOR II" if getattr(item, "game", "") else "")
+            return " - ".join(x for x in (look if look != "unknown" else "", game) if x)
+        # `Outfit.label` is a display string that already contains the model
+        # name, so feeding it back in gave "N_CommF   N CommF (Commoner 01)".
+        # What is wanted is the row's own label, which an outfit calls
+        # `example` - the character the game dresses in it.
+        given = (getattr(item, "example", "") if key == "outfit"
+                 else getattr(item, "label", "")) or ""
+        said = kwardrobe.describe(item.model, given, slot=key != "body")
+        return "" if said.lower() == item.model.lower() else said
+
+    def _item_for(self, key: str, model: str):
+        cat = self.catalogue
+        return getattr(cat, key)(model) if cat is not None else None
+
     def _refresh_parts(self, key: str):
         from . import who as kwho
 
         wanted = getattr(self, f"part_filter_{key}").get()
+        search = getattr(self, f"part_search_{key}").get().strip().lower()
         body = self.part_pick["body"].get()
         items = self._part_items(key)
+        if search:
+            items = [i for i in items
+                     if search in i.model.lower()
+                     or search in self._part_label(key, i).lower()]
         if wanted != ANYONE:
             # Through the catalogue rather than the item, because an outfit is
             # a body model and has a sex, but is not the kind of object that
@@ -1223,12 +1290,15 @@ class App(ttk.Frame):
                 seen = self.catalogue.pairs_with(
                     body, **{"head" if key == "head" else "outfit": item})
                 mark = f"{SEEN_IN_GAME} " if seen else ""
-            labels[f"{mark}{item.label}"] = item.model
+            labels[f"{mark}{self._part_label(key, item)}"] = item.model
 
         self.part_labels[key] = labels
         self.part_photos[key] = {k: v for k, v in self.part_photos[key].items()
                                  if k in labels}
-        self.part_gallery[key].show(list(labels))
+        self.part_gallery[key].show(
+            list(labels),
+            {label: self._part_said(key, self._item_for(key, model))
+             for label, model in labels.items()})
         getattr(self, f"part_note_{key}").config(
             text=f"{len(labels)} to choose from"
             + (f", {SEEN_IN_GAME} = the game already pairs it with this body"
@@ -1350,8 +1420,13 @@ class App(ttk.Frame):
         cat = self.catalogue
         picked = {k: self.part_pick[k].get() for k in PART_KINDS}
         for key in PART_KINDS:
+            said = ""
+            if picked[key] and cat is not None:
+                found = getattr(cat, key)(picked[key])
+                if found is not None:
+                    said = self._part_label(key, found)
             self.part_summary[key].config(
-                text=picked[key] or "nothing picked",
+                text=said or picked[key] or "nothing picked",
                 foreground="#000" if picked[key] else "#666")
 
         # Say plainly when a combination is one the game never ships. It is

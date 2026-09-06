@@ -2254,3 +2254,83 @@ class TestTheCollarWarning:
             stocked._update_character()
 
             assert self.PHRASE not in stocked.character_warn.cget("text")
+
+
+class TestPartsReadAsWhatTheyAre:
+    """`PMBIM` is a Jedi robe on a medium male build.
+
+    A picker showing five letters asks a person to have memorised the scheme
+    rather than read it - and the resref stays, because it is what the game and
+    every other tool call the thing, and because two parts that describe the
+    same way collapsed into one entry once already.
+    """
+
+    @staticmethod
+    def test_a_label_carries_both_the_name_and_the_meaning(stocked):
+        label = next(k for k, v in stocked.part_labels["outfit"].items()
+                     if v == "PMBIM")
+
+        assert "PMBIM" in label
+        assert "Jedi robe" in label
+
+    @staticmethod
+    def test_the_gallery_gets_a_second_line_rather_than_a_cut_word(stocked):
+        """It drew the first word of the label under a 96-pixel cell, so
+        "female, medium   PFBAM" arrived as "female,"."""
+        labels = stocked.part_labels["body"]
+        subtitles = stocked.part_gallery["body"].subtitles
+
+        assert set(subtitles) >= set(labels), "the gallery was given no subtitles"
+        said = subtitles[next(k for k, v in labels.items() if v == "PFBAM")]
+        assert said == "female, medium"
+
+    @staticmethod
+    def test_no_two_parts_describe_to_the_same_label(stocked):
+        """The labels are dict keys, so a collision is silent - it drops an
+        entry rather than raising. Six player bodies collapsed to two that way
+        once, so this counts the labels built rather than the ones kept.
+
+        The same model may legitimately appear twice: an outfit is a model *and*
+        a texture, and `N_CommF` is worn by both a commoner and a Czerka
+        officer. What must not repeat is the label."""
+        for key in ("body", "outfit", "head"):
+            items = stocked._part_items(key)
+            built = [stocked._part_label(key, i) for i in items]
+            duplicates = {x for x in built if built.count(x) > 1}
+            assert not duplicates, (key, sorted(duplicates)[:4])
+
+    @staticmethod
+    def test_an_outfit_does_not_repeat_its_own_name(stocked):
+        """`Outfit.label` is a display string that already carries the model,
+        so feeding it back in gave "N_CommF   N CommF (Commoner 01)"."""
+        labels = [k for k, v in stocked.part_labels["outfit"].items()
+                  if v.upper().startswith("N_COMM")]
+
+        assert labels, "no NPC outfit on offer to check"
+        for label in labels:
+            resref, _, said = label.partition("   ")
+            assert resref.strip().lower() not in said.lower().replace("_", " "), label
+
+    @staticmethod
+    def test_find_narrows_the_list(stocked):
+        before = len(stocked.part_labels["outfit"])
+        stocked.part_search_outfit.set("jedi")
+        stocked._refresh_parts("outfit")
+        after = stocked.part_labels["outfit"]
+        stocked.part_search_outfit.set("")
+        stocked._refresh_parts("outfit")
+
+        assert 0 < len(after) < before
+        assert all("Jedi" in k or "jedi" in k.lower() for k in after), list(after)[:3]
+
+    @staticmethod
+    def test_find_matches_the_resref_too(stocked):
+        """Both halves of the label are searchable - somebody who knows the
+        resref should not have to know the description as well."""
+        stocked.part_search_body.set("pfbam")
+        stocked._refresh_parts("body")
+        got = dict(stocked.part_labels["body"])
+        stocked.part_search_body.set("")
+        stocked._refresh_parts("body")
+
+        assert list(got.values()) == ["PFBAM"], got

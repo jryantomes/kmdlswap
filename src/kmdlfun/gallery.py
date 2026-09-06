@@ -21,10 +21,35 @@ import tkinter as tk
 from tkinter import ttk
 
 CELL_PAD = 8
-LABEL_H = 16
+# Two lines under each cell: what the thing is called, and what it is. One line
+# was enough while every label was a resref; a described part does not fit on
+# one, and taking the first word of it turned "female, medium build   PFBAM"
+# into "female,".
+LABEL_H = 28
+LINE_H = 12
+# Characters that fit under a 96-pixel cell at 8pt.
+LINE_CHARS = 17
 SELECT_FILL = "#2d5c8a"
 SELECT_OUTLINE = "#7fb4e8"
 TEXT_FILL = "#dddddd"
+SUBTITLE_FILL = "#9a9a9a"
+
+
+def _shorten(text: str, room: int) -> str:
+    """Trim to `room` characters on a word boundary where there is one.
+
+    Cutting mid-word reads as a rendering fault rather than an abbreviation -
+    "clothing - fem" looks broken where "clothing" looks deliberate.
+    """
+    text = text.strip()
+    if len(text) <= room:
+        return text
+    cut = text[:room]
+    if " " in cut:
+        trimmed = cut.rsplit(" ", 1)[0].rstrip(" ,-")
+        if len(trimmed) >= room // 2:
+            return trimmed
+    return cut.rstrip(" ,-")
 
 
 class Gallery(ttk.Frame):
@@ -32,6 +57,7 @@ class Gallery(ttk.Frame):
         super().__init__(master, **kw)
         self.cell = cell
         self.on_pick = on_pick
+        self.subtitles: dict[str, str] = {}
 
         # Ask for one row. A Canvas with no size asks for Tk's default, which
         # is a couple of hundred pixels and quietly made this the tallest thing
@@ -60,9 +86,14 @@ class Gallery(ttk.Frame):
 
     # ---- content -----------------------------------------------------------
 
-    def show(self, labels) -> None:
-        """Replace the contents. `labels` is an ordered iterable of strings."""
+    def show(self, labels, subtitles=None) -> None:
+        """Replace the contents. `labels` is an ordered iterable of strings.
+
+        `subtitles` maps a label to a second line drawn under it - what the part
+        is, where the label is what it is called.
+        """
         self.labels = list(labels)
+        self.subtitles = dict(subtitles or {})
         if self.selected not in self.labels:
             self.selected = None
         # Images for rows that are gone would otherwise accumulate; Tk only
@@ -149,12 +180,20 @@ class Gallery(ttk.Frame):
                     outline="#333", fill="#252525",
                 )
 
-            # The model name is what identifies it; the grade and marks are in
-            # the full label and would not fit under a 96-pixel cell.
+            # The name on top, what it is underneath. The grade and marks stay
+            # in the full label, which would not fit under a 96-pixel cell.
             self.canvas.create_text(
-                x + step // 2, y + step + LABEL_H // 2 - 2,
-                text=label.split()[0][:16], fill=TEXT_FILL, font=("Segoe UI", 8),
+                x + step // 2, y + step + LINE_H // 2,
+                text=label.split()[0][:LINE_CHARS], fill=TEXT_FILL,
+                font=("Segoe UI", 8),
             )
+            said = getattr(self, "subtitles", {}).get(label, "")
+            if said:
+                self.canvas.create_text(
+                    x + step // 2, y + step + LINE_H + LINE_H // 2 - 1,
+                    text=_shorten(said, LINE_CHARS), fill=SUBTITLE_FILL,
+                    font=("Segoe UI", 7),
+                )
 
         rows = (len(self.labels) + self._columns - 1) // self._columns
         self.canvas.configure(scrollregion=(0, 0, self._columns * step, rows * row_h))
