@@ -50,6 +50,9 @@ from .library import build
 WINDOW_W, WINDOW_H = 860, 980
 
 WHOLE_MODEL = "every matching part (whole model)"
+
+# A blank line before a job starts, so the log reads as sections.
+NEWLINE = chr(10)
 ANYONE = "anyone"
 AUTO_NODE = "automatic"
 NOT_A_CHARACTER = "just a model"
@@ -192,6 +195,7 @@ class App(ttk.Frame):
         # Nothing can be clicked while the tables are being read. See `_busy`.
         self._busy_reasons: dict[str, str] = {}
         self._busy_panel = None
+        self._scanning = False
 
         self.after(100, self._drain)
         self._on_effect_change()
@@ -219,17 +223,34 @@ class App(ttk.Frame):
             self._busy_text.grid(row=0, column=0, pady=(0, 10))
             bar = ttk.Progressbar(inner, mode="indeterminate", length=280)
             bar.grid(row=1, column=0)
-            bar.start(12)
             # Swallow anything aimed at what is underneath. The shade covers the
             # window, so this is belt and braces for a stray key press.
             for sequence in ("<Button>", "<Key>", "<MouseWheel>"):
                 panel.bind(sequence, lambda _e: "break")
             panel.focus_set()
             self._busy_panel = (panel, bar)
-        panel, _bar = self._busy_panel
+        panel, bar = self._busy_panel
         self._busy_text.config(text=" - ".join(self._busy_reasons.values()))
         panel.place(x=0, y=0, relwidth=1.0, relheight=1.0)
         panel.lift()
+        # Started every time, not once when the panel was built. `_busy_done`
+        # stops it, so the first shade of a session crawled and every one after
+        # it stood still - which reads as a frozen window rather than a busy
+        # one, since standing still is exactly what a hung app looks like.
+        bar.start(12)
+
+    def _busy_progress(self, done: int, total: int, label: str) -> None:
+        """Put a real count on the shade, and fill the bar rather than slide it."""
+        if not self._busy_reasons or self._busy_panel is None:
+            return
+        _panel, bar = self._busy_panel
+        if total > 0:
+            if str(bar.cget("mode")) != "determinate":
+                bar.stop()
+                bar.config(mode="determinate", maximum=100)
+            bar.config(value=100 * (done + 1) / total)
+        said = " - ".join(self._busy_reasons.values())
+        self._busy_text.config(text=f"{said}   [{done + 1}/{total}] {label}")
 
     def _busy_done(self, reason: str) -> None:
         self._busy_reasons.pop(reason, None)
@@ -240,6 +261,7 @@ class App(ttk.Frame):
             self._busy_text.config(text=" - ".join(self._busy_reasons.values()))
             return
         bar.stop()
+        bar.config(mode="indeterminate", value=0)
         panel.place_forget()
 
     # ---- shared ------------------------------------------------------------
@@ -576,7 +598,7 @@ class App(ttk.Frame):
             inner = ttk.Notebook(holder)
             inner.pack(fill="both", expand=True)
             inner.bind("<<NotebookTabChanged>>",
-                       lambda _e: self._name_the_action())
+                       lambda _e: self._on_page_shown())
             self._groups[name] = inner
 
         self._build_character_tab()
@@ -596,6 +618,10 @@ class App(ttk.Frame):
         parent.add(page, text=caption)
         self.pages[key] = (parent, page)
         return page
+
+    def _on_page_shown(self) -> None:
+        self._name_the_action()
+        self._scan_if_needed()
 
     def _show_page(self, key: str) -> None:
         """Bring one page to the front, whichever group it is inside."""
@@ -746,7 +772,9 @@ class App(ttk.Frame):
         self.host_box.grid(row=0, column=1, sticky="ew", padx=6)
         self.host_box.bind("<<ComboboxSelected>>", lambda _e: self._refresh_donors())
 
-        ttk.Button(page, text="Scan install", command=self._scan).grid(row=0, column=4)
+        # A rescan, not the way in: every page that needs the index now asks for
+        # it when it is opened. Kept for a model added to Override since.
+        ttk.Button(page, text="Rescan", command=self._scan).grid(row=0, column=4)
 
         # A name does not tell you what a face looks like. `n_shaardanh` and
         # `n_lashoweh` are both clean fits on Carth and one of them is the one
@@ -2205,7 +2233,9 @@ class App(ttk.Frame):
             return
         name = self.preview_model.get().strip()
         if not name:
-            self._say("pick a model to preview (press Scan install first)")
+            self._say("reading your install - pick a model when the list fills"
+                      if self._scanning else
+                      "pick a model to preview from the list")
             return
         if not self._check_install():
             return
@@ -2337,8 +2367,8 @@ class App(ttk.Frame):
         # create character".
         self.build_btn = ttk.Button(row, text="Build", command=self._start)
         self.build_btn.grid(row=1, column=1)
-        self.tabs.bind("<<NotebookTabChanged>>", lambda _e: self._name_the_action())
-        self._name_the_action()
+        self.tabs.bind("<<NotebookTabChanged>>", lambda _e: self._on_page_shown())
+        self._on_page_shown()
         ttk.Button(row, text="Open output", command=self._open_out).grid(
             row=1, column=2, padx=(6, 0)
         )
@@ -2359,6 +2389,33 @@ class App(ttk.Frame):
         "Transplant": ("Swap the parts", None),
         "Effects": ("Apply the change", None),
     }
+
+    # Pages whose controls are empty until the install has been indexed.
+    NEEDS_INDEX = ("Preview", "Transplant", "Custom head")
+
+    def _scan_if_needed(self) -> None:
+        """Index the install the first time a page that needs it is opened.
+
+        The Preview page offered a model box filled by the scan and a Show
+        button that said "press Scan install first" - and that button lives on
+        the swap-parts page, which after the regroup is not even in the same
+        group. Telling somebody to go and find a control is worse than doing the
+        thing, and the character catalogue already loads itself this way.
+        """
+        if self._current_page() not in self.NEEDS_INDEX:
+            return
+        if self.index is not None or self._scanning:
+            return
+        if not (Path(self.install.get().strip()) / "chitin.key").is_file():
+            return                      # no install set yet; the scan would fail
+        self._scanning = True
+        self._busy("scan", "reading the models in your install")
+        if not self._scan():
+            # It declined - busy already, or no install. Take the shade back
+            # down rather than leaving the window covered by a scan that never
+            # ran.
+            self._scanning = False
+            self._busy_done("scan")
 
     def _name_the_action(self) -> None:
         """Label the button for the tab in front, and grey it where there is
@@ -2588,7 +2645,11 @@ class App(ttk.Frame):
         self.outfit_box.config(values=[SAME_AS_HOST] + [
             f"{o.model}  ({o.example})" if o.example else o.model for o in rack
         ])
-        self._say(f"{len(rack)} outfits available to wear")
+        # Logged, not put on the status line. The wardrobe loads in the
+        # background and finishing mid-task would replace the status of
+        # whatever the person was actually doing - the same fault the catalogue
+        # summary had, on a different message.
+        self._say(f"{len(rack)} outfits available to wear", status=False)
 
     def _show_thumb(self, job: int, label: str, path: str):
         if job != self._thumb_job or label not in self.donor_labels:
@@ -3388,10 +3449,22 @@ class App(ttk.Frame):
             return False
         return True
 
-    def _scan(self):
+    def _scan(self) -> bool:
+        """Index the install. Returns whether it actually started.
+
+        The caller needs to know: `_scan_if_needed` raises a shade before
+        calling, and a scan that declined to start would leave it up forever.
+        """
         if not self._check_install() or (self.worker and self.worker.is_alive()):
-            return
-        self._say("\nscanning install for character models ...")
+            return False
+        # Only claims the status line when the person asked for it. Opening
+        # a page that needs the index starts this on their behalf, and it
+        # should not answer a question they did not ask.
+        # Only claims the status line when the person asked for it: opening
+        # a page that needs the index starts this on their behalf, and it
+        # should not answer a question they did not ask.
+        self._say(NEWLINE + "scanning install for character models ...",
+                  status=not self._busy_reasons)
         self.build_btn.config(state="disabled")
         # Read here, on the main thread, and handed over as a plain string.
         # Reading it inside the worker survived only while the main loop
@@ -3401,6 +3474,7 @@ class App(ttk.Frame):
             target=self._scan_work, args=(self.install.get().strip(),), daemon=True
         )
         self.worker.start()
+        return True
 
     def _scan_work(self, install: str):
         """Build the compatibility index.
@@ -3967,7 +4041,14 @@ class App(ttk.Frame):
                     i, total, label = payload
                     self.progress.config(value=100 * i / max(total, 1))
                     if label != "done":
-                        self._say(f"  [{i + 1}/{total}] {label}")
+                        # While the window is shaded the person is looking at
+                        # the shade, so that is where the count goes - and a bar
+                        # that fills is a better answer to "is this frozen" than
+                        # one that only slides. The status line underneath
+                        # belongs to whatever they last asked for.
+                        self._busy_progress(i, total, label)
+                        self._say(f"  [{i + 1}/{total}] {label}",
+                                  status=not self._busy_reasons)
                 elif kind == "scenes":
                     scenes, labels, note, *rest = payload
                     self.viewport.set_scenes(scenes, labels)
@@ -3979,6 +4060,8 @@ class App(ttk.Frame):
                     # front rather than drawing where nobody is looking.
                     self._show_page("Preview")
                 elif kind == "index":
+                    self._scanning = False
+                    self._busy_done("scan")
                     payload, kinds, scanned = payload
                     self.index = payload
                     self.models = payload.names
@@ -3994,7 +4077,8 @@ class App(ttk.Frame):
                     cache = getattr(self, "_kind_cache", {})
                     cache.setdefault(scanned, kinds)
                     self._kind_cache = cache
-                    self._say(f"indexed {len(self.models)} character models")
+                    self._say(f"indexed {len(self.models)} character models",
+                              status=False)
                     self._load_wardrobe(scanned)
                     self._load_catalogue(scanned)
                     self._refresh_donors()
@@ -4042,6 +4126,7 @@ class App(ttk.Frame):
                     self.rank_btn.config(state="normal")
                     self._say("could not rank donors: " + payload)
                 elif kind == "error":
+                    self._scanning = False
                     # A load that failed must not leave the window shaded.
                     for reason in list(getattr(self, "_busy_reasons", {})):
                         self._busy_done(reason)

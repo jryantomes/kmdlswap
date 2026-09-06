@@ -2438,3 +2438,125 @@ class TestTheWindowSpeaksPlainly:
         walk(page_of(app, "Transplant"))
         assert "Base" in labels, labels[:8]
         assert any("Source" in x for x in labels), labels[:8]
+
+
+class TestPagesThatNeedTheIndexAskForIt:
+    """The Preview page offered a model box the scan fills and a Show button
+    that said "press Scan install first" - and that button is on the swap-parts
+    page, which after the regroup is not even in the same group.
+    """
+
+    @staticmethod
+    def test_opening_preview_starts_the_scan(app):
+        app.index = None
+        app._scanning = False
+        app._show_page("Preview")
+        app.update()
+
+        assert app._scanning, "it still waits to be told"
+        assert "scan" in app._busy_reasons
+
+    @staticmethod
+    def test_a_scan_that_will_not_start_does_not_leave_the_shade_up(app, monkeypatch):
+        """A shade raised for work that never began covers the window for good."""
+        app.index = None
+        app._scanning = False
+        monkeypatch.setattr(app, "_scan", lambda: False)
+        app._show_page("Preview")
+        app.update()
+
+        assert not app._scanning
+        assert "scan" not in app._busy_reasons
+
+    @staticmethod
+    def test_it_does_not_scan_twice(app):
+        calls = []
+        app.index = None
+        app._scanning = False
+        real = app._scan
+        app._scan = lambda: (calls.append(1), real())[1]
+        app._show_page("Preview")
+        app._show_page("Transplant")
+        app._show_page("Preview")
+        app.update()
+        app._scan = real
+
+        assert len(calls) == 1, calls
+
+    @staticmethod
+    def test_a_page_that_needs_nothing_does_not_scan(app):
+        app.index = None
+        app._scanning = False
+        app._show_page("Builds")
+        app.update()
+
+        assert not app._scanning
+
+
+class TestTheShadeLooksBusy:
+    """A bar that does not move is what a hung window looks like.
+
+    It was started once, when the panel was built, and stopped every time the
+    shade came down - so the first load of a session crawled and every one after
+    it stood perfectly still.
+    """
+
+    @staticmethod
+    def spins(app) -> bool:
+        """Whether the bar's value actually advances while the app ticks."""
+        _panel, bar = app._busy_panel
+        seen = set()
+        for _ in range(12):
+            app.update()
+            seen.add(float(bar.cget("value")))
+            time.sleep(0.02)
+        return len(seen) > 1
+
+    def test_it_moves_the_first_time(self, app):
+        app._busy("probe", "working")
+        try:
+            assert self.spins(app)
+        finally:
+            app._busy_done("probe")
+
+    def test_it_still_moves_the_second_time(self, app):
+        """The bug: `_busy_done` stops the bar, and only the panel's first
+        construction ever started it."""
+        app._busy("probe", "working")
+        app._busy_done("probe")
+
+        app._busy("probe", "working")
+        try:
+            assert self.spins(app), "the shade froze on its second showing"
+        finally:
+            app._busy_done("probe")
+
+
+class TestBackgroundWorkKeepsQuiet:
+    """Loading finishes when it finishes, which may be in the middle of
+    something the person is watching.
+
+    Three background completions have now claimed the status line and replaced a
+    result somebody was reading: the catalogue summary, the wardrobe count and
+    the scan's own total. They belong in the log.
+    """
+
+    @staticmethod
+    def test_a_background_message_does_not_replace_a_result(app):
+        app._set_status("preview only: 1/1 would transfer")
+        for said in ("36 bodies, 117 outfits and 328 heads to build a character from",
+                     "117 outfits available to wear",
+                     "indexed 233 character models"):
+            app._say(said, status=False)
+            assert app.status.cget("text") == "preview only: 1/1 would transfer", said
+
+        log = app.log.get("1.0", "end")
+        assert "outfits available to wear" in log
+        assert "indexed 233" in log
+
+    @staticmethod
+    def test_work_the_person_asked_for_still_reports(app):
+        """The rule is about *background* work. Anything they pressed a button
+        for should still say how it went."""
+        app._say("preview only: 1/1 would transfer")
+        assert app.status.cget("text") == "preview only: 1/1 would transfer"
