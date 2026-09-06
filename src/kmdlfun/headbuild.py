@@ -134,6 +134,7 @@ def run(
     reshape: bool = False,
     hide: list[str] | None = None,
     build: bool = False,
+    force: bool = False,
 ) -> HeadResult:
     """Check a head pack, and build it into a host model when asked.
 
@@ -303,6 +304,19 @@ def run(
 
     r.failures = list(verdict.failures)
     r.warnings = list(verdict.warnings)
+    if r.failures and force:
+        # Build it anyway, and say so. The spec is written for heads - vanilla's
+        # 440-796 triangles, its solidity, the size of a head node - and every
+        # one of those is the wrong question for a body: a whole Jade body into
+        # a torso node reads as 1.5x too big and twice too dense while the
+        # whole-model budget it actually has to fit is not close to full.
+        #
+        # Not a way to ignore the checks in general. It exists so a thing the
+        # spec has no opinion about can be put in front of the game, which is
+        # the only place some of these questions get answered.
+        r.lines.append("forced: built despite " + ", ".join(
+            f.check for f in r.failures) + " - the spec's limits are a head's")
+        r.failures = []
     if r.failures:
         if not decimate and any(f.check == "density" for f in r.failures):
             r.lines.append("Too dense is the one failure the tool can fix itself: "

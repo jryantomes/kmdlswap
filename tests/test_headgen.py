@@ -251,3 +251,66 @@ def test_both_anchor_the_chin_to_the_same_place():
     fitted = headgen.fit_to(mesh, node, centre, anchor="chin")
 
     assert min(p[2] for p in placed) == pytest.approx(min(p[2] for p in fitted))
+
+
+
+@pytest.fixture(scope="module")
+def jade_path():
+    from kmdlfun import installs
+
+    found = installs.detect().get(installs.JADE)
+    if not found:
+        pytest.skip("no Jade Empire install on this machine")
+    return found
+
+
+@pytest.fixture(scope="module")
+def k1_path():
+    from kmdlfun import installs
+
+    found = installs.detect().get(installs.K1)
+    if not found:
+        pytest.skip("no KOTOR install on this machine")
+    return found
+
+
+def test_a_jade_body_arrives_on_its_side(jade_path, k1_path):
+    """Heads come through the conversion upright; bodies do not.
+
+    `TO_KOTOR` maps Jade's X-up to KOTOR's Z-up and is right for heads. A body
+    put through the same correction lands with its arm span along z and its
+    height along x - it is lying down. The cause is not yet known; this records
+    the fact so it is not rediscovered by looking at a render.
+
+    Told apart by the shape of the mesh, not its extents: in a T-pose the arm
+    span and the height are nearly equal, so a bounding box cannot distinguish
+    them - which is exactly what fooled the first check. Along the true height
+    a body is narrow at the feet and broad at the shoulders; along the arm span
+    it is pinched at both hands and broad in the middle.
+    """
+    import numpy as np
+
+    from kmdlfun import jade
+
+    def girths(P, axis):
+        v = P[:, axis]
+        t = (v - v.min()) / (v.max() - v.min())
+        others = [i for i in range(3) if i != axis]
+        out = []
+        for a, b in ((0, 1 / 3), (1 / 3, 2 / 3), (2 / 3, 1)):
+            q = P[(t >= a) & (t <= b)][:, others]
+            out.append(float(np.hypot(*(q.max(0) - q.min(0)))) if len(q) > 2 else 0.0)
+        return out
+
+    entry = next((e for e in jade.catalogue(jade_path, kinds=(jade.BODY,))
+                  if e.resref.lower() == "n_bandit_"), None)
+    if entry is None:
+        pytest.skip("n_bandit_ not present")
+    P = np.asarray(jade.mesh(*jade.read(entry),
+                             scale=jade.scale_for(entry.kind)).positions, float)
+
+    low, mid, high = girths(P, 2)
+    assert low < mid and high < mid, (low, mid, high)
+    assert abs(low - high) < 0.2 * mid, (
+        "pinched at both ends and broad in the middle is an arm span, not a "
+        "height - if this now fails, bodies have been made to stand up")
