@@ -1,5 +1,13 @@
 """Tkinter desktop app for kmdlfun.
 
+**The window says base and source; the code says host and donor.** They are the
+same two things. The code's words are the ones the modules, the reports and the
+commit history use and renaming those would touch far more than a caption; the
+window's are the ones somebody can read without being told what they mean. Where
+a string is shown to a person it says base and source, and everywhere else the
+old pair stands.
+
+
 Tkinter ships with Python, so the app adds no dependency. It drives the same
 library the CLI does - nothing here reimplements the geometry work.
 
@@ -41,7 +49,7 @@ from .library import build
 # inside it, and a magic number in two places drifts apart.
 WINDOW_W, WINDOW_H = 860, 980
 
-WHOLE_MODEL = "matching nodes (whole model)"
+WHOLE_MODEL = "every matching part (whole model)"
 ANYONE = "anyone"
 AUTO_NODE = "automatic"
 NOT_A_CHARACTER = "just a model"
@@ -312,9 +320,15 @@ class App(ttk.Frame):
             except tk.TclError:
                 continue                # a destroyed window is not an error
 
+        # Through whichever notebook the page is in. Pages live in groups now,
+        # and asking the outer notebook to hide one of the inner ones raises -
+        # quietly, since this swallows TclError, so basic mode simply stopped
+        # hiding anything.
         for page, _label in self._advanced_tabs:
+            holder = next((parent for parent, frame in self.pages.values()
+                           if frame is page), self.tabs)
             try:
-                self.tabs.tab(page, state="hidden" if basic else "normal")
+                holder.tab(page, state="hidden" if basic else "normal")
             except tk.TclError:
                 continue
 
@@ -528,30 +542,101 @@ class App(ttk.Frame):
         if chosen:
             self.jade.set(chosen)
 
+    # Where each page lives and what it is called there.
+    #
+    # Eight tabs across the top asked a beginner to know the difference between
+    # a transplant, a custom head and an effect before choosing one, and those
+    # three are all "change or build a model". Two groups answer the question
+    # somebody actually arrives with: am I making something, or changing
+    # something that exists.
+    #
+    # The key is not the caption. Code and tests navigate by the key, so a page
+    # can be renamed or moved between groups without either following it - the
+    # captions here have already changed once.
+    PAGES = (
+        ("Character", "Character", "Make"),
+        ("Custom head", "Head from a file", "Make"),
+        ("Transplant", "Swap parts", "Change"),
+        ("Effects", "Quick changes", "Change"),
+        ("Lips", "Lips", "Change"),
+        ("Preview", "Preview", None),
+        ("Builds", "Builds", None),
+        ("Upcoming", "Upcoming", None),
+    )
+    GROUPS = ("Make", "Change")
+
     def _build_tabs(self):
         self.tabs = ttk.Notebook(self)
         self.tabs.grid(row=1, column=0, sticky="nsew", pady=(0, 8))
-        # Transplant first because it is what the tool is for. Effects last:
-        # it was written first and sat in front for that reason alone.
-        self._build_transplant_tab()
+        self.pages: dict[str, tuple] = {}
+        self._groups: dict[str, ttk.Notebook] = {}
+        for name in self.GROUPS:
+            holder = ttk.Frame(self.tabs, padding=6)
+            self.tabs.add(holder, text=name)
+            inner = ttk.Notebook(holder)
+            inner.pack(fill="both", expand=True)
+            inner.bind("<<NotebookTabChanged>>",
+                       lambda _e: self._name_the_action())
+            self._groups[name] = inner
+
         self._build_character_tab()
         self._build_head_tab()
+        self._build_transplant_tab()
+        self._build_effect_tab()
         self._build_lips_tab()
         self._build_preview_tab()
         self._build_builds_tab()
-        self._build_effect_tab()
         self._build_upcoming_tab()
+
+    def _page(self, key: str) -> ttk.Frame:
+        """Make the frame for one page, in whichever notebook it belongs to."""
+        caption, group = next((c, g) for k, c, g in self.PAGES if k == key)
+        parent = self._groups[group] if group else self.tabs
+        page = ttk.Frame(parent, padding=8)
+        parent.add(page, text=caption)
+        self.pages[key] = (parent, page)
+        return page
+
+    def _show_page(self, key: str) -> None:
+        """Bring one page to the front, whichever group it is inside."""
+        parent, page = self.pages[key]
+        if parent is not self.tabs:
+            for name, inner in self._groups.items():
+                if inner is parent:
+                    self.tabs.select(self.pages_group_frame(name))
+                    break
+        parent.select(page)
+        self.update_idletasks()
+
+    def pages_group_frame(self, name: str):
+        return self._groups[name].master
+
+    def _current_page(self) -> str:
+        """The key of the page in front, looking inside a group if need be."""
+        try:
+            chosen = self.tabs.select()
+        except tk.TclError:
+            return ""
+        for name, inner in self._groups.items():
+            if str(self.pages_group_frame(name)) == str(chosen):
+                try:
+                    inside = inner.select()
+                except tk.TclError:
+                    return ""
+                return next((k for k, (parent, page) in self.pages.items()
+                             if parent is inner and str(page) == str(inside)), "")
+        return next((k for k, (parent, page) in self.pages.items()
+                     if parent is self.tabs and str(page) == str(chosen)), "")
 
     # What each tab is for, in one line, at the top of it. A beginner opening
     # the window meets eight tab names and no indication which one does the
     # thing they came for.
     TAB_HELP = {
-        "Effects": "Quick changes to a model that need no donor - resize it, "
-                   "recolour it, or give it a glow. Pick a model, pick an "
-                   "effect, build.",
-        "Transplant": "Put one model's head (or any part) onto another. The "
-                      "host keeps its body and animations; the donor supplies "
-                      "the geometry.",
+        "Effects": "Quick changes to a model on its own - resize it, recolour "
+                   "it, or give it a glow. Pick a model, pick a change, build.",
+        "Transplant": "Take a part from one model and put it on another. The "
+                      "base keeps its body and animations; the source supplies "
+                      "the shape.",
         "Custom head": "Build a head from a file you supply - a .glb sculpt, a "
                        "scan, or a head converted from another game - and fit "
                        "it to a KOTOR body.",
@@ -589,8 +674,7 @@ class App(ttk.Frame):
     # ---- effects tab -------------------------------------------------------
 
     def _build_effect_tab(self):
-        page = ttk.Frame(self.tabs, padding=8)
-        self.tabs.add(page, text="Effects")
+        page = self._page("Effects")
         outer_page = page
         page = self._explain(outer_page, "Effects")
         page.columnconfigure(1, weight=1)
@@ -647,8 +731,7 @@ class App(ttk.Frame):
     # ---- transplant tab ----------------------------------------------------
 
     def _build_transplant_tab(self):
-        page = ttk.Frame(self.tabs, padding=8)
-        self.tabs.add(page, text="Transplant")
+        page = self._page("Transplant")
         outer_page = page
         page = self._explain(outer_page, "Transplant")
         # The notebook holds the outer frame, so that is what gets hidden.
@@ -657,7 +740,7 @@ class App(ttk.Frame):
         page.columnconfigure(1, weight=1)
         page.columnconfigure(3, weight=1)
 
-        ttk.Label(page, text="Host").grid(row=0, column=0, sticky="w")
+        ttk.Label(page, text="Base").grid(row=0, column=0, sticky="w")
         self.host = tk.StringVar()
         self.host_box = ttk.Combobox(page, textvariable=self.host, values=[])
         self.host_box.grid(row=0, column=1, sticky="ew", padx=6)
@@ -700,7 +783,7 @@ class App(ttk.Frame):
 
         game = ttk.Frame(page)
         game.grid(row=2, column=0, columnspan=5, sticky="w", pady=(6, 0))
-        ttk.Label(game, text="Donor from").pack(side="left", padx=(0, 6))
+        ttk.Label(game, text="Source from").pack(side="left", padx=(0, 6))
         self.donor_game = tk.StringVar(value="K1")
         for label, value in (("KOTOR", "K1"), ("KOTOR II", "K2")):
             ttk.Radiobutton(game, text=label, value=value, variable=self.donor_game,
@@ -708,7 +791,7 @@ class App(ttk.Frame):
         # Sorting the list by measured fit is worth a button rather than being
         # automatic: it reads every donor model, which takes about ten seconds
         # for K2's 128, and most of the time the name is already known.
-        self.rank_btn = ttk.Button(game, text="Rank for this host",
+        self.rank_btn = ttk.Button(game, text="Rank for this base",
                                    command=self._rank_donors)
         self.rank_btn.pack(side="left", padx=(6, 0))
         ttk.Label(game, text="Show").pack(side="left", padx=(12, 4))
@@ -750,7 +833,7 @@ class App(ttk.Frame):
 
         self.donor_note = ttk.Label(
             page,
-            text="The host keeps its hierarchy, skeleton and animations. Only geometry moves.",
+            text="The base keeps its skeleton and animations. Only the shape moves across.",
             foreground="#666", wraplength=620,
         )
         self.donor_note.grid(row=4, column=0, columnspan=5, sticky="w", pady=(4, 0))
@@ -778,22 +861,22 @@ class App(ttk.Frame):
         # made this argument about a Quarren long before the default agreed.
         self.opt_fit = tk.BooleanVar(value=False)
         ttk.Checkbutton(
-            opts, text="Take donor's texture", variable=self.opt_texture
+            opts, text="Take the source's texture", variable=self.opt_texture
         ).grid(row=0, column=0, sticky="w", padx=(0, 14))
         ttk.Checkbutton(
-            opts, text="Hide parts the donor lacks", variable=self.opt_hide
+            opts, text="Hide parts the source does not have", variable=self.opt_hide
         ).grid(row=0, column=1, sticky="w", padx=(0, 14))
         ttk.Checkbutton(
-            opts, text="Shrink donor to the host's size (usually wrong - "
+            opts, text="Shrink the source to the base's size (usually wrong - "
                        "a head is the size it is meant to be)",
             variable=self.opt_fit,
         ).grid(row=1, column=0, sticky="w", padx=(0, 14), pady=(4, 0))
         ttk.Checkbutton(
-            opts, text="Reshape: keep host's topology and UVs instead",
+            opts, text="Reshape: keep the base's own surface and texture mapping",
             variable=self.opt_reshape,
         ).grid(row=1, column=1, sticky="w", pady=(4, 0))
         ttk.Checkbutton(
-            opts, text="Fold in donor parts this host has no node for",
+            opts, text="Bring across source parts the base has no slot for",
             variable=self.opt_automerge,
         ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
@@ -821,7 +904,7 @@ class App(ttk.Frame):
         # instead of replacing one.
         self.save_as = tk.StringVar(value="")
         ttk.Entry(saveas, textvariable=self.save_as, width=22).pack(side="left")
-        ttk.Label(saveas, text="a new resref, e.g. p_myhead - blank replaces the host",
+        ttk.Label(saveas, text="a new game name, e.g. p_myhead - blank replaces the base",
                   foreground="#666").pack(side="left", padx=(8, 0))
 
         # How much a new character needs depends on what it is for, and the
@@ -864,8 +947,9 @@ class App(ttk.Frame):
                   foreground="#666").pack(side="left", padx=(8, 0))
         ttk.Label(
             page,
-            text=("Preview writes nothing - it draws the result on the Preview tab "
-                  "and reports how solid the donor is. Under 76% reads as holes."),
+            text=("Preview writes nothing - it draws the result on the Preview "
+                  "page and reports how solid the source is. Under 76% reads "
+                  "as holes."),
             foreground="#666", wraplength=620,
         ).grid(row=11, column=0, columnspan=5, sticky="w", pady=(4, 0))
 
@@ -881,8 +965,7 @@ class App(ttk.Frame):
         missing a button, and someone waiting for a feature that already runs
         on the command line is waiting for nothing.
         """
-        page = ttk.Frame(self.tabs, padding=12)
-        self.tabs.add(page, text="Upcoming")
+        page = self._page("Upcoming")
         self._advanced_tab(page, "Upcoming")
         page.columnconfigure(0, weight=1)
 
@@ -920,8 +1003,7 @@ class App(ttk.Frame):
         on a model. It is also the only route onto a unified body like HK-47
         whose head node takes a mesh directly.
         """
-        page = ttk.Frame(self.tabs, padding=8)
-        self.tabs.add(page, text="Custom head")
+        page = self._page("Custom head")
         outer_page = page
         page = self._explain(outer_page, "Custom head")
         page.columnconfigure(1, weight=1)
@@ -977,15 +1059,15 @@ class App(ttk.Frame):
                     textvariable=self.head_budget).grid(row=0, column=1, sticky="w")
         ttk.Label(opts, text="triangles", foreground="#666").grid(
             row=0, column=2, sticky="w", padx=(4, 14))
-        ttk.Checkbutton(opts, text="Resize to the node (only for sculpts and scans)",
+        ttk.Checkbutton(opts, text="Resize to fit the part (only for sculpts and scans)",
                         variable=self.head_fit).grid(
             row=0, column=3, sticky="w", padx=(0, 14))
         ttk.Checkbutton(opts, text="Repair winding", variable=self.head_repair).grid(
             row=1, column=0, columnspan=3, sticky="w", pady=(4, 0))
-        ttk.Checkbutton(opts, text="Hide the host's own hair, eyes and teeth",
+        ttk.Checkbutton(opts, text="Hide the base's own hair, eyes and teeth",
                         variable=self.head_hide).grid(
             row=1, column=3, sticky="w", pady=(4, 0))
-        ttk.Checkbutton(opts, text="Reshape: keep the host's topology and UVs",
+        ttk.Checkbutton(opts, text="Reshape: keep the base's own surface and texture mapping",
                         variable=self.head_reshape).grid(
             row=2, column=0, columnspan=5, sticky="w", pady=(4, 0))
 
@@ -1028,8 +1110,7 @@ class App(ttk.Frame):
         from . import gallery as kgallery
         from . import thumbs as kthumbs
 
-        page = ttk.Frame(self.tabs, padding=8)
-        self.tabs.add(page, text="Character")
+        page = self._page("Character")
         outer_page = page
         page = self._explain(outer_page, "Character")
         page.columnconfigure(0, weight=1)
@@ -1123,7 +1204,10 @@ class App(ttk.Frame):
         ttk.Label(who, text="Called").pack(side="left", padx=(0, 6))
         self.new_name = tk.StringVar(value="")
         ttk.Entry(who, textvariable=self.new_name, width=20).pack(side="left")
-        ttk.Label(who, text="resref").pack(side="left", padx=(12, 6))
+        # "Game name" rather than "resref". It is the resref, and anyone who
+        # already knows the word will recognise the field by what it does; the
+        # word itself teaches nobody anything.
+        ttk.Label(who, text="Game name").pack(side="left", padx=(12, 6))
         self.new_resref = tk.StringVar(value="")
         ttk.Entry(who, textvariable=self.new_resref, width=16).pack(side="left")
         self.new_kind = tk.StringVar(value="npc")
@@ -1563,8 +1647,8 @@ class App(ttk.Frame):
             self._say("pick a body first")
             return
         if not resref:
-            self._say("a character needs a resref - it is the filename the game "
-                      "spawns it by")
+            self._say("a character needs a game name - it is the filename the "
+                      "game spawns it by, and it has to be unique")
             return
 
         # Where the head came from, if it is not this game's. Read here on the
@@ -1695,7 +1779,7 @@ class App(ttk.Frame):
             shutil.copy2(texture_at, out / texture_at.name)
             said.append(f"its atlas came too: {texture_at.name}")
         else:
-            said.append("no atlas came across; it will wear the host's texture")
+            said.append("no atlas came across; it will wear the base's texture")
         return model, said
 
     @staticmethod
@@ -1747,8 +1831,7 @@ class App(ttk.Frame):
         command-line only, which is a poor place for the one feature here that
         needs no model at all.
         """
-        page = ttk.Frame(self.tabs, padding=8)
-        self.tabs.add(page, text="Lips")
+        page = self._page("Lips")
         outer_page = page
         page = self._explain(outer_page, "Lips")
         page.columnconfigure(1, weight=1)
@@ -1899,8 +1982,7 @@ class App(ttk.Frame):
         was no way to keep two heads, go back to one that worked, or tell what
         a file was a day later.
         """
-        page = ttk.Frame(self.tabs, padding=8)
-        self.tabs.add(page, text="Builds")
+        page = self._page("Builds")
         outer_page = page
         page = self._explain(outer_page, "Builds")
         page.columnconfigure(0, weight=1)
@@ -1986,8 +2068,7 @@ class App(ttk.Frame):
         the same ruler, shows immediately whether a head landed at the right size
         and in the right place, which is otherwise a trip to the game to find out.
         """
-        page = ttk.Frame(self.tabs, padding=8)
-        self.tabs.add(page, text="Preview")
+        page = self._page("Preview")
         outer_page = page
         page = self._explain(outer_page, "Preview")
         page.columnconfigure(1, weight=1)
@@ -2275,17 +2356,14 @@ class App(ttk.Frame):
         "Character": ("Create the character", "_character_start"),
         "Lips": ("Write the lips", "_lips_start"),
         "Custom head": ("Build the head", None),
-        "Transplant": ("Build", None),
-        "Effects": ("Build", None),
+        "Transplant": ("Swap the parts", None),
+        "Effects": ("Apply the change", None),
     }
 
     def _name_the_action(self) -> None:
         """Label the button for the tab in front, and grey it where there is
         nothing for it to do."""
-        try:
-            tab = self.tabs.tab(self.tabs.select(), "text")
-        except tk.TclError:
-            return
+        tab = self._current_page()
         label, _ = self.ACTIONS.get(tab, ("Build", None))
         busy = bool(self.worker and self.worker.is_alive())
         self.build_btn.config(
@@ -2678,7 +2756,7 @@ class App(ttk.Frame):
             from . import jade as kjade
 
             result = kjade.to_pack(entry, out, scale=scale)
-            wears = result["texture"] or "none - it wears the host's"
+            wears = result["texture"] or "none - it wears the base's"
             lines = [
                 f"{result['resref']}",
                 f"  vertices  {result['vertices']}",
@@ -2689,7 +2767,7 @@ class App(ttk.Frame):
             ]
             lines.extend(f"  note: {n}" for n in result["notes"])
             lines.append(f"wrote a head pack to {result['pack']}")
-            lines.append("Build it onto a host with Fit ticked - the geometry "
+            lines.append("Build it onto a base with Fit ticked - the geometry "
                          "arrives at Jade's origin, not the head node's.")
             self.events.put(("imported", (out, lines, result["triangles"])))
         except Exception as exc:  # noqa: BLE001
@@ -2911,7 +2989,7 @@ class App(ttk.Frame):
             return
         if self.target_node.get() != WHOLE_MODEL:
             self.target_note.config(
-                text=f"one node of {len(nodes)}; the rest of {host} is left alone")
+                text=f"one part of {len(nodes)}; the rest of {host} is left alone")
             return
         # Nothing pairs whole-model? Then say what will work instead.
         pairs_nothing = (self.index is not None and host in self.index.nodes
@@ -2940,7 +3018,7 @@ class App(ttk.Frame):
             try:
                 cache[path] = who.looks(path, self._head_donors(path))
             except Exception as exc:  # noqa: BLE001
-                self._say(f"could not sort donors by who they are: {exc}")
+                self._say(f"could not sort the source models by who they are: {exc}")
                 cache[path] = {}
             self._look_cache = cache
         return cache[path]
@@ -2982,18 +3060,18 @@ class App(ttk.Frame):
             return
         host = self._selected_host()
         if not host:
-            self._say("choose a host first")
+            self._say("choose a base first")
             return
         path = self._donor_install()
         if not path:
-            self._say("set the donor's game folder first")
+            self._say("set the source game's folder first")
             return
 
         # Worked out here rather than in the worker: it reads Tk vars and can
         # log, and Tk is not safe to touch off the main thread.
         donors = self._head_donors(path)
         if not donors:
-            self._say("no donors to measure in that folder")
+            self._say("nothing to measure in that folder")
             self.rank_btn.config(state="normal")
             return
 
@@ -3032,7 +3110,7 @@ class App(ttk.Frame):
         from . import compat
 
         self.rank_btn.config(state="normal")
-        self._say(f"{len(fits)} donors measured: {compat.summarise(fits)}")
+        self._say(f"{len(fits)} models measured: {compat.summarise(fits)}")
         best = [f for f in fits if not f.blocked][:3]
         if best:
             self._say("best fits: " + ", ".join(f"{f.donor} ({f.far:.1%})"
@@ -3134,7 +3212,7 @@ class App(ttk.Frame):
         if not usable and not self.show_all.get():
             self.donor_note.config(
                 text=(
-                    f"{host} has no compatible donor in the game. Its node names are "
+                    f"{host} has nothing in the game it can take from. Its part names are "
                     f"its own, so nothing vanilla can be moved into it - custom "
                     f"geometry is the only route. Tick the box below to see every "
                     f"model anyway."
@@ -3146,8 +3224,8 @@ class App(ttk.Frame):
             extra = f", {good} sharing its skeleton" if good else ""
             self.donor_note.config(
                 text=(
-                    f"{len(usable)} donor(s) can pair with {host}{extra}. The number "
-                    f"is how many of the host's parts that donor has; (?) marks a "
+                    f"{len(usable)} model(s) can pair with {host}{extra}. The number "
+                    f"is how many of the base's parts that model has; (?) marks a "
                     f"different skeleton, so the fit is less certain."
                 ),
                 foreground="#666",
@@ -3462,7 +3540,7 @@ class App(ttk.Frame):
         if not self._check_install():
             return
 
-        tab = self.tabs.tab(self.tabs.select(), "text")
+        tab = self._current_page()
         if tab not in self.ACTIONS:
             self._say(f"nothing to build on the {tab} tab")
             return
@@ -3497,7 +3575,7 @@ class App(ttk.Frame):
         else:
             host, donor = self._selected_host(), self._selected_donor()
             if not host or not donor:
-                messagebox.showinfo("kmdlfun", "Pick a host and a donor.")
+                messagebox.showinfo("kmdlfun", "Pick a base and a source.")
                 self.build_btn.config(state="normal")
                 return
             target = ("" if self.target_node.get() == WHOLE_MODEL
@@ -3572,10 +3650,10 @@ class App(ttk.Frame):
             lib = ModelLibrary(cfg.install)
             donor_lib = ModelLibrary(cfg.donor_install) if cfg.donor_install else lib
             if not lib.has(host):
-                self.events.put(("error", f"no model named {host!r} in the host game"))
+                self.events.put(("error", f"no model named {host!r} in the base game"))
                 return
             if not donor_lib.has(donor):
-                self.events.put(("error", f"no model named {donor!r} in the donor game"))
+                self.events.put(("error", f"no model named {donor!r} in the source game"))
                 return
 
             mdl, mdx = lib.read(host)
@@ -3611,7 +3689,7 @@ class App(ttk.Frame):
                         pairs = [(cfg.target_node, donor_head.name)]
             if not pairs:
                 self.events.put(("error",
-                                 f"{host} and {donor} share no mesh node names, "
+                                 f"{host} and {donor} share no part names, "
                                  f"so there is nothing to move between them"))
                 return
 
@@ -3638,7 +3716,7 @@ class App(ttk.Frame):
                     [n.name for n in kparts.mesh_nodes(host_layout)
                      if n.name not in taken])
             if left:
-                lines.append(f"donor has no: {', '.join(left)}"
+                lines.append(f"the source has no: {', '.join(left)}"
                              + ("  (will hide)" if cfg.hide else ""))
 
             # Several parts of one donor have to keep their positions
@@ -3897,12 +3975,9 @@ class App(ttk.Frame):
                     self._whole_bounds = self.viewport.bounds
                     self._apply_framing()
                     self.preview_status.config(text=note)
-                    # The viewport lives on the Preview tab, so put it in front
-                    # rather than drawing where nobody is looking.
-                    for i in range(len(self.tabs.tabs())):
-                        if self.tabs.tab(i, "text") == "Preview":
-                            self.tabs.select(i)
-                            break
+                    # The viewport lives on the Preview page, so put it in
+                    # front rather than drawing where nobody is looking.
+                    self._show_page("Preview")
                 elif kind == "index":
                     payload, kinds, scanned = payload
                     self.index = payload

@@ -58,6 +58,10 @@ class Gallery(ttk.Frame):
         self.cell = cell
         self.on_pick = on_pick
         self.subtitles: dict[str, str] = {}
+        # The gallery started life on the transplant tab and said so. It
+        # shows bodies, outfits and heads now, and "no donors" is the
+        # wrong word on every one of them.
+        self.empty_text = "Nothing to show"
 
         # Ask for one row. A Canvas with no size asks for Tk's default, which
         # is a couple of hundred pixels and quietly made this the tallest thing
@@ -149,7 +153,7 @@ class Gallery(ttk.Frame):
         if not self.labels:
             self.canvas.create_text(
                 (self.canvas.winfo_width() or 200) // 2, 40,
-                text="No donors to show", fill="#888", font=("Segoe UI", 9),
+                text=self.empty_text, fill="#888", font=("Segoe UI", 9),
             )
             self.canvas.configure(scrollregion=(0, 0, 0, 0))
             return

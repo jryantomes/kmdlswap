@@ -141,12 +141,23 @@ def pump(a, seconds=3.0):
         time.sleep(0.02)
 
 
+def page_of(a, key):
+    """The frame for one page, by key rather than by caption."""
+    return a.pages[key][1]
+
+
+def page_keys(a):
+    """Every page the window offers, groups walked into."""
+    return list(a.pages)
+
+
 def transplant_tab(a):
-    for i in range(len(a.tabs.tabs())):
-        if a.tabs.tab(i, "text") == "Transplant":
-            a.tabs.select(i)
-            return
-    raise AssertionError("no Transplant tab")
+    """Bring the swap-parts page to the front.
+
+    By key rather than by caption: the pages moved into two groups and were
+    renamed at the same time, and navigating by what a tab says would have made
+    every test in this file follow them."""
+    a._show_page("Transplant")
 
 
 def test_one_preview_run(app, tmp_path):
@@ -370,10 +381,7 @@ def test_the_effects_tab_previews_a_whole_character(app):
     """A body model alone renders headless and a head model alone renders as a
     floating head, so neither shows what bighead did. The body's `headhook`
     says where the head goes; together is the only view that answers it."""
-    for i in range(len(app.tabs.tabs())):
-        if app.tabs.tab(i, "text") == "Effects":
-            app.tabs.select(i)
-            break
+    app._show_page("Effects")
 
     app.effect.set("bighead")
     app.intensity.set(1.6)
@@ -555,11 +563,8 @@ def pick_head_node(a):
     a._refresh_donors()
 
 def head_tab(a):
-    for i in range(len(a.tabs.tabs())):
-        if a.tabs.tab(i, "text") == "Custom head":
-            a.tabs.select(i)
-            return
-    raise AssertionError("no Custom head tab")
+    a._show_page("Custom head")
+
 
 
 def test_a_unified_body_can_be_given_a_head_by_naming_the_node(app, tmp_path):
@@ -1075,8 +1080,7 @@ def test_the_upcoming_tab_lists_what_is_coming(app):
 def test_a_feature_with_a_tab_is_off_the_upcoming_list(app):
     """It graduated. Leaving it listed sends someone to the command line for
     something that now has a button, which is how a roadmap starts lying."""
-    tabs = [app.tabs.tab(i, "text") for i in range(len(app.tabs.tabs()))]
-    assert "Lips" in tabs
+    assert "Lips" in page_keys(app)
 
     titles = [row[0] for row in UPCOMING_ROWS()]
     assert not any("Lip files" in t for t in titles), titles
@@ -1103,10 +1107,7 @@ def test_upcoming_promises_no_buttons(app):
     clickable, or it becomes a source of bug reports."""
     from tkinter import ttk
 
-    page = None
-    for i in range(len(app.tabs.tabs())):
-        if app.tabs.tab(i, "text") == "Upcoming":
-            page = app.tabs.nametowidget(app.tabs.tabs()[i])
+    page = page_of(app, "Upcoming")
     assert page is not None
 
     def buttons(widget):
@@ -1288,12 +1289,7 @@ def _drain(app):
 def test_the_custom_head_tab_offers_an_import(app):
     from tkinter import ttk
 
-    page = None
-    for i in range(len(app.tabs.tabs())):
-        if app.tabs.tab(i, "text") == "Custom head":
-            page = app.tabs.nametowidget(app.tabs.tabs()[i])
-    assert page is not None
-
+    page = page_of(app, "Custom head")
     labels = buttons_under(page)
     assert any("glb" in text.lower() for text in labels), labels
 
@@ -1381,8 +1377,7 @@ def stocked(app, install_path, catalogue):
 def test_the_tab_is_there_and_has_three_pickers(app):
     from kmdlfun.gui import PART_KINDS
 
-    names = [app.tabs.tab(i, "text") for i in range(len(app.tabs.tabs()))]
-    assert "Character" in names
+    assert "Character" in page_keys(app)
     assert set(app.part_gallery) == set(PART_KINDS)
 
 
@@ -1717,11 +1712,7 @@ def test_the_detection_worker_touches_no_tk_variable(app):
 def test_the_custom_head_tab_offers_jade(app):
     from tkinter import ttk
 
-    page = None
-    for i in range(len(app.tabs.tabs())):
-        if app.tabs.tab(i, "text") == "Custom head":
-            page = app.tabs.nametowidget(app.tabs.tabs()[i])
-    labels = buttons_under(page)
+    labels = buttons_under(page_of(app, "Custom head"))
 
     assert any("Jade" in text for text in labels), labels
 
@@ -1800,8 +1791,18 @@ def test_an_unknown_size_changes_nothing(app):
 
 
 def visible_tabs(app):
-    return [app.tabs.tab(i, "text") for i in app.tabs.tabs()
-            if app.tabs.tab(i, "state") != "hidden"]
+    """Every page on offer, by key, groups walked into.
+
+    It used to read the outer notebook's captions. Pages live in two groups
+    now, so a page hidden inside one is not a tab missing from the other."""
+    shown = []
+    for key, (parent, page) in app.pages.items():
+        try:
+            if parent.tab(page, "state") != "hidden":
+                shown.append(key)
+        except Exception:
+            continue
+    return shown
 
 
 def test_basic_mode_hides_the_tabs_that_ask_hard_questions(app):
@@ -1828,9 +1829,11 @@ def test_advanced_mode_brings_them_back_in_the_same_order(app):
     app._apply_mode()
     shown = visible_tabs(app)
 
-    assert shown[0] == "Transplant", shown
     assert shown[-1] == "Upcoming", shown
-    assert shown.index("Character") == 1
+    assert "Transplant" in shown and "Character" in shown
+    # The order is the order they were built in, which un-hiding must not
+    # disturb: hiding with `hide()` and re-adding appends to the end.
+    assert shown.index("Character") < shown.index("Transplant"), shown
 
 
 def test_the_dense_options_hide_and_come_back(app):
@@ -2348,12 +2351,9 @@ class TestOnePrimaryAction:
 
     @staticmethod
     def select(app, name):
-        for i in range(len(app.tabs.tabs())):
-            if app.tabs.tab(i, "text") == name:
-                app.tabs.select(i)
-                app.update()
-                return True
-        return False
+        app._show_page(name)
+        app.update()
+        return True
 
     def test_the_button_says_what_it_will_do(self, app):
         for tab, said in (("Character", "Create the character"),
@@ -2370,9 +2370,7 @@ class TestOnePrimaryAction:
     def test_the_page_no_longer_carries_a_second_one(self, app):
         """Two buttons doing the same job is the fault itself."""
         self.select(app, "Character")
-        page = app.tabs.nametowidget(app.tabs.select())
-        assert "Create the character" not in [
-            b.cget("text") for b in buttons_under(page)]
+        assert "Create the character" not in buttons_under(page_of(app, "Character"))
 
     def test_pressing_it_on_character_does_not_ask_for_a_donor(self, app, tmp_path):
         self.select(app, "Character")
@@ -2384,3 +2382,59 @@ class TestOnePrimaryAction:
         log = app.log.get("1.0", "end")
         assert "Pick a host and a donor" not in log
         assert "pick a body first" in log, log[-300:]
+
+
+class TestTheWindowSpeaksPlainly:
+    """The window says base and source; the code says host and donor.
+
+    They are the same two things. The code's words are what the modules, the
+    reports and the commit history use; the window's are what somebody can read
+    without being told what they mean.
+    """
+
+    JARGON = ("host", "donor", "resref", "node")
+
+    @staticmethod
+    def shown_strings():
+        """Every string the window puts in front of a person.
+
+        Read out of the syntax tree rather than by running the app, so a string
+        on a page nobody opened in a test is still checked."""
+        import ast
+        import pathlib
+
+        source = pathlib.Path("src/kmdlfun/gui.py").read_text(encoding="utf-8")
+        found = []
+        for node in ast.walk(ast.parse(source)):
+            if isinstance(node, ast.Call):
+                for kw in node.keywords:
+                    if kw.arg in ("text", "title") and isinstance(kw.value, ast.Constant) \
+                            and isinstance(kw.value.value, str):
+                        found.append(kw.value.value)
+        return found
+
+    def test_no_caption_or_label_uses_the_code_s_words(self):
+        import re
+
+        offenders = []
+        for said in self.shown_strings():
+            for word in self.JARGON:
+                if re.search(rf"\b{word}\b", said.lower()):
+                    offenders.append((word, said[:70]))
+        assert not offenders, offenders[:5]
+
+    @staticmethod
+    def test_the_swap_page_names_its_two_models(app):
+        labels = []
+
+        def walk(w):
+            for c in w.winfo_children():
+                try:
+                    labels.append(str(c.cget("text")))
+                except Exception:
+                    pass
+                walk(c)
+
+        walk(page_of(app, "Transplant"))
+        assert "Base" in labels, labels[:8]
+        assert any("Source" in x for x in labels), labels[:8]
