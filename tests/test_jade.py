@@ -954,3 +954,69 @@ class TestSwingingTheArmsDown:
                 seen.append(float(np.degrees(np.arctan2(-v[2], abs(v[0])))))
         assert min(seen) > 50.0 and max(seen) < 58.0, seen
         assert min(seen) <= jade.KOTOR_ARM_REST <= max(seen)
+
+
+class TestWhichWayRoundABodyGoes:
+    """The check that two renders could not make.
+
+    A half-turned human looks very like a human, so a body facing backwards -
+    and handed the wrong way round with it - survived being looked at twice. The
+    two skeletons settle it between them without anybody having to squint.
+    """
+
+    @staticmethod
+    def kotor_bone(k1_path, model, bone):
+        import numpy as np
+
+        from kmdlfun import space
+        from kmdlfun.library import ModelLibrary
+        from kmdlswap import layout as kl
+
+        lay = kl.parse(*ModelLibrary(k1_path).read(model))
+        rest = space.rest_pose(lay)
+        return np.asarray(rest[lay.node_by_name(bone).index].position, float)
+
+    def test_both_games_hand_a_body_the_same_way(self, catalogue, k1_path):
+        """KOTOR's left bicep sits at negative x. So must Jade's left arm, or
+        the port comes out mirrored - left hand on the right wrist."""
+        import numpy as np
+
+        left = self.kotor_bone(k1_path, "PMBBM", "lbicep_g")
+        right = self.kotor_bone(k1_path, "PMBBM", "rbicep_g")
+        assert left[0] < 0 < right[0], "KOTOR is not built the way this assumes"
+
+        checked = 0
+        for entry in [e for e in catalogue
+                      if jade.kind_of(e.resref) == jade.BODY][:5]:
+            try:
+                bones = jade.skeleton(entry)
+            except jade.JadeError:
+                continue
+            here = jade.BODY_FACING @ bones["BLArmUppeL01"]
+            there = jade.BODY_FACING @ bones["BLArmUppeR01"]
+            assert here[0] < 0 < there[0], (entry.resref, here[0], there[0])
+            checked += 1
+        assert checked >= 3
+
+    def test_both_games_point_the_toes_the_same_way(self, catalogue, k1_path):
+        """The other axis, and the one that says front from back: in KOTOR the
+        toes sit forward of the ball of the foot along +y."""
+        import numpy as np
+
+        step = (self.kotor_bone(k1_path, "PMBBM", "lfootT_g")
+                - self.kotor_bone(k1_path, "PMBBM", "lfoot_g"))
+        assert step[1] > 0, "KOTOR is not built the way this assumes"
+
+        checked = 0
+        for entry in [e for e in catalogue
+                      if jade.kind_of(e.resref) == jade.BODY][:5]:
+            try:
+                bones = jade.skeleton(entry)
+            except jade.JadeError:
+                continue
+            if "FootToesL" not in bones or "FootBallL" not in bones:
+                continue
+            forward = jade.BODY_FACING @ (bones["FootToesL"] - bones["FootBallL"])
+            assert forward[1] > 0, (entry.resref, forward)
+            checked += 1
+        assert checked >= 3

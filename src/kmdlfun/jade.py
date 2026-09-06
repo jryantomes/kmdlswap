@@ -67,23 +67,28 @@ TO_KOTOR = np.array([
 ])
 
 # Bodies do not share the heads' convention. A head's height runs along X and
-# `TO_KOTOR` turns it upright; a body's runs along Z already, and it stands the
-# right way up on its own - so a body needs no turning over, only turning
-# round: 180 degrees about Z, `(-x, -y, z)`. Determinant +1, so no face is
-# mirrored - the same care `TO_KOTOR` takes.
+# `TO_KOTOR` turns it upright; a body arrives already standing, already facing
+# the way KOTOR faces, and already handed the same way round. It needs nothing
+# doing to it at all, and this is here to say so rather than to act.
 #
-# This used to be a flip about X, and that was a bug wearing a matrix. The node
-# quaternions were being unpacked in the wrong order, which stood every body on
-# its head, and the flip put it back. Both errors were invisible: a bounding box
-# cannot tell a T-pose from one rotated ninety degrees, because arm span and
-# height are nearly equal, and comparing the girth of the two ends splits the
-# corpus 41/32, because on a figure whose arms sit near mid-height both ends are
-# small and the comparison is noise. What caught it was reading the skeleton -
-# with the order right, every named bone lands within 0.1 of skin and the feet
-# come out below the head; with it wrong, bones sit up to 0.43 outside the body.
+# Getting to identity took two wrong turns, both of them mine, both taken by
+# looking at a render. First the node quaternions were being unpacked x, y, z,
+# w when Jade stores them w first, which stood every body on its head; I put in
+# a flip about X and the render looked right. With the unpacking fixed I
+# replaced the flip with a half turn about Z, and the render looked right then
+# too - because a half-turned human is very hard to tell from a human.
+#
+# What settles it is the two skeletons, which agree without any help. KOTOR
+# names its left bicep at x -0.164 and its right at +0.176; Jade names its left
+# arm at -0.205 and its right at +0.205. In both games the toes sit forward of
+# the ball of the foot along +y. A half turn about Z reverses both of those: it
+# puts the left arm on the right and points the toes backwards. The render that
+# convinced me otherwise was of a body seen from behind, and the one Jade body
+# with a face on it - `n_cnsrt_` - shows her face with no turn applied and the
+# back of her head with one.
 BODY_FACING = np.array([
-    [-1.0, 0.0, 0.0],
-    [0.0, -1.0, 0.0],
+    [1.0, 0.0, 0.0],
+    [0.0, 1.0, 0.0],
     [0.0, 0.0, 1.0],
 ])
 
