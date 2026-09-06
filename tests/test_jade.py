@@ -705,7 +705,7 @@ class TestBodiesStandUp:
         out - the same care `TO_KOTOR` takes."""
         import numpy as np
 
-        assert round(float(np.linalg.det(jade.BODY_UPRIGHT)), 6) == 1.0
+        assert round(float(np.linalg.det(jade.BODY_FACING)), 6) == 1.0
 
     @staticmethod
     def test_a_head_still_uses_the_head_correction(a_head):
@@ -770,3 +770,52 @@ class TestTheJadeSkeleton:
             assert 0 < angle < 20, (resref, angle)
         spread = max(a for _r, a in seen) - min(a for _r, a in seen)
         assert spread < 2.0, f"the rest pose should be a constant, got {seen}"
+
+
+class TestTheQuaternionOrder:
+    """Jade stores a node's orientation `w` first, and reading it any other way
+    turns the whole model.
+
+    On a body that turn came within a hair of a half-revolution, so a corrective
+    flip hid it - and neither of the two numeric checks that were meant to catch
+    an upside-down figure could see past it. The bones can.
+    """
+
+    @staticmethod
+    def bodies(catalogue):
+        return [e for e in catalogue if jade.kind_of(e.resref) == jade.BODY]
+
+    def test_the_bones_land_inside_the_skin(self, catalogue):
+        """The check that settles the order. A skeleton is inside its body."""
+        import numpy as np
+
+        checked = 0
+        for entry in self.bodies(catalogue)[:5]:
+            try:
+                bones = jade.skeleton(entry)
+                mesh = jade.mesh(*jade.read(entry), orient=False, centre=False,
+                                 scale=1.0, kind=jade.BODY)
+            except jade.JadeError:
+                continue
+            skin = np.asarray(mesh.positions, dtype=float)
+            pts = np.array([bones[k] for k in jade.BONE_NAMES if k in bones])
+            gap = np.linalg.norm(skin[None, :, :] - pts[:, None, :],
+                                 axis=2).min(axis=1)
+            # Read the other way round the worst bone sits 0.43 out - a hand's
+            # width away from any part of the body it belongs to.
+            assert gap.max() < 0.2, (entry.resref, float(gap.max()))
+            checked += 1
+        assert checked >= 3
+
+    def test_a_body_stands_up_without_being_turned_over(self, catalogue):
+        import numpy as np
+
+        for entry in self.bodies(catalogue)[:5]:
+            try:
+                bones = jade.skeleton(entry)
+            except jade.JadeError:
+                continue
+            if "FootBallL" not in bones or "HeadBone" not in bones:
+                continue
+            assert bones["FootBallL"][2] < bones["HeadBone"][2], entry.resref
+            assert abs(bones["FootBallL"][2]) < 0.2, "feet near the ground"

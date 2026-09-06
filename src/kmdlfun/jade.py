@@ -67,23 +67,24 @@ TO_KOTOR = np.array([
 ])
 
 # Bodies do not share the heads' convention. A head's height runs along X and
-# `TO_KOTOR` turns it upright; a body's runs along Z already, and along it the
-# figure is upside down - shoulders at the low end, feet at the high one. Put a
-# body through the head's correction and it arrives lying on its side, which is
-# what the game would have shown.
+# `TO_KOTOR` turns it upright; a body's runs along Z already, and it stands the
+# right way up on its own - so a body needs no turning over, only turning
+# round: 180 degrees about Z, `(-x, -y, z)`. Determinant +1, so no face is
+# mirrored - the same care `TO_KOTOR` takes.
 #
-# So a body only needs turning over: 180 degrees about X, `(x, -y, -z)`.
-# Determinant +1, so no face is mirrored - the same care `TO_KOTOR` takes.
-#
-# Established by rendering twelve of them, after two numeric checks each gave a
-# confident wrong answer. A bounding box cannot tell a T-pose from one rotated
-# ninety degrees, because arm span and height are nearly equal; and comparing
-# the girth of the two ends splits the corpus 41/32, because on a figure whose
-# arms sit near mid-height both ends are small and the comparison is noise.
-BODY_UPRIGHT = np.array([
-    [1.0, 0.0, 0.0],
+# This used to be a flip about X, and that was a bug wearing a matrix. The node
+# quaternions were being unpacked in the wrong order, which stood every body on
+# its head, and the flip put it back. Both errors were invisible: a bounding box
+# cannot tell a T-pose from one rotated ninety degrees, because arm span and
+# height are nearly equal, and comparing the girth of the two ends splits the
+# corpus 41/32, because on a figure whose arms sit near mid-height both ends are
+# small and the comparison is noise. What caught it was reading the skeleton -
+# with the order right, every named bone lands within 0.1 of skin and the feet
+# come out below the head; with it wrong, bones sit up to 0.43 outside the body.
+BODY_FACING = np.array([
+    [-1.0, 0.0, 0.0],
     [0.0, -1.0, 0.0],
-    [0.0, 0.0, -1.0],
+    [0.0, 0.0, 1.0],
 ])
 
 MDL_TYPE = 0x07D2
@@ -288,7 +289,7 @@ def mesh(mdl_bytes: bytes, mdx_bytes: bytes | None, *, scale: float = SCALE,
     out = Mesh()
     rotation = np.eye(3)
     if orient:
-        rotation = BODY_UPRIGHT if kind == BODY else TO_KOTOR
+        rotation = BODY_FACING if kind == BODY else TO_KOTOR
 
     def walk(node, parent_r, parent_t):
         r = parent_r @ _quaternion(node.orientation)
@@ -335,7 +336,14 @@ def mesh(mdl_bytes: bytes, mdx_bytes: bytes | None, *, scale: float = SCALE,
 
 
 def _quaternion(q):
-    x, y, z, w = (float(v) for v in q)
+    """A node's orientation as a matrix. Jade stores it `w` first.
+
+    The order is not cosmetic: read as `x, y, z, w` the whole model comes out
+    turned, and on a body that turn is close enough to a half-revolution that a
+    corrective flip hid it for a long time. `skeleton` is what settles it - see
+    the note on `BODY_FACING`.
+    """
+    w, x, y, z = (float(v) for v in q)
     n = (x * x + y * y + z * z + w * w) ** 0.5
     if n == 0:
         return np.eye(3)
@@ -543,19 +551,6 @@ BONE_NAMES = {
 }
 
 
-def _quaternion_matrix(q) -> np.ndarray:
-    w, x, y, z = q
-    n = w * w + x * x + y * y + z * z
-    if n < 1e-12:
-        return np.eye(3)
-    s = 2.0 / n
-    return np.array([
-        [1 - s * (y * y + z * z), s * (x * y - z * w), s * (x * z + y * w)],
-        [s * (x * y + z * w), 1 - s * (x * x + z * z), s * (y * z - x * w)],
-        [s * (x * z - y * w), s * (y * z + x * w), 1 - s * (x * x + y * y)],
-    ])
-
-
 def skeleton(entry: Entry) -> dict:
     """Every named bone of one Jade model, in its own model space.
 
@@ -592,7 +587,7 @@ def skeleton(entry: Entry) -> dict:
         def walk(node, rotation, offset):
             position = np.asarray(node.position or (0.0, 0.0, 0.0), dtype=float)
             here = offset + rotation @ position
-            turned = rotation @ _quaternion_matrix(node.orientation or (1, 0, 0, 0))
+            turned = rotation @ _quaternion(node.orientation or (1, 0, 0, 0))
             if node.name:
                 found[node.name] = here
             for child in node.children or []:
