@@ -36,9 +36,16 @@ import numpy as np
 # for heads made them visibly small in game.
 #
 # Held loosely either way - see reports/JADE_FINDINGS.md before trusting it.
-SCALE = 0.83
+SCALE = 0.97
 HEAD_SCALE = 0.86
-BODY_SCALE = 0.83
+# Bodies: KOTOR's median body height 1.576 against Jade's 1.618.
+#
+# It was 0.83, from comparing Jade's X extent of 1.85 against a KOTOR body's
+# height. 1.85 is consistent across the corpus and that consistency was read as
+# evidence it was the height - it is the *arm span*, which is just as
+# consistent. Measuring height against height gives 0.97, so a Jade body is
+# about 3% larger than a KOTOR one rather than a sixth.
+BODY_SCALE = 0.97
 
 
 def scale_for(kind: str) -> float:
@@ -57,6 +64,26 @@ TO_KOTOR = np.array([
     [0.0, 0.0, 1.0],
     [0.0, -1.0, 0.0],
     [1.0, 0.0, 0.0],
+])
+
+# Bodies do not share the heads' convention. A head's height runs along X and
+# `TO_KOTOR` turns it upright; a body's runs along Z already, and along it the
+# figure is upside down - shoulders at the low end, feet at the high one. Put a
+# body through the head's correction and it arrives lying on its side, which is
+# what the game would have shown.
+#
+# So a body only needs turning over: 180 degrees about X, `(x, -y, -z)`.
+# Determinant +1, so no face is mirrored - the same care `TO_KOTOR` takes.
+#
+# Established by rendering twelve of them, after two numeric checks each gave a
+# confident wrong answer. A bounding box cannot tell a T-pose from one rotated
+# ninety degrees, because arm span and height are nearly equal; and comparing
+# the girth of the two ends splits the corpus 41/32, because on a figure whose
+# arms sit near mid-height both ends are small and the comparison is noise.
+BODY_UPRIGHT = np.array([
+    [1.0, 0.0, 0.0],
+    [0.0, -1.0, 0.0],
+    [0.0, 0.0, -1.0],
 ])
 
 MDL_TYPE = 0x07D2
@@ -232,7 +259,8 @@ def read(entry: Entry) -> tuple[bytes, bytes | None]:
 
 
 def mesh(mdl_bytes: bytes, mdx_bytes: bytes | None, *, scale: float = SCALE,
-         orient: bool = True, centre: bool = True, tmp_dir=None) -> Mesh:
+         orient: bool = True, centre: bool = True, tmp_dir=None,
+         kind: str = HEAD) -> Mesh:
     """Every drawn triangle, in KOTOR's axes and at KOTOR's size.
 
     The vendored reader takes file paths rather than bytes, so the payloads are
@@ -258,7 +286,9 @@ def mesh(mdl_bytes: bytes, mdx_bytes: bytes | None, *, scale: float = SCALE,
         raise JadeError(f"could not read the model: {exc}") from exc
 
     out = Mesh()
-    rotation = TO_KOTOR if orient else np.eye(3)
+    rotation = np.eye(3)
+    if orient:
+        rotation = BODY_UPRIGHT if kind == BODY else TO_KOTOR
 
     def walk(node, parent_r, parent_t):
         r = parent_r @ _quaternion(node.orientation)
@@ -430,7 +460,7 @@ def to_pack(entry: Entry, out_dir, *, scale: float | None = None,
     out_dir.mkdir(parents=True, exist_ok=True)
     if scale is None:
         scale = scale_for(entry.kind)
-    found = mesh(*read(entry), scale=scale)
+    found = mesh(*read(entry), scale=scale, kind=entry.kind)
 
     kobj.write_obj(out_dir / "head.obj", found.positions, found.faces,
                    uvs=found.uvs or None, normals=found.normals or None,
@@ -518,7 +548,7 @@ def scene(entry: Entry, *, install=None, scale: float | None = None):
 
     if scale is None:
         scale = scale_for(entry.kind)
-    found = mesh(*read(entry), scale=scale)
+    found = mesh(*read(entry), scale=scale, kind=entry.kind)
     built = krender.from_mesh(found.positions, found.faces)
     if not len(built.faces) or not found.uvs:
         return built

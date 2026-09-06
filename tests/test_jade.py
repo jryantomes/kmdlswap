@@ -413,14 +413,26 @@ def test_a_mask_still_converts(catalogue, tmp_path):
 
 
 def test_heads_and_bodies_get_their_own_scale():
-    """Measured separately and they disagree: 0.858 across 158 heads against
-    105 of KOTOR's, 0.830 across 112 bodies against 95. Using the body figure
-    for heads made them visibly small in game."""
+    """Measured separately and they disagree. Using one figure for both made
+    heads visibly small in game."""
     assert jade.scale_for(jade.HEAD) == jade.HEAD_SCALE
     assert jade.scale_for(jade.BODY) == jade.BODY_SCALE
-    assert jade.HEAD_SCALE > jade.BODY_SCALE
+    assert jade.HEAD_SCALE != jade.BODY_SCALE
     # a mask is a face, so it scales like one
     assert jade.scale_for(jade.MASK) == jade.HEAD_SCALE
+
+
+def test_the_body_scale_is_height_against_height():
+    """It was 0.83, from Jade's X extent of 1.85 against a KOTOR body's height.
+
+    1.85 is near-constant across the corpus and that constancy was read as
+    evidence it was the height. It is the *arm span* - just as constant, and on
+    a T-posed figure about half again the height. Measured height to height,
+    KOTOR's median 1.576 against Jade's 1.618, the answer is 0.97: a Jade body
+    is a few percent larger, not a sixth.
+    """
+    assert 0.93 <= jade.BODY_SCALE <= 1.02, (
+        "a body scale near 0.83 is the arm span being compared to a height")
 
 
 def test_a_pack_uses_the_scale_for_its_kind(a_head, tmp_path):
@@ -436,9 +448,12 @@ def test_a_pack_uses_the_scale_for_its_kind(a_head, tmp_path):
     chosen = jade.to_pack(a_head, tmp_path / "chosen")
     as_body = jade.to_pack(a_head, tmp_path / "as_body", scale=jade.BODY_SCALE)
 
-    assert height(chosen["pack"]) > height(as_body["pack"]), (
-        "a head should not be built at the body figure"
-    )
+    # Which is larger is not the point and has changed once already; that the
+    # kind decides, rather than a single default, is.
+    assert height(chosen["pack"]) != height(as_body["pack"])
+    assert abs(height(chosen["pack"])
+               / (height(as_body["pack"]) / jade.BODY_SCALE)
+               - jade.HEAD_SCALE) < 1e-6
 
 
 # --- the texture resref ------------------------------------------------------
@@ -644,3 +659,58 @@ class TestHeadsThatWearTheirOwnCollar:
         assert jade.wears_a_collar("H_MercF01_")
         assert jade.wears_a_collar("  h_mercf01_  ")
         assert not jade.wears_a_collar("")
+
+
+class TestBodiesStandUp:
+    """A body does not share the heads' convention.
+
+    A head's height runs along X and `TO_KOTOR` turns it upright; a body's runs
+    along Z already and the figure is upside down along it. Put a body through
+    the head's correction and it arrives lying on its side.
+    """
+
+    @staticmethod
+    def girths(P, axis):
+        import numpy as np
+
+        v = P[:, axis]
+        t = (v - v.min()) / (v.max() - v.min())
+        others = [i for i in range(3) if i != axis]
+        out = []
+        for a, b in ((0, 1 / 3), (1 / 3, 2 / 3), (2 / 3, 1)):
+            q = P[(t >= a) & (t <= b)][:, others]
+            out.append(float(np.hypot(*(q.max(0) - q.min(0)))) if len(q) > 2 else 0.0)
+        return out
+
+    def test_a_body_comes_out_upright(self, catalogue):
+        """Narrow at the feet, broad at the shoulders - the shape a KOTOR body
+        has. Extents cannot check this: on a T-pose the arm span and the height
+        are close enough that a bounding box reads the same either way."""
+        import numpy as np
+
+        entry = next((e for e in catalogue
+                      if e.resref.lower() == "n_bandit_"), None)
+        if entry is None:
+            pytest.skip("n_bandit_ not present")
+        P = np.asarray(jade.mesh(*jade.read(entry), kind=entry.kind,
+                                 scale=jade.scale_for(entry.kind)).positions, float)
+
+        low, _mid, high = self.girths(P, 2)
+        assert high > low, "the figure is upside down"
+        assert np.ptp(P[:, 2]) > np.ptp(P[:, 1]), "it is lying down"
+
+    @staticmethod
+    def test_the_turn_does_not_mirror_it():
+        """A reflection maps the axis just as well and turns every face inside
+        out - the same care `TO_KOTOR` takes."""
+        import numpy as np
+
+        assert round(float(np.linalg.det(jade.BODY_UPRIGHT)), 6) == 1.0
+
+    @staticmethod
+    def test_a_head_still_uses_the_head_correction(a_head):
+        import numpy as np
+
+        P = np.asarray(jade.mesh(*jade.read(a_head), kind=a_head.kind,
+                                 scale=jade.scale_for(a_head.kind)).positions, float)
+        assert np.ptp(P[:, 2]) > np.ptp(P[:, 1]), "the head is not upright"

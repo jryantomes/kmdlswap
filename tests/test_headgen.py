@@ -274,19 +274,15 @@ def k1_path():
     return found
 
 
-def test_a_jade_body_arrives_on_its_side(jade_path, k1_path):
-    """Heads come through the conversion upright; bodies do not.
+def test_a_jade_body_now_stands_up(jade_path, k1_path):
+    """It used to arrive lying on its side. Kept as a test rather than deleted,
+    because the fix is a second rotation that only bodies get and a later change
+    to the shared one could quietly undo it.
 
-    `TO_KOTOR` maps Jade's X-up to KOTOR's Z-up and is right for heads. A body
-    put through the same correction lands with its arm span along z and its
-    height along x - it is lying down. The cause is not yet known; this records
-    the fact so it is not rediscovered by looking at a render.
-
-    Told apart by the shape of the mesh, not its extents: in a T-pose the arm
-    span and the height are nearly equal, so a bounding box cannot distinguish
-    them - which is exactly what fooled the first check. Along the true height
-    a body is narrow at the feet and broad at the shoulders; along the arm span
-    it is pinched at both hands and broad in the middle.
+    Told apart by shape, not extents: in a T-pose the arm span and the height
+    are nearly equal, so a bounding box cannot distinguish them - which is what
+    fooled the first check. Along the true height a body is narrow at the feet
+    and broad at the shoulders.
     """
     import numpy as np
 
@@ -306,11 +302,10 @@ def test_a_jade_body_arrives_on_its_side(jade_path, k1_path):
                   if e.resref.lower() == "n_bandit_"), None)
     if entry is None:
         pytest.skip("n_bandit_ not present")
-    P = np.asarray(jade.mesh(*jade.read(entry),
+    P = np.asarray(jade.mesh(*jade.read(entry), kind=entry.kind,
                              scale=jade.scale_for(entry.kind)).positions, float)
 
-    low, mid, high = girths(P, 2)
-    assert low < mid and high < mid, (low, mid, high)
-    assert abs(low - high) < 0.2 * mid, (
-        "pinched at both ends and broad in the middle is an arm span, not a "
-        "height - if this now fails, bodies have been made to stand up")
+    low, _mid, high = girths(P, 2)
+    assert high > low, "shoulders below the feet - it is upside down"
+    assert 1.4 < np.ptp(P[:, 2]) < 1.8, (
+        f"height {np.ptp(P[:, 2]):.2f}; a KOTOR body is about 1.58")
