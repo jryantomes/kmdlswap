@@ -241,3 +241,37 @@ def test_the_droid_test_still_works_on_the_second_game(k2_path):
     for name in ("p_attonh", "p_mirah"):
         if lib.has(name):
             assert not who.is_droid(kl.parse(*lib.read(name))), name
+
+
+class TestABrokenReaderIsNotAQuietAnswer:
+    """Two broad handlers were nested here, and between them they could turn a
+    bug into a wrong answer with nothing said.
+
+    A reader that breaks returned no rows, `looks` returned nothing, and every
+    model in the pickers became "unknown" - which empties the male and female
+    filters with no error anywhere.
+    """
+
+    @staticmethod
+    def test_a_missing_table_is_still_just_an_answer(monkeypatch, tmp_path):
+        from kmdlfun import twoda as k2da
+        from kmdlfun import who
+
+        def missing(_install, name):
+            raise k2da.TwoDAError(f"{name}.2da not found in that install")
+
+        monkeypatch.setattr(k2da, "_load", missing)
+        assert who._from_portraits(str(tmp_path)) == {}
+
+    @staticmethod
+    def test_a_reader_that_breaks_does_not_pass_for_no_rows(monkeypatch, tmp_path):
+        """The distinction that matters: absent versus broken."""
+        from kmdlfun import twoda as k2da
+        from kmdlfun import who
+
+        def broken(_install, _name):
+            raise RuntimeError("the reader is wrong")
+
+        monkeypatch.setattr(k2da, "_load", broken)
+        with pytest.raises(RuntimeError):
+            who._from_portraits(str(tmp_path))

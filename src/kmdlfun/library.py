@@ -191,15 +191,21 @@ def body_for_head(install, head: str, library=None) -> str | None:
     from collections import Counter
 
     try:
-        from pykotor.extract.installation import Installation
-        from pykotor.resource.formats.twoda import read_2da
-        from pykotor.resource.type import ResourceType
-
-        inst = Installation(str(install))
+        from . import twoda as k2da
 
         def table(name):
-            found = inst.resource(name, ResourceType.TwoDA)
-            return read_2da(found.data) if found else None
+            # Through the one loader, which keeps an `Installation` per path
+            # and asks Override then the BIFs. A fresh one per call reopened
+            # all 1825 module archives to find a file that cannot be in any of
+            # them - this was the third copy of that code.
+            #
+            # `TwoDAError` means the table is not there, which is an answer.
+            # Anything else is a fault and belongs to the caller, not to a
+            # handler that turns it into "no result".
+            try:
+                return k2da._load(install, name)
+            except k2da.TwoDAError:
+                return None
 
         app, heads = table("appearance"), table("heads")
         if not (app and heads):

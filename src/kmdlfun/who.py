@@ -132,9 +132,16 @@ def _from_portraits(install) -> dict[str, str]:
         from . import twoda as k2da
 
         def table(name):
+            # A missing table is an answer; anything else is a fault.
+            #
+            # Swallowing everything here meant a reader that broke returned no
+            # rows, `looks` returned nothing, and every model in the pickers
+            # became "unknown" - which empties the male and female filters with
+            # no error anywhere. Two broad handlers nested, and between them
+            # they could turn a bug into a quiet wrong answer.
             try:
                 return k2da._load(install, name)
-            except Exception:  # noqa: BLE001
+            except k2da.TwoDAError:
                 return None
 
         app, heads, port = table("appearance"), table("heads"), table("portraits")
@@ -164,7 +171,11 @@ def _from_portraits(install) -> dict[str, str]:
                 if head:
                     out[head] = FEMALE if int(sex) == 1 else MALE
         return out
-    except Exception:  # noqa: BLE001
+    except (KeyError, IndexError, ValueError, TypeError):
+        # A column this install's tables do not have, or a cell that will not
+        # parse. The outer handler used to be `Exception`, which with the inner
+        # one made two nets: a reader that raised anything at all came back as
+        # no rows, and no rows means every model reads as "unknown".
         return {}
 
 
@@ -190,9 +201,16 @@ def _from_body(install) -> dict[str, str]:
         from . import twoda as k2da
 
         def table(name):
+            # A missing table is an answer; anything else is a fault.
+            #
+            # Swallowing everything here meant a reader that broke returned no
+            # rows, `looks` returned nothing, and every model in the pickers
+            # became "unknown" - which empties the male and female filters with
+            # no error anywhere. Two broad handlers nested, and between them
+            # they could turn a bug into a quiet wrong answer.
             try:
                 return k2da._load(install, name)
-            except Exception:  # noqa: BLE001
+            except k2da.TwoDAError:
                 return None
 
         app, heads = table("appearance"), table("heads")
@@ -220,7 +238,7 @@ def _from_body(install) -> dict[str, str]:
                 )
         return {head: (next(iter(s)) if len(s) == 1 else EITHER)
                 for head, s in seen.items()}
-    except Exception:  # noqa: BLE001
+    except (KeyError, IndexError, ValueError, TypeError):
         return {}
 
 
