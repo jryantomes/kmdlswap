@@ -511,7 +511,7 @@ def test_the_donor_list_can_be_sorted_by_measured_fit(app, k2_path):
     app._refresh_donors()
 
     before = list(app.donor_labels.values())
-    assert before, "no donors offered to rank"
+    assert before, "nothing offered to rank"
     first = list(app.donor_labels)[0]
     assert re.search(r"\[(head|creature)\]$", first), (
         f"unranked labels should say the kind, got {first!r}"
@@ -523,7 +523,7 @@ def test_the_donor_list_can_be_sorted_by_measured_fit(app, k2_path):
 
     assert "main thread is not in main loop" not in log
     assert "could not rank donors" not in log, log[-400:]
-    assert "donors measured" in log
+    assert "models measured" in log
     assert "best fits:" in log
 
     after = list(app.donor_labels.values())
@@ -545,11 +545,11 @@ def test_the_donor_list_can_be_sorted_by_measured_fit(app, k2_path):
     assert app._selected_donor() == after[0]
 
 
-def test_ranking_without_a_host_says_so_rather_than_failing(app):
+def test_ranking_without_a_base_says_so_rather_than_failing(app):
     transplant_tab(app)
     app.host.set("")
     app._rank_donors()
-    assert "choose a host first" in app.log.get("1.0", "end")
+    assert "choose a base first" in app.log.get("1.0", "end")
     assert str(app.rank_btn.cget("state")) == "normal", (
         "the button must not be left disabled after a refusal"
     )
@@ -591,7 +591,7 @@ def test_a_unified_body_can_be_given_a_head_by_naming_the_node(app, tmp_path):
     app._refresh_donors()
     offered = app.donor_choices()
     assert len(offered) > 20, "naming the node should offer every head donor"
-    assert "one node of" in app.target_note.cget("text")
+    assert "one part of" in app.target_note.cget("text")
 
     carth = [v for v in offered if v.startswith("p_carthh")]
     assert carth, offered[:5]
@@ -1505,7 +1505,7 @@ def ANYONE_LABEL():
     return ANYONE
 
 
-def test_creating_needs_a_body_and_a_resref(stocked):
+def test_creating_needs_a_body_and_a_game_name(stocked):
     stocked.said = []
     stocked._say = lambda text: stocked.said.append(text)
 
@@ -1518,7 +1518,7 @@ def test_creating_needs_a_body_and_a_resref(stocked):
     stocked.new_name.set("")
     stocked.said = []
     stocked._character_start()
-    assert any("resref" in s for s in stocked.said)
+    assert any("game name" in s for s in stocked.said)
 
 
 def test_creating_writes_the_rows_and_the_blueprint(stocked, tmp_path):
