@@ -389,7 +389,19 @@ def _uvs(found, out: Mesh) -> None:
         out.notes.append("no UVs - the head will build but render untextured")
         return
     for uv in layers[0]:
-        out.uvs.append((float(uv[0]), 1.0 - float(uv[1])))
+        out.uvs.append(turn_uv(uv))
+
+
+def turn_uv(uv) -> tuple:
+    """One UV pair, with V turned over. The convention lives here alone.
+
+    `partition` used to read the layer straight out of the reader and skip
+    this, and the result was a body wearing a plausible outfit off the wrong
+    rows of its own atlas - which reads as a slightly wrong model rather than
+    as a flipped coordinate, and is exactly the kind of thing that survives
+    being looked at.
+    """
+    return (float(uv[0]), 1.0 - float(uv[1]))
 
 
 # --- textures ---------------------------------------------------------------
@@ -898,7 +910,7 @@ def partition(model, *, cap: int = BONE_CAP, floor: float = WEIGHT_FLOOR,
                     part.positions.append(tuple(float(x) for x in placed))
                     part.weights.append([(slot[b], w) for b, w in weights[v]])
                     if uvs is not None and v < len(uvs):
-                        part.uvs.append(tuple(float(x) for x in uvs[v][:2]))
+                        part.uvs.append(turn_uv(uvs[v]))
                     if normals is not None and v < len(normals):
                         part.normals.append(tuple(float(x) for x in normals[v][:3]))
                 face.append(seen[v])

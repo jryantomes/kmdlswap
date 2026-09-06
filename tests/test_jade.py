@@ -1201,3 +1201,51 @@ class TestCuttingABodyIntoKotorMeshes:
         assert after > before, (before, after)
         # A cut through a body, not a shredding of it.
         assert after < before * 1.6, (before, after)
+
+
+class TestTheUvsComeOutTheSameWayTwice:
+    """`mesh` and `partition` read the same model and must agree about it.
+
+    Jade's V axis runs the opposite way to the one this project's pipeline
+    expects, and `partition` used to read the layer straight out of the reader
+    and skip the turn. The body then wore a plausible outfit off the wrong rows
+    of its own atlas - which reads as a slightly wrong model rather than as a
+    flipped coordinate, and is exactly the kind of thing that survives being
+    looked at.
+    """
+
+    @staticmethod
+    def test_turning_a_uv_over_is_its_own_undoing():
+        u, v = jade.turn_uv((0.25, 0.75))
+        assert (u, v) == (0.25, 0.25)
+        assert jade.turn_uv(jade.turn_uv((0.25, 0.75))) == (0.25, 0.75)
+
+    @staticmethod
+    def test_a_partitioned_body_uses_the_same_uvs_as_the_mesh(catalogue):
+        """Not vertex for vertex - the parts renumber and duplicate seams - but
+        the same set, and the same span of V."""
+        import numpy as np
+
+        bodies = [e for e in catalogue if jade.kind_of(e.resref) == jade.BODY]
+        checked = 0
+        for entry in bodies[:5]:
+            try:
+                whole = jade.mesh(*jade.read(entry), kind=jade.BODY,
+                                  scale=jade.BODY_SCALE)
+                parts = jade.partition(jade._parse(*jade.read(entry)))
+            except jade.JadeError:
+                continue
+            if not whole.uvs:
+                continue
+            mine = np.asarray([uv for p in parts for uv in p.uvs], dtype=float)
+            theirs = np.asarray(whole.uvs, dtype=float)
+            assert len(mine), entry.resref
+            assert abs(mine[:, 1].min() - theirs[:, 1].min()) < 1e-6, entry.resref
+            assert abs(mine[:, 1].max() - theirs[:, 1].max()) < 1e-6, entry.resref
+            assert abs(mine[:, 0].min() - theirs[:, 0].min()) < 1e-6, entry.resref
+            # Every UV a part carries is one the whole mesh carries.
+            want = {(round(u, 6), round(v, 6)) for u, v in theirs}
+            got = {(round(u, 6), round(v, 6)) for u, v in mine}
+            assert got <= want, entry.resref
+            checked += 1
+        assert checked >= 3
