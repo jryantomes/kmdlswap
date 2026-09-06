@@ -802,6 +802,20 @@ LIMB_ROOTS = {
 }
 TORSO = "Torso"
 
+# Jade builds some of its people with a head on the body - 42 of the 112 carry
+# one, sometimes as its own mesh and sometimes as a mask on top of that. KOTOR
+# does not: a body ends at the neck and the head is a separate model hung on
+# `headhook`. Ported with the head still attached, the figure wears two, one
+# inside the other, and the wrong one is the one you see.
+#
+# The cut is at `hturn_g`, the head-turn bone. Below it `NeckBone0` drives the
+# neck stump, which is the body's and stays; above it everything is head, the
+# face rig included.
+# Not `HEAD` - that name is taken, by the kind of model a head is.
+HEAD_LIMB = "Head"
+LIMB_ROOTS["hturn_g"] = HEAD_LIMB
+LIMBS = (TORSO, "LArm", "RArm", "Legs", HEAD_LIMB)
+
 
 @dataclass
 class Part:
@@ -963,7 +977,7 @@ def partition(model, *, cap: int = BONE_CAP, floor: float = WEIGHT_FLOOR,
 
         uvs = found.uv_layers[0] if getattr(found, "uv_layers", None) else None
         normals = getattr(found, "normals", None)
-        for limb in (TORSO, "LArm", "RArm", "Legs"):
+        for limb in LIMBS:
             if limb not in grouped:
                 continue
             for bones, members in _pack(grouped[limb], cap):

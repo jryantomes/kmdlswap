@@ -231,3 +231,62 @@ class TestWritingItOut:
         bodybuild.write(built, tmp_path)
         after = {p.name for p in override.iterdir()} if override.is_dir() else set()
         assert before == after
+
+
+class TestTheHeadIsLeftBehind:
+    """KOTOR hangs the head on `headhook` as its own model. A Jade body that
+    brings its own gives the figure two, one inside the other, and the one you
+    see is the wrong one - it sits a little higher and a little wider than the
+    real face.
+    """
+
+    @staticmethod
+    def a_body_with_a_head(bodies):
+        return next((e for e in bodies if e.resref.lower() == "n_silk_"), None)
+
+    def test_it_says_it_left_the_head_behind(self, bodies, k1_path, jade_path):
+        entry = self.a_body_with_a_head(bodies)
+        if entry is None:
+            pytest.skip("n_silk_ not present")
+        built = bodybuild.run(entry, install=k1_path, jade_install=jade_path)
+        said = [line for line in built.lines if "headhook" in line]
+        assert said, built.lines
+        assert "triangles" in said[0]
+
+    def test_none_of_it_reaches_the_model(self, bodies, k1_path, jade_path):
+        """The check that matters: nothing above the neck in the built body."""
+        import numpy as np
+
+        from kmdlswap import layout as kl
+        from kmdlswap import mdx as kmdx
+
+        entry = self.a_body_with_a_head(bodies)
+        if entry is None:
+            pytest.skip("n_silk_ not present")
+        built = bodybuild.run(entry, install=k1_path, jade_install=jade_path)
+        parts = jade.partition(jade._parse(*jade.read(entry)))
+        neck = max(np.asarray(p.positions)[:, 2].max()
+                   for p in parts if p.limb == jade.TORSO)
+
+        lay = kl.parse(built.mdl, built.mdx)
+        for node in lay.nodes:
+            if node.in_animation is not None or not node.is_skin:
+                continue
+            if not bodybuild.limb_for(node.name):
+                continue
+            z = [p[2] for p in kmdx.positions(lay, node)]
+            if z:
+                assert max(z) <= neck + 1e-6, (node.name, max(z), neck)
+
+    def test_the_texture_is_chosen_without_counting_the_head(self, bodies,
+                                                             k1_path, jade_path):
+        """The head was most of the clash. Counting a texture we do not carry
+        can pick it - and then the body wears the face's atlas."""
+        entry = self.a_body_with_a_head(bodies)
+        if entry is None:
+            pytest.skip("n_silk_ not present")
+        built = bodybuild.run(entry, install=k1_path, jade_install=jade_path)
+        wrong = [w for w in built.warnings if "wrong one" in w]
+        for line in wrong:
+            got = [int(x) for x in line.replace(":", " ").split() if x.isdigit()]
+            assert got and got[0] < got[1] / 2, line

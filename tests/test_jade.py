@@ -1249,3 +1249,66 @@ class TestTheUvsComeOutTheSameWayTwice:
             assert got <= want, entry.resref
             checked += 1
         assert checked >= 3
+
+
+class TestTheHeadSomeBodiesBringWithThem:
+    """Jade builds 49 of its 112 people with a head on the body, sometimes with
+    a mask over that. KOTOR does not - a body ends at the neck and the head is
+    a separate model on `headhook` - so the head has to be findable and
+    separable, or a ported figure wears two.
+    """
+
+    @staticmethod
+    def test_the_limb_name_is_not_the_kind_name():
+        """`HEAD` was already taken, by the kind of model a head is. Reusing it
+        emptied every head fixture in this file."""
+        assert jade.HEAD == "head"
+        assert jade.HEAD_LIMB == "Head"
+        assert jade.HEAD_LIMB in jade.LIMBS
+        assert jade.HEAD not in jade.LIMBS
+
+    @staticmethod
+    def test_a_body_with_a_head_puts_it_in_its_own_part(catalogue):
+        import numpy as np
+
+        entry = next((e for e in catalogue if e.resref.lower() == "n_silk_"), None)
+        if entry is None:
+            pytest.skip("n_silk_ not present")
+        parts = jade.partition(jade._parse(*jade.read(entry)))
+        heads = [p for p in parts if p.limb == jade.HEAD_LIMB]
+        body = [p for p in parts if p.limb != jade.HEAD_LIMB]
+        assert heads, "n_silk_ carries a head and it was not found"
+        # And it is where a head goes - above everything else.
+        top = max(np.asarray(p.positions)[:, 2].max() for p in heads)
+        rest = max(np.asarray(p.positions)[:, 2].max() for p in body)
+        assert top > rest, (top, rest)
+
+    @staticmethod
+    def test_the_neck_stays_with_the_body(catalogue):
+        """The cut is at `hturn_g`. `NeckBone0` sits below it and drives the
+        neck stump, which is the body's - cut any lower and a ported figure has
+        a hole where its neck was."""
+        entry = next((e for e in catalogue if e.resref.lower() == "n_mercf_"), None)
+        if entry is None:
+            pytest.skip("n_mercf_ not present")
+        parts = jade.partition(jade._parse(*jade.read(entry)))
+        torso = [p for p in parts if p.limb == jade.TORSO]
+        assert torso
+        assert any("neck_g" in p.bones for p in torso), \
+            "the neck went with the head"
+
+    @staticmethod
+    def test_most_bodies_bring_no_head_at_all(catalogue):
+        bodies = [e for e in catalogue if jade.kind_of(e.resref) == jade.BODY]
+        carrying = 0
+        looked = 0
+        for entry in bodies[:20]:
+            try:
+                parts = jade.partition(jade._parse(*jade.read(entry)))
+            except jade.JadeError:
+                continue
+            looked += 1
+            if any(p.limb == jade.HEAD_LIMB for p in parts):
+                carrying += 1
+        assert looked >= 10
+        assert 0 < carrying < looked, (carrying, looked)

@@ -124,6 +124,16 @@ def run(entry, *, host: str = HOSTS[0], install=None, jade_install=None,
     for part in parts:
         by_limb.setdefault(part.limb, []).append(part)
 
+    # Jade builds 49 of its 112 people with a head on the body, sometimes with
+    # a mask over that. KOTOR hangs the head on `headhook` as its own model, so
+    # a body that brings its own wears two - and the one you see is the wrong
+    # one, sitting a little higher and a little wider than the real face.
+    head = by_limb.pop(jade.HEAD_LIMB, None)
+    if head:
+        out.lines.append(
+            f"left the Jade head behind ({sum(len(p.faces) for p in head)} "
+            f"triangles) - KOTOR hangs its own on headhook")
+
     # The texture is found before the splice, because each node's reference to
     # it is written as part of that node's rewrite.
     _dress(out, entry, parts, jade_install)
@@ -183,7 +193,7 @@ def _dress(out: Built, entry, parts: list, jade_install) -> None:
         return
     seen: dict = {}
     for part in parts:
-        if part.material:
+        if part.material and part.limb != jade.HEAD_LIMB:
             seen[part.material] = seen.get(part.material, 0) + len(part.faces)
     for material in sorted(seen, key=lambda m: -seen[m]):
         name = jade.texture_name(root, material)
