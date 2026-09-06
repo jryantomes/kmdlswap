@@ -134,8 +134,16 @@ def build_replacement(
     max_influences: int = weights.MAX_INFLUENCES,
     material: int | None = None,
     influences: list[list[kmdx.Influence]] | None = None,
+    facial_rig: bool = True,
 ) -> tuple[MeshGeometry, SwapReport]:
-    """Build a MeshGeometry replacing ``node``'s geometry with ``mesh``."""
+    """Build a MeshGeometry replacing ``node``'s geometry with ``mesh``.
+
+    ``facial_rig`` runs the two corrections that only make sense on a face -
+    rebalancing the brow and eye band, and binding lips modelled as their own
+    pieces. Pass False for anything that is not a head. On a body they are not
+    merely useless: `facerig.rebalance` finds an "eye band" in a torso and
+    quietly rebinds the vertices it finds there.
+    """
     original = extract(layout, node)
     stride = kmdx.stride_layout(layout, node)
 
@@ -263,30 +271,34 @@ def build_replacement(
         # them elsewhere - `h_mercf01_` 0.567-0.662 against Carth's 0.541-0.610
         # - and a socket correction fixed to the host's eye line then lands on
         # the bottom of hers and leaves the upper lid on the brow.
-        eyes = lips.eye_extent(mesh.positions, [tuple(f)[:3] for f in mesh.faces])
-        influences_out, report.mouth_lines = facerig.rebalance(
-            mesh.positions,
-            influences_out,
-            original.positions,
-            original.influences,
-            max_influences=max_influences,
-            eye_band=(eyes[0] - facerig.SOCKET, eyes[1]) if eyes else None,
-        )
+        if facial_rig:
+            eyes = lips.eye_extent(mesh.positions,
+                                   [tuple(f)[:3] for f in mesh.faces])
+            influences_out, report.mouth_lines = facerig.rebalance(
+                mesh.positions,
+                influences_out,
+                original.positions,
+                original.influences,
+                max_influences=max_influences,
+                eye_band=(eyes[0] - facerig.SOCKET, eyes[1]) if eyes else None,
+            )
         # Lips modelled as their own pieces sit recessed behind the face, so the
         # nearest host surface to them is skull rather than lip. They are also
         # too few to show up in any regional average - 28 vertices inside a band
         # of 285 - so they need finding and binding directly.
-        influences_out, lip_lines = lips.bind(
-            mesh.positions,
-            [tuple(f)[:3] for f in mesh.faces],
-            influences_out,
-            {slot: n.name for slot, n in kmdx.bone_slot_nodes(layout, node).items()},
-            original.positions,
-            original.influences,
-            split=getattr(mesh, "mouth_split", None),
-            max_influences=max_influences,
-        )
-        report.mouth_lines = list(report.mouth_lines) + lip_lines
+        if facial_rig:
+            influences_out, lip_lines = lips.bind(
+                mesh.positions,
+                [tuple(f)[:3] for f in mesh.faces],
+                influences_out,
+                {slot: n.name
+                 for slot, n in kmdx.bone_slot_nodes(layout, node).items()},
+                original.positions,
+                original.influences,
+                split=getattr(mesh, "mouth_split", None),
+                max_influences=max_influences,
+            )
+            report.mouth_lines = list(report.mouth_lines) + lip_lines
         problems = weights.check(influences_out)
         if problems:
             raise ValueError(
