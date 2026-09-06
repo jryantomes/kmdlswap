@@ -556,15 +556,51 @@ def _install_of(entry: Entry):
 # What Jade calls the bones KOTOR names differently. Both games descend from
 # the same engine and the skeletons correspond limb for limb - `hturn_g` even
 # survives under its own name.
+#
+# Jade is the finer rig of the two. Its spine has four joints to KOTOR's three,
+# each arm carries a twist bone and a radius alongside the ulna, and its hands
+# have four digits where KOTOR's have five. Where two Jade bones do one KOTOR
+# bone's work they land on the same name and merge, which is what keeps a
+# ported mesh under `BONE_CAP`.
 BONE_NAMES = {
+    # spine, neck and head
+    "SpinBone0": "pelvis_g", "SpinBone1": "torso_g", "SpinBone2": "torso_g",
+    "SpinBone3": "torsoupr_g", "NeckBone0": "neck_g",
+    "hturn_g": "hturn_g", "head_bob": "head_g", "HeadBone": "head_g",
+    # legs
+    "LegUppeL": "lthigh_g", "LegLoweL": "lshin_g",
+    "FootBallL": "lfoot_g", "FootToesL": "lfootT_g",
+    "LegUppeR": "rthigh_g", "LegLoweR": "rshin_g",
+    "FootBallR": "rfoot_g", "FootToesR": "rfootT_g",
+    # left arm - Twis0/Twis1 are one twist bone to KOTOR, Radi rides the Ulna
     "BLClavL01": "lcollar_g", "BLArmUppeL01": "lbicep_g",
-    "UlnaL01": "lforearm_g", "HandL": "lhand_g",
+    "Twis0L01": "LbicepL_g", "Twis1L01": "LbicepL_g",
+    "UlnaL01": "lforearm_g", "RadiL01": "lforearm_g", "HandL": "lhand_g",
+    "FingIndeL0": "LaFngrB_g", "FingIndeL1": "LaFngrT_g",
+    "FingIndeL2": "LaFngrT_g",
+    "FingMiddL0": "LbFngrB_g", "FingMiddL1": "LbFngrT_g",
+    "FingRingL0": "LcFngrB_g", "FingRingL1": "LcFngrT_g",
+    "FingThumL0": "LThumbB_g", "FingThumL1": "LThumbT_g",
+    # right arm
     "BLClavR01": "rcollar_g", "BLArmUppeR01": "rbicep_g",
-    "UlnaR01": "rforearm_g", "HandR": "rhand_g",
-    "LegUppeL": "lthigh_g", "LegLoweL": "lshin_g", "FootBallL": "lfoot_g",
-    "LegUppeR": "rthigh_g", "LegLoweR": "rshin_g", "FootBallR": "rfoot_g",
-    "SpinBone0": "pelvis_g", "SpinBone2": "torso_g", "SpinBone3": "torsoupr_g",
+    "Twis0R01": "RbicepL_g", "Twis1R01": "RbicepL_g",
+    "UlnaR01": "rforearm_g", "RadiR01": "rforearm_g", "HandR": "rhand_g",
+    "FingIndeR0": "RaFngrB_g", "FingIndeR1": "RaFngrT_g",
+    "FingIndeR2": "RaFngrT_g",
+    "FingMiddR0": "RbFngrB_g", "FingMiddR1": "RbFngrT_g",
+    "FingRingR0": "RcFngrB_g", "FingRingR1": "RcFngrT_g",
+    "FingThumR0": "RThumbB_g", "FingThumR1": "RThumbT_g",
 }
+
+# The bones every Jade body has, and the ones the rest of this module reaches
+# for by name. A body missing one of these is not a body.
+CORE_BONES = frozenset({
+    "SpinBone0", "SpinBone2", "SpinBone3",
+    "BLClavL01", "BLArmUppeL01", "UlnaL01", "HandL",
+    "BLClavR01", "BLArmUppeR01", "UlnaR01", "HandR",
+    "LegUppeL", "LegLoweL", "FootBallL",
+    "LegUppeR", "LegLoweR", "FootBallR",
+})
 
 
 def skeleton(entry: Entry) -> dict:
@@ -723,6 +759,227 @@ def arm_rest(entry: Entry) -> float | None:
         return None
     v = v / length
     return float(np.degrees(np.arctan2(-v[2], abs(v[0]))))
+
+
+# --- into KOTOR's mesh nodes ------------------------------------------------
+
+# KOTOR will not skin one mesh to more than seventeen bones. Every skinned mesh
+# in the game obeys it: across all 2832 models in the K1 library the counts run
+# 14 (245 meshes), 15 (147), 16 (176), 17 (21), and nothing above. A Jade body
+# weights one mesh to 45, so it cannot be a KOTOR mesh until it is cut up.
+BONE_CAP = 17
+
+# An influence this far below its vertex's total contributes nothing you can
+# see, and each one can drag a whole extra bone into a mesh's map. Dropping
+# them is worth about one bone per body.
+WEIGHT_FLOOR = 0.02
+
+# Where KOTOR cuts a body up, and so where we do. `P_CarthBB` is the four-way
+# version - Torso, LArm, RArm, Legs - and `PMBBM` the three-way, with the legs
+# left inside the torso. Four is the safer shape: the torso is the crowded one,
+# because every limb's first bone has to be in it for the joint to bend.
+#
+# The feet are named separately because Jade hangs them off the model root
+# rather than off the leg they belong to - walk the tree from `FootBallL` and
+# you arrive at the body, not at `LegLoweL`. Left to the tree they would sort
+# into the torso and drag the foot bones up with them.
+LIMB_ROOTS = {
+    "BLArmUppeL01": "LArm", "BLArmUppeR01": "RArm",
+    "LegUppeL": "Legs", "LegUppeR": "Legs",
+    "FootBallL": "Legs", "FootBallR": "Legs",
+}
+TORSO = "Torso"
+
+
+@dataclass
+class Part:
+    """One KOTOR mesh node: geometry of its own, and a bone map that fits."""
+
+    name: str
+    limb: str = TORSO
+    source: str = ""                               # the Jade mesh it came from
+    positions: list = field(default_factory=list)
+    faces: list = field(default_factory=list)
+    uvs: list = field(default_factory=list)
+    normals: list = field(default_factory=list)
+    bones: list = field(default_factory=list)      # KOTOR bone names
+    weights: list = field(default_factory=list)    # per vertex: (bone slot, weight)
+    material: int | None = None
+
+
+def _climb(name, parent: dict, table: dict, fallback=None):
+    """What `name` maps to, or what its nearest mapped ancestor maps to.
+
+    Jade weights vertices to things that are not joints - collision proxies,
+    weapon hooks, dangly hair, the face rig - and every one of them hangs
+    directly off a real bone. Walking up is what saves this from being forty
+    special cases, and it is also right: a hook sits at its parent.
+    """
+    walk, seen = name, set()
+    while walk is not None and walk not in seen:
+        seen.add(walk)
+        if walk in table:
+            return table[walk]
+        walk = parent.get(walk)
+    return fallback
+
+
+def _pack(faces: list, cap: int) -> list:
+    """Faces into as few nodes as will hold them, none over the bone cap.
+
+    The limb split gets almost everything under on its own - across all 112
+    Jade bodies this opens 24 extra nodes in total - but "almost" is not a
+    guarantee, and a mesh one bone over the cap is a mesh the engine drops.
+
+    Faces are offered in order of the bones they touch, so the ones that share
+    bones are tried together and a node fills with a region rather than a
+    scatter.
+    """
+    bins: list = []
+    for face in sorted(faces, key=lambda f: (sorted(f[1])[0], -len(f[1]))):
+        for used, members in bins:
+            if len(used | face[1]) <= cap:
+                used |= face[1]
+                members.append(face)
+                break
+        else:
+            bins.append((set(face[1]), [face]))
+    return bins
+
+
+def partition(model, *, cap: int = BONE_CAP, floor: float = WEIGHT_FLOOR,
+              pose: float | None = None, orient: bool = True,
+              scale: float = BODY_SCALE) -> list:
+    """Cut a Jade body into mesh nodes KOTOR can skin.
+
+    Jade ships a body as one or two meshes weighted to 45 bones. KOTOR wants
+    several, none of them touching more than `cap`, so this splits by limb the
+    way the game's own bodies are split: a vertex belongs to the limb of the
+    bone that pulls hardest on it, and a triangle to the limb most of its
+    corners agree on.
+
+    Meshes that are not skinned keep their shape and become rigid parts, bound
+    wholly to the one bone they hang from.
+
+    Positions come out where `mesh` puts them - KOTOR's axes, KOTOR's size -
+    because that is the space the parts are for.
+    """
+    names = list(getattr(model, "names", ()) or ())
+    into = BODY_FACING if orient else np.eye(3)
+    _where, parent = _tree(model)
+    swing = repose(model, pose) if pose is not None else {}
+    out: list = []
+
+    def bone_of(index: int) -> str:
+        raw = names[index] if 0 <= index < len(names) else ""
+        return _climb(raw, parent, BONE_NAMES, "torso_g")
+
+    def limb_of(index: int) -> str:
+        raw = names[index] if 0 <= index < len(names) else ""
+        return _climb(raw, parent, LIMB_ROOTS, TORSO)
+
+    def gather(limb, members, bones, world, weights, uvs, normals, found, source):
+        """One part's own vertices, renumbered from zero.
+
+        A vertex on a seam belongs to two parts and is written into both. That
+        is how KOTOR's own bodies are built, and because both copies keep the
+        same weights the seam still moves as one when the model animates.
+        """
+        part = Part(name="", limb=limb, source=source, bones=sorted(bones),
+                    material=getattr(found, "material_id", None) or None)
+        slot = {b: i for i, b in enumerate(part.bones)}
+        seen: dict = {}
+        for corners, _touched in members:
+            face = []
+            for v in corners:
+                if v not in seen:
+                    seen[v] = len(part.positions)
+                    placed = (into @ world[v]) * scale
+                    part.positions.append(tuple(float(x) for x in placed))
+                    part.weights.append([(slot[b], w) for b, w in weights[v]])
+                    if uvs is not None and v < len(uvs):
+                        part.uvs.append(tuple(float(x) for x in uvs[v][:2]))
+                    if normals is not None and v < len(normals):
+                        part.normals.append(tuple(float(x) for x in normals[v][:3]))
+                face.append(seen[v])
+            part.faces.append(tuple(face))
+        return part
+
+    def cut(node, found, rotation, offset):
+        raw = np.asarray(found.vertices, dtype=float)[:, :3]
+        raw = np.where(np.isfinite(raw), raw, 0.0)
+        world = raw @ rotation.T + offset
+        if swing:
+            world = _skin(world, found, names, swing)
+
+        skin = getattr(found, "skin", None)
+        if skin is None or not skin.vertex_weights:
+            # Rigid: the whole mesh rides the one bone it hangs from.
+            anchor = _climb(node.name, parent, BONE_NAMES, None) or _climb(
+                parent.get(node.name), parent, BONE_NAMES, "torso_g")
+            weights = [[(anchor, 1.0)] for _ in range(len(world))]
+            limbs = [_climb(node.name, parent, LIMB_ROOTS, TORSO)] * len(world)
+        else:
+            weights, limbs = [], []
+            for ws in skin.vertex_weights:
+                total = sum(w for _i, w in ws) or 1.0
+                kept = [(i, w) for i, w in ws if w / total >= floor] or list(ws)
+                merged: dict = {}
+                for index, weight in kept:
+                    bone = bone_of(index)
+                    merged[bone] = merged.get(bone, 0.0) + weight
+                share = sum(merged.values()) or 1.0
+                weights.append([(b, w / share) for b, w in merged.items()])
+                best = max(kept, key=lambda kv: kv[1])[0] if kept else 0
+                limbs.append(limb_of(best))
+            short = len(world) - len(weights)
+            if short > 0:
+                weights += [[("torso_g", 1.0)] for _ in range(short)]
+                limbs += [TORSO] * short
+
+        grouped: dict = {}
+        for tri in (found.triangles or ()):
+            corners = tuple(int(v) for v in tri[:3])
+            if any(v >= len(world) for v in corners):
+                continue
+            vote: dict = {}
+            for v in corners:
+                vote[limbs[v]] = vote.get(limbs[v], 0) + 1
+            limb = max(vote.items(), key=lambda kv: (kv[1], kv[0] == TORSO))[0]
+            touched = {b for v in corners for b, _w in weights[v]}
+            grouped.setdefault(limb, []).append((corners, touched))
+
+        uvs = found.uv_layers[0] if getattr(found, "uv_layers", None) else None
+        normals = getattr(found, "normals", None)
+        for limb in (TORSO, "LArm", "RArm", "Legs"):
+            if limb not in grouped:
+                continue
+            for bones, members in _pack(grouped[limb], cap):
+                out.append(gather(limb, members, bones, world, weights, uvs,
+                                  normals, found, node.name or ""))
+
+    def walk(node, rotation, offset):
+        turn = rotation @ _quaternion(node.orientation or (1, 0, 0, 0))
+        here = offset + rotation @ np.asarray(
+            node.position or (0.0, 0.0, 0.0), dtype=float)
+        found = node.mesh
+        if found is not None and found.render and found.vertices:
+            cut(node, found, turn, here)
+        for child in node.children or []:
+            walk(child, turn, here)
+
+    walk(model.root, np.eye(3), np.zeros(3))
+
+    # A body can arrive as several meshes - a figure, a chestplate, a vein of
+    # trim - and each of them has a torso's worth of triangles in it. Naming
+    # happens here, once, so two of them cannot both be called `Torso`: MDL
+    # nodes are addressed by name and a duplicate is a model the game misreads.
+    tally: dict = {}
+    for part in out:
+        tally[part.limb] = tally.get(part.limb, 0) + 1
+        part.name = part.limb if tally[part.limb] == 1 else (
+            part.limb + str(tally[part.limb]))
+    return out
 
 
 def scene(entry: Entry, *, install=None, scale: float | None = None,

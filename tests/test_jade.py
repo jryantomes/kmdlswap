@@ -1020,3 +1020,184 @@ class TestWhichWayRoundABodyGoes:
             assert forward[1] > 0, (entry.resref, forward)
             checked += 1
         assert checked >= 3
+
+
+class TestCuttingABodyIntoKotorMeshes:
+    """Jade ships a body as one mesh weighted to 45 bones. KOTOR will not skin
+    one mesh to more than seventeen - no model in the game does - so the body
+    has to be cut up before it can be a KOTOR body at all.
+    """
+
+    @staticmethod
+    def bodies(catalogue):
+        return [e for e in catalogue if jade.kind_of(e.resref) == jade.BODY]
+
+    @staticmethod
+    def parts_of(entry, **kw):
+        return jade.partition(jade._parse(*jade.read(entry)), **kw)
+
+    def test_no_part_asks_for_more_bones_than_kotor_allows(self, catalogue):
+        """The whole point. One bone over and the engine drops the mesh."""
+        checked = 0
+        for entry in self.bodies(catalogue)[:12]:
+            try:
+                parts = self.parts_of(entry)
+            except jade.JadeError:
+                continue
+            assert parts, entry.resref
+            for part in parts:
+                assert len(part.bones) <= jade.BONE_CAP, (
+                    entry.resref, part.name, len(part.bones))
+            checked += 1
+        assert checked >= 8
+
+    def test_kotor_itself_never_goes_over_that_cap(self, k1_path):
+        """`BONE_CAP` is measured, not chosen. If it is wrong, every part this
+        module writes is built on a wrong number."""
+        from kmdlfun.library import ModelLibrary
+        from kmdlswap import layout as kl
+
+        lib = ModelLibrary(k1_path)
+        worst = 0
+        for name in ("PMBBM", "PFBBM", "P_CarthBB", "p_juhanibb", "n_darthrevan"):
+            if not lib.has(name):
+                continue
+            lay = kl.parse(*lib.read(name))
+            for node in lay.nodes:
+                if node.in_animation is None and node.is_skin:
+                    worst = max(worst, sum(1 for s in node.bonemap if s >= 0))
+        assert worst, "no skinned meshes found"
+        assert worst <= jade.BONE_CAP
+        # 17 is not a ceiling nobody reaches - the game sits right on it.
+        assert worst == jade.BONE_CAP
+
+    def test_not_one_triangle_is_dropped_or_drawn_twice(self, catalogue):
+        checked = 0
+        for entry in self.bodies(catalogue)[:8]:
+            try:
+                model = jade._parse(*jade.read(entry))
+            except jade.JadeError:
+                continue
+            before = 0
+
+            def count(node):
+                nonlocal before
+                found = node.mesh
+                if found is not None and found.render and found.vertices:
+                    before += len(found.triangles or ())
+                for child in node.children or []:
+                    count(child)
+
+            count(model.root)
+            after = sum(len(p.faces) for p in jade.partition(model))
+            assert before == after, (entry.resref, before, after)
+            checked += 1
+        assert checked >= 6
+
+    def test_each_part_carries_weights_it_can_use(self, catalogue):
+        """Weights are renormalised after the merge and the prune, and every
+        slot indexes that part's own bone list - not the model's."""
+        checked = 0
+        for entry in self.bodies(catalogue)[:8]:
+            try:
+                parts = self.parts_of(entry)
+            except jade.JadeError:
+                continue
+            for part in parts:
+                assert len(part.weights) == len(part.positions), part.name
+                for slots in part.weights:
+                    assert slots, part.name
+                    assert abs(sum(w for _s, w in slots) - 1.0) < 1e-6
+                    for slot, _w in slots:
+                        assert 0 <= slot < len(part.bones)
+            checked += 1
+        assert checked >= 6
+
+    def test_no_two_nodes_share_a_name(self, catalogue):
+        """A body can arrive as several meshes, each with a torso's worth of
+        triangles. MDL nodes are addressed by name and a duplicate is a model
+        the game misreads."""
+        checked = 0
+        for entry in self.bodies(catalogue)[:12]:
+            try:
+                parts = self.parts_of(entry)
+            except jade.JadeError:
+                continue
+            names = [p.name for p in parts]
+            assert len(names) == len(set(names)), (entry.resref, names)
+            checked += 1
+        assert checked >= 8
+
+    def test_the_limbs_come_out_where_limbs_go(self, catalogue):
+        """Named LArm, and on the left. The split is by weight, not by
+        position, so this is a real check and not a restatement."""
+        import numpy as np
+
+        checked = 0
+        for entry in self.bodies(catalogue)[:8]:
+            try:
+                parts = self.parts_of(entry)
+            except jade.JadeError:
+                continue
+            where = {}
+            for part in parts:
+                if part.name in ("Torso", "LArm", "RArm", "Legs"):
+                    where[part.name] = np.asarray(part.positions, dtype=float)
+            if not {"LArm", "RArm", "Torso", "Legs"} <= set(where):
+                continue
+            assert where["LArm"][:, 0].mean() < 0 < where["RArm"][:, 0].mean()
+            assert where["Legs"][:, 2].mean() < where["Torso"][:, 2].mean()
+            # The arms are out at the sides, further out than the trunk.
+            assert (abs(where["LArm"][:, 0]).max()
+                    > abs(where["Torso"][:, 0]).max())
+            checked += 1
+        assert checked >= 5
+
+    def test_it_only_names_bones_kotor_actually_has(self, catalogue, k1_path):
+        """A weight on a bone the target skeleton does not carry is a weight
+        that goes nowhere."""
+        from kmdlfun.library import ModelLibrary
+        from kmdlswap import layout as kl
+
+        lib = ModelLibrary(k1_path)
+        known = set()
+        for name in ("PMBBM", "PFBBM", "P_CarthBB"):
+            lay = kl.parse(*lib.read(name))
+            known |= {n.name.lower() for n in lay.nodes if n.in_animation is None}
+
+        checked = 0
+        for entry in self.bodies(catalogue)[:8]:
+            try:
+                parts = self.parts_of(entry)
+            except jade.JadeError:
+                continue
+            for part in parts:
+                unknown = [b for b in part.bones if b.lower() not in known]
+                assert not unknown, (entry.resref, part.name, unknown)
+            checked += 1
+        assert checked >= 6
+
+    def test_a_seam_vertex_goes_into_both_parts(self, catalogue):
+        """Splitting a mesh means the vertices along the cut belong to two
+        parts, and each part needs its own copy. Both copies keep the same
+        weights, so the seam still moves as one when the model animates."""
+        entry = next((e for e in self.bodies(catalogue)
+                      if e.resref.lower() == "n_bandit_"), None)
+        if entry is None:
+            pytest.skip("n_bandit_ not present")
+        model = jade._parse(*jade.read(entry))
+        before = 0
+
+        def count(node):
+            nonlocal before
+            found = node.mesh
+            if found is not None and found.render and found.vertices:
+                before += len(found.vertices)
+            for child in node.children or []:
+                count(child)
+
+        count(model.root)
+        after = sum(len(p.positions) for p in jade.partition(model))
+        assert after > before, (before, after)
+        # A cut through a body, not a shredding of it.
+        assert after < before * 1.6, (before, after)
