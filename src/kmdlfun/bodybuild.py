@@ -23,13 +23,23 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import jade
+from . import jade, space
 from .library import ModelLibrary
 
-# The bodies worth building onto. All four-node bodies: a three-node host like
-# `PMBBM` keeps its legs inside the torso, which works, but it puts a Jade
-# figure's legs and trunk under one texture and one bone map for no gain.
-HOSTS = ("P_CarthBB",)
+TORSO = jade.TORSO
+
+# The bodies worth building onto, and the reason there is more than one: a
+# host's `headhook` is where the engine hangs the head, and the male and female
+# skeletons do not put it at the same height. The male bodies hook at z 1.525,
+# the female ones at 1.450.
+#
+# That 0.075 decides whether a ported body reaches its own head. Jade's women
+# top out around 1.47, so on a male host the head floats with a quarter-inch of
+# bare neck under it, and on a female host it is covered with room to spare.
+# The fix is to pick the right host, not to stretch the body up to a hook that
+# was never meant for it.
+HOSTS = ("P_CarthBB", "PMBBM", "PFBBM")
+FEMALE_HOSTS = ("PFBBM",)
 
 # A KOTOR texture reference is a 32-byte field and the resref that fills it is
 # 16 characters. Named from the model rather than the folder: the folder is the
@@ -76,6 +86,12 @@ def limb_for(node_name: str) -> str | None:
     return None
 
 
+def _turn(rest, vector):
+    """A direction in the node's space. Rotated, never moved."""
+    return tuple(sum(rest.rotation[k][i] * vector[k] for k in range(3))
+                 for i in range(3))
+
+
 def _merge(parts: list):
     """Every part of one limb, joined into a single mesh for one host node.
 
@@ -105,7 +121,8 @@ def _merge(parts: list):
 
 
 def run(entry, *, host: str = HOSTS[0], install=None, jade_install=None,
-        pose: float | None = jade.KOTOR_ARM_REST) -> Built:
+        pose: float | None = jade.KOTOR_ARM_REST,
+        scale: float = jade.BODY_SCALE) -> Built:
     """Build one Jade body onto one KOTOR host. Returns the bytes, not a file."""
     from kmdlswap import edit as kedit
     from kmdlswap import layout as kl
@@ -119,7 +136,7 @@ def run(entry, *, host: str = HOSTS[0], install=None, jade_install=None,
     mdl, mdx = lib.read(host)
 
     model = jade._parse(*jade.read(entry))
-    parts = jade.partition(model, pose=pose)
+    parts = jade.partition(model, pose=pose, scale=scale)
     by_limb: dict = {}
     for part in parts:
         by_limb.setdefault(part.limb, []).append(part)
@@ -144,11 +161,18 @@ def run(entry, *, host: str = HOSTS[0], install=None, jade_install=None,
     if not wanted:
         raise jade.JadeError(f"{host} has no skinned body meshes to replace")
 
-    spare = sorted(set(by_limb) - {limb_for(n) for n in wanted})
-    if spare:
-        out.warnings.append(
-            f"{host} has no node for " + ", ".join(spare)
-            + " - that geometry is not carried over")
+    # A three-node host - every female body, and `PMBBM` - keeps its legs
+    # inside its torso mesh rather than in one of their own. Fold ours the same
+    # way rather than dropping them: that is not a workaround, it is how KOTOR
+    # builds those bodies.
+    taken = {limb_for(n) for n in wanted}
+    for limb in sorted(set(by_limb) - taken):
+        moved = by_limb.pop(limb)
+        by_limb.setdefault(TORSO, []).extend(moved)
+        out.lines.append(
+            f"{host} has no {limb} node, so those "
+            f"{sum(len(p.faces) for p in moved)} triangles go in the torso - "
+            f"which is where {host} keeps its own")
 
     for node_name in wanted:
         limb = limb_for(node_name)
@@ -167,8 +191,17 @@ def run(entry, *, host: str = HOSTS[0], install=None, jade_install=None,
 
         layout = kl.parse(mdl, mdx)
         node = layout.node_by_name(node_name)
-        mesh = kobj.ObjMesh(name=node_name, positions=positions, faces=faces,
-                            uvs=uvs, normals=normals)
+        # A skinned mesh's vertices are stored in its *node's* space, and the
+        # node is not always at the origin: `P_CarthBB` keeps all four within a
+        # centimetre of it, but `PFBBM` hangs its torso at z 1.042 and offset
+        # sideways. Written as model space they came out a metre high on that
+        # host - and one centimetre low on Carth, which is small enough to look
+        # like nothing and is a third of the gap under his head.
+        rest = space.rest_pose(layout)[node.index]
+        local = [rest.to_local(p) for p in positions]
+        turned = [_turn(rest, n) for n in normals] if normals else normals
+        mesh = kobj.ObjMesh(name=node_name, positions=local, faces=faces,
+                            uvs=uvs, normals=turned)
         # `facial_rig=False` matters: those two passes look for a brow band and
         # for lips, and on a torso they find something and rebind it.
         geo, report = kswap.build_replacement(layout, node, mesh,

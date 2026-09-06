@@ -290,3 +290,136 @@ class TestTheHeadIsLeftBehind:
         for line in wrong:
             got = [int(x) for x in line.replace(":", " ").split() if x.isdigit()]
             assert got and got[0] < got[1] / 2, line
+
+
+class TestWhereTheGeometryActuallyLands:
+    """A skinned mesh's vertices are stored in its *node's* space, and the node
+    is not always at the origin.
+
+    `P_CarthBB` keeps all four of its body nodes within a centimetre of it, so
+    writing model-space coordinates looked right there and was wrong by a
+    centimetre. `PFBBM` hangs its torso at z 1.042 and offset sideways, and the
+    same mistake puts the body a metre in the air.
+    """
+
+    @staticmethod
+    @pytest.mark.parametrize("host", ["P_CarthBB", "PMBBM", "PFBBM"])
+    def test_a_built_body_stands_where_the_partition_put_it(host, a_body,
+                                                            k1_path, jade_path):
+        import numpy as np
+
+        from kmdlfun import space
+        from kmdlfun.library import ModelLibrary
+        from kmdlswap import layout as kl
+        from kmdlswap import mdx as kmdx
+
+        if not ModelLibrary(k1_path).has(host):
+            pytest.skip(f"{host} not in this install")
+        parts = jade.partition(jade._parse(*jade.read(a_body)),
+                               pose=jade.KOTOR_ARM_REST)
+        want = np.vstack([np.asarray(p.positions) for p in parts
+                          if p.limb != jade.HEAD_LIMB])
+
+        built = bodybuild.run(a_body, host=host, install=k1_path,
+                              jade_install=jade_path)
+        lay = kl.parse(built.mdl, built.mdx)
+        rest = space.rest_pose(lay)
+        got = []
+        for node in lay.nodes:
+            if node.in_animation is not None or not node.is_skin:
+                continue
+            if not bodybuild.limb_for(node.name):
+                continue
+            at = rest[node.index]
+            got.extend([p[i] + at.position[i] for i in range(3)]
+                       for p in kmdx.positions(lay, node))
+        got = np.asarray(got, dtype=float)
+
+        # Same floor and the same neckline, on every host.
+        assert abs(got[:, 2].min() - want[:, 2].min()) < 1e-3, host
+        assert abs(got[:, 2].max() - want[:, 2].max()) < 1e-3, host
+
+    @staticmethod
+    def test_the_figure_stands_on_the_floor(a_body, k1_path, jade_path):
+        """The one that catches a body a metre in the air."""
+        from kmdlfun import space
+        from kmdlswap import layout as kl
+        from kmdlswap import mdx as kmdx
+
+        built = bodybuild.run(a_body, host="PFBBM", install=k1_path,
+                              jade_install=jade_path)
+        lay = kl.parse(built.mdl, built.mdx)
+        rest = space.rest_pose(lay)
+        low = min(p[2] + rest[node.index].position[2]
+                  for node in lay.nodes
+                  if node.in_animation is None and node.is_skin
+                  and bodybuild.limb_for(node.name)
+                  for p in kmdx.positions(lay, node))
+        assert abs(low) < 0.05, low
+
+
+class TestReachingTheHead:
+    """The engine hangs the head on the host's `headhook`, and the male and
+    female skeletons do not put it at the same height - 1.525 against 1.450.
+
+    Jade's women top out around 1.47. On a male host that leaves the head with
+    bare neck under it; on a female host it is covered with room to spare. The
+    fix is choosing the host, not stretching the body.
+    """
+
+    @staticmethod
+    def hook_of(k1_path, host):
+        import numpy as np
+
+        from kmdlfun import space
+        from kmdlfun.library import ModelLibrary
+        from kmdlswap import layout as kl
+
+        lay = kl.parse(*ModelLibrary(k1_path).read(host))
+        rest = space.rest_pose(lay)
+        return float(np.asarray(
+            rest[lay.node_by_name("headhook").index].position)[2])
+
+    def test_the_two_skeletons_hook_the_head_at_different_heights(self, k1_path):
+        male = self.hook_of(k1_path, "P_CarthBB")
+        female = self.hook_of(k1_path, "PFBBM")
+        assert male > female
+        assert 0.05 < male - female < 0.12, (male, female)
+
+    def test_a_womans_body_reaches_the_head_on_a_womans_host(self, bodies,
+                                                             k1_path, jade_path):
+        import numpy as np
+
+        from kmdlfun import space
+        from kmdlswap import layout as kl
+        from kmdlswap import mdx as kmdx
+
+        entry = next((e for e in bodies if e.resref.lower() == "n_mercf_"), None)
+        if entry is None:
+            pytest.skip("n_mercf_ not present")
+        for host, reach in (("PFBBM", True), ("P_CarthBB", False)):
+            built = bodybuild.run(entry, host=host, install=k1_path,
+                                  jade_install=jade_path)
+            lay = kl.parse(built.mdl, built.mdx)
+            rest = space.rest_pose(lay)
+            top = max(p[2] + rest[node.index].position[2]
+                      for node in lay.nodes
+                      if node.in_animation is None and node.is_skin
+                      and bodybuild.limb_for(node.name)
+                      for p in kmdx.positions(lay, node))
+            # Her head's lowest geometry sits a shade under the hook it hangs
+            # from; anything above that line is covered.
+            need = self.hook_of(k1_path, host) - 0.016
+            assert (top >= need) is reach, (host, top, need)
+
+    @staticmethod
+    def test_a_three_node_host_keeps_the_legs_in_its_torso(bodies, k1_path,
+                                                           jade_path):
+        """`PFBBM` has no Legs mesh - it carries them in the torso, and so must
+        anything built onto it, or the figure comes out with no legs."""
+        entry = next(iter(bodies))
+        built = bodybuild.run(entry, host="PFBBM", install=k1_path,
+                              jade_install=jade_path)
+        assert any("no Legs node" in line for line in built.lines), built.lines
+        assert not any("not carried over" in w for w in built.warnings), \
+            built.warnings
