@@ -1132,10 +1132,7 @@ class App(ttk.Frame):
             ttk.Radiobutton(who, text=text, value=value,
                             variable=self.new_kind).pack(side="left", padx=(10, 0))
 
-        ttk.Button(page, text="Create the character",
-                   command=self._character_start).grid(row=2, column=0,
-                                                       columnspan=2,
-                                                       sticky="w", pady=(8, 0))
+
         ttk.Label(
             page,
             text=("Nothing here writes geometry - it is two table rows and a "
@@ -1804,8 +1801,6 @@ class App(ttk.Frame):
                              "recordings are not here",
                   foreground="#666").pack(side="left")
 
-        ttk.Button(page, text="Write the lips", command=self._lips_start).grid(
-            row=5, column=0, sticky="w", pady=(10, 0))
         ttk.Label(
             page,
             text=("Your dialogue is never edited. Lines given a VO_ResRef get one "
@@ -2252,8 +2247,17 @@ class App(ttk.Frame):
 
         self.progress = ttk.Progressbar(row, mode="determinate")
         self.progress.grid(row=1, column=0, sticky="ew", padx=(0, 8))
+        # One primary action, and it says what it will do. There were two:
+        # this one, and a second inside the Character and Lips pages. The bottom
+        # right is where an action bar lives, so that is the one that gets
+        # pressed - and on those two tabs it fell through to the transplant path
+        # and asked for a host and a donor, which is not a question the page had
+        # posed. Reported from use: "I clicked build but I needed to click
+        # create character".
         self.build_btn = ttk.Button(row, text="Build", command=self._start)
         self.build_btn.grid(row=1, column=1)
+        self.tabs.bind("<<NotebookTabChanged>>", lambda _e: self._name_the_action())
+        self._name_the_action()
         ttk.Button(row, text="Open output", command=self._open_out).grid(
             row=1, column=2, padx=(6, 0)
         )
@@ -2263,6 +2267,30 @@ class App(ttk.Frame):
         ttk.Button(row, text="Remove", command=self._uninstall).grid(
             row=1, column=4, padx=(6, 0)
         )
+
+    # What the primary action is called on each tab, and what it runs. A tab
+    # absent from here has nothing to build, and says so rather than doing
+    # something else.
+    ACTIONS = {
+        "Character": ("Create the character", "_character_start"),
+        "Lips": ("Write the lips", "_lips_start"),
+        "Custom head": ("Build the head", None),
+        "Transplant": ("Build", None),
+        "Effects": ("Build", None),
+    }
+
+    def _name_the_action(self) -> None:
+        """Label the button for the tab in front, and grey it where there is
+        nothing for it to do."""
+        try:
+            tab = self.tabs.tab(self.tabs.select(), "text")
+        except tk.TclError:
+            return
+        label, _ = self.ACTIONS.get(tab, ("Build", None))
+        busy = bool(self.worker and self.worker.is_alive())
+        self.build_btn.config(
+            text=label,
+            state="disabled" if (busy or tab not in self.ACTIONS) else "normal")
 
     # ---- behaviour ---------------------------------------------------------
 
@@ -3435,8 +3463,20 @@ class App(ttk.Frame):
             return
 
         tab = self.tabs.tab(self.tabs.select(), "text")
+        if tab not in self.ACTIONS:
+            self._say(f"nothing to build on the {tab} tab")
+            return
         self.build_btn.config(state="disabled")
         self.progress.config(value=0, maximum=100)
+
+        # Tabs that own their whole job. Without these the Character and Lips
+        # pages fell through to the transplant branch below and asked for a host
+        # and a donor.
+        _label, own = self.ACTIONS[tab]
+        if own is not None:
+            self.build_btn.config(state="normal")   # each re-disables as it starts
+            getattr(self, own)()
+            return
 
         if tab == "Custom head":
             self.build_btn.config(state="normal")   # _head_start disables it itself

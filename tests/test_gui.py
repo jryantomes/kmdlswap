@@ -2334,3 +2334,53 @@ class TestPartsReadAsWhatTheyAre:
         stocked._refresh_parts("body")
 
         assert list(got.values()) == ["PFBAM"], got
+
+
+class TestOnePrimaryAction:
+    """There were two buttons that build, and the wrong one was in the place an
+    action bar lives.
+
+    Reported from use: "I clicked build at the bottom but I needed to click
+    create character". Worse than a wasted click - on Character and Lips the
+    bottom button fell through to the transplant branch and asked for a host and
+    a donor, which is not a question either page had posed.
+    """
+
+    @staticmethod
+    def select(app, name):
+        for i in range(len(app.tabs.tabs())):
+            if app.tabs.tab(i, "text") == name:
+                app.tabs.select(i)
+                app.update()
+                return True
+        return False
+
+    def test_the_button_says_what_it_will_do(self, app):
+        for tab, said in (("Character", "Create the character"),
+                          ("Lips", "Write the lips"),
+                          ("Custom head", "Build the head")):
+            if self.select(app, tab):
+                assert app.build_btn.cget("text") == said, tab
+
+    def test_it_is_greyed_where_there_is_nothing_to_build(self, app):
+        for tab in ("Preview", "Builds"):
+            if self.select(app, tab):
+                assert str(app.build_btn.cget("state")) == "disabled", tab
+
+    def test_the_page_no_longer_carries_a_second_one(self, app):
+        """Two buttons doing the same job is the fault itself."""
+        self.select(app, "Character")
+        page = app.tabs.nametowidget(app.tabs.select())
+        assert "Create the character" not in [
+            b.cget("text") for b in buttons_under(page)]
+
+    def test_pressing_it_on_character_does_not_ask_for_a_donor(self, app, tmp_path):
+        self.select(app, "Character")
+        app.out_dir.set(str(tmp_path))
+        app.part_pick["body"].set("")
+        app._start()
+        app.update()
+
+        log = app.log.get("1.0", "end")
+        assert "Pick a host and a donor" not in log
+        assert "pick a body first" in log, log[-300:]
