@@ -819,3 +819,138 @@ class TestTheQuaternionOrder:
                 continue
             assert bones["FootBallL"][2] < bones["HeadBone"][2], entry.resref
             assert abs(bones["FootBallL"][2]) < 0.2, "feet near the ground"
+
+
+class TestSwingingTheArmsDown:
+    """Jade stands its people in a T-pose; KOTOR's rest is an A-pose.
+
+    Forty-seven degrees separate them, and a body dropped onto KOTOR's skeleton
+    with its arms still out sideways has half of each arm somewhere the engine
+    will never put it.
+    """
+
+    @staticmethod
+    def bodies(catalogue):
+        return [e for e in catalogue if jade.kind_of(e.resref) == jade.BODY]
+
+    def test_the_arms_land_on_the_angle_asked_for(self, catalogue):
+        import numpy as np
+
+        checked = 0
+        for entry in self.bodies(catalogue)[:5]:
+            try:
+                model = jade._parse(*jade.read(entry))
+            except jade.JadeError:
+                continue
+            where, _parent = jade._tree(model)
+            swing = jade.repose(model, jade.KOTOR_ARM_REST)
+            assert swing, entry.resref
+
+            def after(name):
+                if name not in swing:
+                    return where[name]
+                pivot, turn = swing[name]
+                return pivot + turn @ (where[name] - pivot)
+
+            for side in ("L", "R"):
+                v = after(f"Hand{side}") - after(f"BLArmUppe{side}01")
+                v = v / np.linalg.norm(v)
+                got = float(np.degrees(np.arctan2(-v[2], abs(v[0]))))
+                assert abs(got - jade.KOTOR_ARM_REST) < 0.5, (entry.resref, side, got)
+            checked += 1
+        assert checked >= 3
+
+    def test_the_move_falls_away_towards_the_middle(self, catalogue):
+        """A body is posed, not rebuilt. Travel should fall off from the hands
+        to the spine, and it does - averaged by distance from the centreline it
+        goes 0.48, 0.26, 0.11, 0.008, 0.001. The torso is carried along a
+        millimetre by a shoulder cap that shares the bicep's weight, which is
+        what blend skinning is for; it is not disturbed.
+        """
+        import numpy as np
+
+        bands = ((0.60, 9.9), (0.45, 0.60), (0.30, 0.45), (0.15, 0.30), (0.0, 0.15))
+        checked = 0
+        for entry in self.bodies(catalogue)[:4]:
+            try:
+                plain = np.asarray(jade.mesh(*jade.read(entry), kind=jade.BODY,
+                                             centre=False, scale=1.0).positions, float)
+                posed = np.asarray(jade.mesh(*jade.read(entry), kind=jade.BODY,
+                                             centre=False, scale=1.0,
+                                             pose=jade.KOTOR_ARM_REST).positions, float)
+            except jade.JadeError:
+                continue
+            travel = np.linalg.norm(plain - posed, axis=1)
+            out = np.abs(plain[:, 0])
+            means = []
+            for low, high in bands:
+                band = (out >= low) & (out < high)
+                if band.sum() > 10:
+                    means.append(float(travel[band].mean()))
+            assert len(means) >= 4, entry.resref
+            assert means == sorted(means, reverse=True), (entry.resref, means)
+            assert means[0] > 0.3, (entry.resref, means)
+            assert means[-1] < 0.01, (entry.resref, means)
+
+            # And the arms really did come in - narrower, and no shorter.
+            assert np.ptp(posed[:, 0]) < np.ptp(plain[:, 0]) * 0.8
+            assert abs(np.ptp(posed[:, 2]) - np.ptp(plain[:, 2])) < 1e-6
+            checked += 1
+        assert checked >= 3
+
+    def test_the_shoulder_does_not_tear(self, catalogue):
+        """Every vertex follows the bones it is weighted to, so one weighted
+        half to the bicep and half to the chest travels half the way. Rotating
+        the arm island outright would leave a hole at the shoulder instead."""
+        import numpy as np
+
+        entry = next((e for e in self.bodies(catalogue)
+                      if e.resref.lower() == "n_bandit_"), None)
+        if entry is None:
+            pytest.skip("n_bandit_ not present")
+        plain = np.asarray(jade.mesh(*jade.read(entry), kind=jade.BODY,
+                                     centre=False, scale=1.0).positions, float)
+        posed = np.asarray(jade.mesh(*jade.read(entry), kind=jade.BODY,
+                                     centre=False, scale=1.0,
+                                     pose=jade.KOTOR_ARM_REST).positions, float)
+        travel = np.linalg.norm(plain - posed, axis=1)
+        # Out at the hand the arm swings furthest; at the shoulder itself it
+        # barely moves. If the join were rigid there would be no middle.
+        shoulder = (np.abs(plain[:, 0]) > 0.30) & (np.abs(plain[:, 0]) < 0.45)
+        assert shoulder.any()
+        assert 0.0 < travel[shoulder].max() < travel.max() * 0.5
+
+    def test_a_head_is_left_alone(self, a_head):
+        """Heads have no arms, and asking for a pose should not disturb one."""
+        import numpy as np
+
+        plain = np.asarray(jade.mesh(*jade.read(a_head), kind=a_head.kind,
+                                     centre=False, scale=1.0).positions, float)
+        posed = np.asarray(jade.mesh(*jade.read(a_head), kind=a_head.kind,
+                                     centre=False, scale=1.0,
+                                     pose=jade.KOTOR_ARM_REST).positions, float)
+        assert np.abs(plain - posed).max() < 1e-9
+
+    @staticmethod
+    def test_kotor_s_own_arms_are_where_the_constant_says(k1_path):
+        """The target is measured, not chosen. If a future KOTOR install reads
+        differently this is the test that says so."""
+        import numpy as np
+
+        from kmdlfun import space
+        from kmdlfun.library import ModelLibrary
+        from kmdlswap import layout as kl
+
+        seen = []
+        for name in ("PMBBM", "PFBBM"):
+            lay = kl.parse(*ModelLibrary(k1_path).read(name))
+            rest = space.rest_pose(lay)
+            for side in ("l", "r"):
+                a = np.asarray(rest[lay.node_by_name(f"{side}bicep_g").index]
+                               .position, float)
+                b = np.asarray(rest[lay.node_by_name(f"{side}hand_g").index]
+                               .position, float)
+                v = (b - a) / np.linalg.norm(b - a)
+                seen.append(float(np.degrees(np.arctan2(-v[2], abs(v[0])))))
+        assert min(seen) > 50.0 and max(seen) < 58.0, seen
+        assert min(seen) <= jade.KOTOR_ARM_REST <= max(seen)

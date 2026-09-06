@@ -259,14 +259,11 @@ def read(entry: Entry) -> tuple[bytes, bytes | None]:
 # --- reading one --------------------------------------------------------------
 
 
-def mesh(mdl_bytes: bytes, mdx_bytes: bytes | None, *, scale: float = SCALE,
-         orient: bool = True, centre: bool = True, tmp_dir=None,
-         kind: str = HEAD) -> Mesh:
-    """Every drawn triangle, in KOTOR's axes and at KOTOR's size.
+def _parse(mdl_bytes: bytes, mdx_bytes: bytes | None, tmp_dir=None):
+    """The vendored reader, given bytes.
 
-    The vendored reader takes file paths rather than bytes, so the payloads are
-    written out first; they come from inside an archive and have nowhere else
-    to be.
+    It takes file paths, and these payloads come from inside an archive and have
+    nowhere else to be, so they are written out first.
     """
     import tempfile
 
@@ -280,11 +277,22 @@ def mesh(mdl_bytes: bytes, mdx_bytes: bytes | None, *, scale: float = SCALE,
     if mdx_bytes:
         mdx_path = folder / "model.mdx"
         mdx_path.write_bytes(mdx_bytes)
-
     try:
-        model = parse_jade_mdl(mdl_path, mdx_path)
+        return parse_jade_mdl(mdl_path, mdx_path)
     except Exception as exc:  # noqa: BLE001 - the reader raises many kinds
         raise JadeError(f"could not read the model: {exc}") from exc
+
+
+def mesh(mdl_bytes: bytes, mdx_bytes: bytes | None, *, scale: float = SCALE,
+         orient: bool = True, centre: bool = True, tmp_dir=None,
+         kind: str = HEAD, pose: float | None = None) -> Mesh:
+    """Every drawn triangle, in KOTOR's axes and at KOTOR's size.
+
+    `pose` swings the arms down to that many degrees below horizontal, which is
+    what a body needs before KOTOR's skeleton will fit it - see `repose`.
+    """
+    model = _parse(mdl_bytes, mdx_bytes, tmp_dir)
+    swing = repose(model, pose) if pose is not None else {}
 
     out = Mesh()
     rotation = np.eye(3)
@@ -306,7 +314,10 @@ def mesh(mdl_bytes: bytes, mdx_bytes: bytes | None, *, scale: float = SCALE,
                 v = np.where(np.isfinite(v), v, 0.0)
                 out.notes.append(f"{int(bad.sum())} non-finite vertices in "
                                  f"{node.name!r}, zeroed")
-            world = ((v @ r.T + t) @ rotation.T) * scale
+            here = v @ r.T + t
+            if swing:
+                here = _skin(here, found, model.names, swing)
+            world = (here @ rotation.T) * scale
             out.positions.extend(tuple(float(x) for x in row) for row in world)
             material = getattr(found, "material_id", None)
             if material and material not in out.materials:
@@ -451,7 +462,7 @@ def texture_for(install, found: Mesh) -> tuple[str, bytes] | None:
 
 def to_pack(entry: Entry, out_dir, *, scale: float | None = None,
             name: str | None = None, install=None,
-            with_texture: bool = True) -> dict:
+            with_texture: bool = True, pose: float | None = None) -> dict:
     """Write a Jade model out as a head pack the Custom head tab can build.
 
     The pack is the same shape a `.glb` import produces, so everything
@@ -468,7 +479,7 @@ def to_pack(entry: Entry, out_dir, *, scale: float | None = None,
     out_dir.mkdir(parents=True, exist_ok=True)
     if scale is None:
         scale = scale_for(entry.kind)
-    found = mesh(*read(entry), scale=scale, kind=entry.kind)
+    found = mesh(*read(entry), scale=scale, kind=entry.kind, pose=pose)
 
     kobj.write_obj(out_dir / "head.obj", found.positions, found.faces,
                    uvs=found.uvs or None, normals=found.normals or None,
@@ -564,37 +575,131 @@ def skeleton(entry: Entry) -> dict:
 
     Positions are relative to the parent in the file, so this walks the tree.
     """
-    import tempfile
+    return _tree(_parse(*read(entry)))[0]
 
-    from .vendor.jade import parse_jade_mdl
 
-    mdl_bytes, mdx_bytes = read(entry)
-    with tempfile.TemporaryDirectory() as folder:
-        root = Path(folder)
-        mdl_path = root / "model.mdl"
-        mdl_path.write_bytes(mdl_bytes)
-        mdx_path = None
-        if mdx_bytes:
-            mdx_path = root / "model.mdx"
-            mdx_path.write_bytes(mdx_bytes)
-        try:
-            model = parse_jade_mdl(mdl_path, mdx_path)
-        except Exception as exc:  # noqa: BLE001 - the reader raises many kinds
-            raise JadeError(f"could not read the model: {exc}") from exc
+def _tree(model) -> tuple[dict, dict]:
+    """Every named bone's model-space position, and who its parent is."""
+    where: dict[str, np.ndarray] = {}
+    parent: dict[str, str | None] = {}
 
-        found: dict[str, np.ndarray] = {}
+    def walk(node, rotation, offset, above):
+        here = offset + rotation @ np.asarray(
+            node.position or (0.0, 0.0, 0.0), dtype=float)
+        turned = rotation @ _quaternion(node.orientation or (1, 0, 0, 0))
+        if node.name:
+            where[node.name] = here
+            parent[node.name] = above
+        for child in node.children or []:
+            walk(child, turned, here, node.name or above)
 
-        def walk(node, rotation, offset):
-            position = np.asarray(node.position or (0.0, 0.0, 0.0), dtype=float)
-            here = offset + rotation @ position
-            turned = rotation @ _quaternion(node.orientation or (1, 0, 0, 0))
-            if node.name:
-                found[node.name] = here
-            for child in node.children or []:
-                walk(child, turned, here)
+    walk(model.root, np.eye(3), np.zeros(3), None)
+    return where, parent
 
-        walk(model.root, np.eye(3), np.zeros(3))
-        return found
+
+# What KOTOR's own arms do. Measured off the game's bones the same way
+# `arm_rest` measures Jade's: 52.3 and 53.2 degrees below horizontal on every
+# male player body, 54.6 and 57.0 on every female one. One number for both is
+# close enough - the shoulder is a ball joint and two degrees of it is nothing
+# beside the forty-seven this has to close.
+KOTOR_ARM_REST = 53.0
+
+
+def _rodrigues(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """The rotation taking unit vector `a` to unit vector `b`."""
+    axis = np.cross(a, b)
+    sin = float(np.linalg.norm(axis))
+    cos = float(np.dot(a, b))
+    if sin < 1e-9:
+        # Parallel, or exactly opposed - and nothing here ever asks for the
+        # second, so the arbitrary axis it would need is not worth choosing.
+        return np.eye(3)
+    axis = axis / sin
+    K = np.array([[0.0, -axis[2], axis[1]],
+                  [axis[2], 0.0, -axis[0]],
+                  [-axis[1], axis[0], 0.0]])
+    return np.eye(3) + sin * K + (1.0 - cos) * (K @ K)
+
+
+def _below(parent: dict, root: str) -> set:
+    """`root` and everything hanging off it."""
+    out = {root}
+    growing = True
+    while growing:
+        growing = False
+        for name, above in parent.items():
+            if above in out and name not in out:
+                out.add(name)
+                growing = True
+    return out
+
+
+def repose(model, degrees: float = KOTOR_ARM_REST) -> dict:
+    """How to swing each arm down, bone by bone: `name -> (pivot, rotation)`.
+
+    Jade stands its people in a T-pose and KOTOR's rest is an A-pose, so a Jade
+    body dropped onto KOTOR's skeleton has its arms out sideways while the bones
+    driving them point down and forty-seven degrees of the arm is somewhere the
+    engine will never put it.
+
+    Each arm turns about its own shoulder, in the plane the arm already lies in,
+    so an arm carried a little forward stays carried a little forward. The
+    clavicle stays where it is: KOTOR moves the bicep, not the collar.
+    """
+    where, parent = _tree(model)
+    out: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+    for side in ("L", "R"):
+        top, hand = f"BLArmUppe{side}01", f"Hand{side}"
+        if top not in where or hand not in where:
+            continue
+        pivot = where[top]
+        along = where[hand] - pivot
+        length = float(np.linalg.norm(along))
+        if length < 1e-6:
+            continue
+        along = along / length
+        flat = np.array([along[0], along[1], 0.0])
+        reach = float(np.linalg.norm(flat))
+        if reach < 1e-6:                       # already hanging straight down
+            continue
+        angle = np.radians(degrees)
+        target = np.cos(angle) * (flat / reach) + np.sin(angle) * np.array(
+            [0.0, 0.0, -1.0])
+        turn = _rodrigues(along, target)
+        for name in _below(parent, top):
+            out[name] = (pivot, turn)
+    return out
+
+
+def _skin(points: np.ndarray, found, names: list, swing: dict) -> np.ndarray:
+    """Move vertices with the bones they are weighted to.
+
+    Plain linear blend skinning. A vertex weighted half to the bicep and half to
+    the chest travels half the way, which is what keeps the shoulder from
+    tearing open when the arm comes down.
+    """
+    skin = getattr(found, "skin", None)
+    if skin is None or not skin.vertex_weights:
+        return points
+    out = points.copy()
+    for i, weights in enumerate(skin.vertex_weights):
+        if not weights or i >= len(points):
+            continue
+        here = points[i]
+        moved = np.zeros(3)
+        total = 0.0
+        for index, weight in weights:
+            total += weight
+            name = names[index] if 0 <= index < len(names) else None
+            turn = swing.get(name)
+            if turn is None:
+                moved += weight * here
+            else:
+                pivot, rotation = turn
+                moved += weight * (pivot + rotation @ (here - pivot))
+        if total > 1e-6:
+            out[i] = moved / total
+    return out
 
 
 def arm_rest(entry: Entry) -> float | None:
@@ -615,7 +720,8 @@ def arm_rest(entry: Entry) -> float | None:
     return float(np.degrees(np.arctan2(-v[2], abs(v[0]))))
 
 
-def scene(entry: Entry, *, install=None, scale: float | None = None):
+def scene(entry: Entry, *, install=None, scale: float | None = None,
+          pose: float | None = None):
     """A drawable, *textured* scene for one Jade model.
 
     `render.from_mesh` draws flat colour, which is enough to tell one silhouette
@@ -634,7 +740,7 @@ def scene(entry: Entry, *, install=None, scale: float | None = None):
 
     if scale is None:
         scale = scale_for(entry.kind)
-    found = mesh(*read(entry), scale=scale, kind=entry.kind)
+    found = mesh(*read(entry), scale=scale, kind=entry.kind, pose=pose)
     built = krender.from_mesh(found.positions, found.faces)
     if not len(built.faces) or not found.uvs:
         return built
