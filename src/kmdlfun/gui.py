@@ -57,6 +57,7 @@ ANYONE = "anyone"
 AUTO_NODE = "automatic"
 NOT_A_CHARACTER = "just a model"
 SAME_AS_HOST = "same body as the host"
+KEEP_BASE = "(keep the base's own part)"
 # The three things a humanoid is made of, in the order somebody picks them.
 # Not `PARTS`: that name already means the body parts of a mesh in `parts.py`,
 # and the two are nothing like each other.
@@ -579,6 +580,7 @@ class App(ttk.Frame):
         ("Character", "Character", "Make"),
         ("Custom head", "Head from a file", "Make"),
         ("Transplant", "Swap parts", "Change"),
+        ("Droid", "Droid", "Change"),
         ("Effects", "Quick changes", "Change"),
         ("Lips", "Lips", "Change"),
         ("Preview", "Preview", None),
@@ -604,6 +606,7 @@ class App(ttk.Frame):
         self._build_character_tab()
         self._build_head_tab()
         self._build_transplant_tab()
+        self._build_droid_tab()
         self._build_effect_tab()
         self._build_lips_tab()
         self._build_preview_tab()
@@ -622,6 +625,23 @@ class App(ttk.Frame):
     def _on_page_shown(self) -> None:
         self._name_the_action()
         self._scan_if_needed()
+        self._droid_tab_shown_if_needed()
+
+    def _droid_tab_shown_if_needed(self) -> None:
+        """Fill the droid list the first time the tab is actually opened.
+
+        A structural scan of the whole install, so it waits for the tab to be
+        wanted rather than running at startup - the same reasoning as
+        `_scan_if_needed` next to it, just for a cheaper, synchronous scan.
+        """
+        if self._current_page() != "Droid":
+            return
+        path = self.install.get().strip()
+        if not path or not (Path(path) / "chitin.key").is_file():
+            return
+        if path in getattr(self, "_droid_cache", {}):
+            return
+        self._refresh_droid_bases()
 
     def _show_page(self, key: str) -> None:
         """Bring one page to the front, whichever group it is inside."""
@@ -663,6 +683,10 @@ class App(ttk.Frame):
         "Transplant": "Take a part from one model and put it on another. The "
                       "base keeps its body and animations; the source supplies "
                       "the shape.",
+        "Droid": "Mix a droid together from other droids' own parts - a head "
+                 "from one, an arm or a leg from another - each pulled straight "
+                 "from the game's models. The base keeps its skeleton; every "
+                 "part left on '(keep base)' stays exactly as it was.",
         "Custom head": "Build a head from a file you supply - a .glb sculpt, a "
                        "scan, or a head converted from another game - and fit "
                        "it to a KOTOR body.",
@@ -980,6 +1004,290 @@ class App(ttk.Frame):
                   "as holes."),
             foreground="#666", wraplength=620,
         ).grid(row=11, column=0, columnspan=5, sticky="w", pady=(4, 0))
+
+    # ---- droid tab ----------------------------------------------------------
+
+    def _build_droid_tab(self):
+        """Mixing a droid together out of other droids' own parts.
+
+        A droid has no `heads.2da` shortcut the way a human does - every one
+        the game ships is a single unified body, its head a node among
+        forty-odd droid-named meshes (see `droidbuild.py`). The Transplant tab
+        already fills one such node at a time; this tab is that same engine
+        run once per part the base has, so "head from one droid, an arm from
+        a second" is one build instead of several manual ones chained by hand.
+        """
+        page = self._page("Droid")
+        outer_page = page
+        page = self._explain(outer_page, "Droid")
+        page.columnconfigure(1, weight=1)
+
+        ttk.Label(page, text="Base droid").grid(row=0, column=0, sticky="w")
+        self.droid_base = tk.StringVar()
+        self.droid_base_box = ttk.Combobox(page, textvariable=self.droid_base,
+                                           values=[], state="readonly", width=28)
+        self.droid_base_box.grid(row=0, column=1, sticky="w", padx=6)
+        self.droid_base_box.bind("<<ComboboxSelected>>",
+                                 lambda _e: self._refresh_droid_slots())
+        ttk.Button(page, text="Find droids",
+                   command=self._refresh_droid_bases).grid(row=0, column=2, padx=(6, 0))
+        self.droid_base_note = ttk.Label(page, text="", foreground="#666")
+        self.droid_base_note.grid(row=0, column=3, columnspan=2, sticky="w", padx=(8, 0))
+
+        self.droid_slots_box = ttk.LabelFrame(page, text="Parts", padding=8)
+        self.droid_slots_box.grid(row=1, column=0, columnspan=5, sticky="nsew", pady=(8, 0))
+        self.droid_slots_box.columnconfigure(1, weight=1)
+        page.rowconfigure(1, weight=1, minsize=160)
+        self.droid_slot_pick: dict[str, tk.StringVar] = {}
+        self.droid_slot_note = ttk.Label(
+            self.droid_slots_box,
+            text="Pick a base droid above to see its own parts.",
+            foreground="#666",
+        )
+        self.droid_slot_note.grid(row=0, column=0, columnspan=2, sticky="w")
+
+        opts = ttk.Frame(page)
+        opts.grid(row=2, column=0, columnspan=5, sticky="w", pady=(8, 0))
+        self.droid_fit = tk.BooleanVar(value=False)
+        self.droid_reshape = tk.BooleanVar(value=False)
+        self.droid_texture = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            opts, text="Take each part's own texture", variable=self.droid_texture
+        ).grid(row=0, column=0, sticky="w", padx=(0, 14))
+        ttk.Checkbutton(
+            opts, text="Shrink each part to the base's size (usually wrong)",
+            variable=self.droid_fit,
+        ).grid(row=0, column=1, sticky="w", padx=(0, 14))
+        ttk.Checkbutton(
+            opts, text="Reshape: keep the base's own surface and texture mapping",
+            variable=self.droid_reshape,
+        ).grid(row=0, column=2, sticky="w")
+
+        size = ttk.Frame(page)
+        size.grid(row=3, column=0, columnspan=5, sticky="w", pady=(6, 0))
+        ttk.Label(size, text="Scale").pack(side="left")
+        self.droid_scale = tk.DoubleVar(value=1.0)
+        ttk.Scale(
+            size, from_=0.6, to=1.8, variable=self.droid_scale, orient="horizontal",
+            length=200, command=lambda _=None: self.droid_scale_label.config(
+                text=f"{self.droid_scale.get():.2f}x"),
+        ).pack(side="left", padx=6)
+        self.droid_scale_label = ttk.Label(size, text="1.00x", width=7)
+        self.droid_scale_label.pack(side="left")
+
+        saveas = ttk.Frame(page)
+        saveas.grid(row=4, column=0, columnspan=5, sticky="w", pady=(8, 0))
+        ttk.Label(saveas, text="Save as").pack(side="left")
+        self.droid_save_as = tk.StringVar(value="")
+        ttk.Entry(saveas, textvariable=self.droid_save_as, width=22).pack(
+            side="left", padx=(6, 0))
+        ttk.Label(saveas, text="a new game name, e.g. p_mydroid - blank replaces the base",
+                  foreground="#666").pack(side="left", padx=(8, 0))
+
+        ttk.Label(
+            page,
+            text="Each part left on '(keep the base's own part)' is untouched. "
+                 "Building writes a new, named folder under Builds, same as "
+                 "every other tab.",
+            foreground="#666", wraplength=620,
+        ).grid(row=5, column=0, columnspan=5, sticky="w", pady=(6, 0))
+
+    def _droid_list(self, path: str) -> list[str]:
+        """Every droid model in an install, cached - a full-install structural
+        scan, same cost as the male/female/droid sort next to it."""
+        if not path:
+            return []
+        cache = getattr(self, "_droid_cache", {})
+        if path not in cache:
+            from . import droidbuild as kdroid
+
+            try:
+                cache[path] = kdroid.droid_models(path)
+            except Exception as exc:  # noqa: BLE001
+                self._say(f"could not find droid models: {exc}")
+                cache[path] = []
+            self._droid_cache = cache
+        return cache[path]
+
+    def _refresh_droid_bases(self):
+        path = self.install.get().strip()
+        droids = self._droid_list(path)
+        self.droid_base_box.config(values=droids)
+        self.droid_base_note.config(
+            text=f"{len(droids)} droid model(s) found" if droids else
+                 "no droid models found - is the install folder set?")
+        if droids and self.droid_base.get() not in droids:
+            self.droid_base.set(droids[0])
+        self._refresh_droid_slots()
+
+    def _refresh_droid_slots(self):
+        """Rebuild the part list for whichever base droid is chosen.
+
+        One model is cheap to read, so this runs on the main thread the same
+        way a single-node lookup does elsewhere (`_host_mesh_nodes`) - no
+        worker thread for one MDL/MDX pair.
+        """
+        for child in self.droid_slots_box.winfo_children():
+            child.destroy()
+        self.droid_slot_pick = {}
+
+        base = self.droid_base.get().strip()
+        path = self.install.get().strip()
+        if not base:
+            ttk.Label(self.droid_slots_box, text="Pick a base droid above to see its own "
+                                                  "parts.", foreground="#666").grid(
+                row=0, column=0, sticky="w")
+            return
+
+        from kmdlswap import layout as kl
+
+        from . import droidbuild as kdroid
+        from .library import ModelLibrary
+
+        try:
+            layout = kl.parse(*ModelLibrary(path).read(base))
+            groups = kdroid.slot_groups(layout)
+        except Exception as exc:  # noqa: BLE001
+            ttk.Label(self.droid_slots_box, text=f"could not read {base}: {exc}",
+                     foreground="#a35").grid(row=0, column=0, sticky="w")
+            return
+
+        donors = [KEEP_BASE] + [d for d in self._droid_list(path) if d != base]
+        row = 0
+        for label, nodes in groups.items():
+            ttk.Label(self.droid_slots_box, text=label,
+                     font=("", 9, "bold")).grid(row=row, column=0, columnspan=2,
+                                                sticky="w", pady=(6 if row else 0, 0))
+            row += 1
+            for node in nodes:
+                ttk.Label(self.droid_slots_box, text=f"  {node.name}").grid(
+                    row=row, column=0, sticky="w")
+                var = tk.StringVar(value=KEEP_BASE)
+                self.droid_slot_pick[node.name] = var
+                ttk.Combobox(self.droid_slots_box, textvariable=var, values=donors,
+                            state="readonly", width=26).grid(
+                    row=row, column=1, sticky="w", padx=(6, 0))
+                row += 1
+        if row == 0:
+            ttk.Label(self.droid_slots_box, text=f"{base} has no visible mesh nodes",
+                     foreground="#666").grid(row=0, column=0, sticky="w")
+
+    def _droid_start(self):
+        if self.worker and self.worker.is_alive():
+            return
+        if not self._check_install():
+            return
+        base = self.droid_base.get().strip()
+        if not base:
+            self._say("pick a base droid first")
+            return
+        parts = {node: var.get() for node, var in self.droid_slot_pick.items()
+                 if var.get() not in ("", KEEP_BASE)}
+        if not parts:
+            self._say("every part is set to 'keep the base's own part' - "
+                      "nothing to build")
+            return
+
+        cfg = dict(
+            fit=self.droid_fit.get(), scale=self.droid_scale.get(),
+            reshape=self.droid_reshape.get(), with_texture=self.droid_texture.get(),
+            save_as=self.droid_save_as.get().strip(),
+        )
+        self.build_btn.config(state="disabled")
+        self._say(f"\n=== {base}: {', '.join(f'{n} <- {d}' for n, d in parts.items())} ===")
+        self.worker = threading.Thread(
+            target=self._droid_work,
+            args=(self.install.get().strip(), self.out_dir.get().strip(),
+                  base, parts, cfg),
+            daemon=True,
+        )
+        self.worker.start()
+
+    def _droid_work(self, install, out_dir, base, parts, cfg):
+        try:
+            from kmdlswap import layout as kl
+            from kmdlswap import validate as kv
+
+            from . import droidbuild as kdroid
+            from .library import ModelLibrary
+
+            lib = ModelLibrary(install)
+            if not lib.has(base):
+                self.events.put(("error", f"no model named {base!r} in the install"))
+                return
+
+            base_mdl, base_mdx = lib.read(base)
+            choices = [kdroid.SlotChoice(node, donor) for node, donor in parts.items()]
+            result = kdroid.build(
+                base_mdl, base_mdx, base, choices, lib,
+                fit=cfg["fit"], scale=cfg["scale"], reshape=cfg["reshape"],
+                with_texture=cfg["with_texture"],
+            )
+
+            lines = []
+            for s in result.slots:
+                if s.note:
+                    lines.append(f"  {s.host_node}: SKIPPED - {s.note}")
+                    continue
+                r = s.transplant
+                if not r.ok:
+                    lines.append(f"  {s.host_node} <- {s.donor_model}: REFUSED {r.error}")
+                    continue
+                a = r.alignment
+                lines.append(f"  {s.host_node} <- {s.donor_model}   "
+                            f"fit {a.worst_ratio:.2f}x   drift {a.drift:.3f}")
+                for w in r.warnings:
+                    lines.append(f"      ! {w}")
+
+            if not result.applied:
+                lines.append("nothing transferred")
+                self.events.put(("error", "\n".join(lines)))
+                return
+
+            if not kv.check(kl.parse(result.mdl, result.mdx)).ok:
+                self.events.put(("error", "result failed validation; nothing written"))
+                return
+
+            from . import builds as kbuilds
+
+            mdl, mdx = result.mdl, result.mdx
+            root = Path(out_dir or ".")
+            root.mkdir(parents=True, exist_ok=True)
+            written_as = base
+            if cfg["save_as"]:
+                from kmdlswap import rename as krename
+
+                try:
+                    krename.check_name(cfg["save_as"])
+                    mdl, mdx = krename.rename(mdl, mdx, cfg["save_as"])
+                except krename.RenameError as exc:
+                    self.events.put(("error", str(exc)))
+                    return
+                written_as = cfg["save_as"]
+                lines.append(f"saved as {written_as}, a new model rather than a "
+                            f"replacement for {base}")
+
+            donors = sorted({s.donor_model for s in result.slots if s.ok})
+            out = root / kbuilds.unique_name(root, f"{written_as}-" + "-".join(donors))
+            out.mkdir(parents=True, exist_ok=True)
+            (out / f"{written_as}.mdl").write_bytes(mdl)
+            (out / f"{written_as}.mdx").write_bytes(mdx)
+
+            build = kbuilds.adopt(out, {
+                "kind": "droid",
+                "host": {"model": base, "install": install},
+                "donors": donors,
+                "nodes": [[s.host_node, s.donor_model, s.donor_node]
+                         for s in result.slots if s.ok],
+                "options": cfg,
+            })
+            lines.append(f"{len(result.applied)}/{len(choices)} part(s) transferred")
+            lines.append(f"build '{build.name}' kept in {out}")
+            lines.append("Install it from the Builds tab. A build is not proof.")
+            self.events.put(("done_text", lines))
+        except Exception as exc:  # noqa: BLE001
+            self.events.put(("error", f"{type(exc).__name__}: {exc}\n"
+                                      f"{traceback.format_exc(limit=3)}"))
 
     # ---- shared bottom -----------------------------------------------------
 
@@ -2413,6 +2721,7 @@ class App(ttk.Frame):
         "Lips": ("Write the lips", "_lips_start"),
         "Custom head": ("Build the head", None),
         "Transplant": ("Swap the parts", None),
+        "Droid": ("Build the droid", "_droid_start"),
         "Effects": ("Apply the change", None),
     }
 

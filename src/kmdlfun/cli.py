@@ -118,6 +118,46 @@ def main(argv: list[str] | None = None) -> int:
                          "host vertex lands (implies --reshape)")
     tp.add_argument("--dry-run", action="store_true", help="report matches and fit, write nothing")
 
+    dr = sub.add_parser("droid",
+                        help="mix heads, arms, legs and torsos between droid models")
+    dr.add_argument("--install", required=True)
+    dr.add_argument("--donor-install",
+                    help="a second game to pull donor parts from - only their "
+                         "geometry crosses over, same as --donor-install on "
+                         "transplant")
+    dr.add_argument("--base", help="the droid that keeps its skeleton and "
+                                   "animations; omit with --list to see droids "
+                                   "in the install")
+    dr.add_argument("--list", action="store_true",
+                    help="list every droid model in the install and stop. With "
+                         "--base and no --part, list that droid's own nodes "
+                         "instead, grouped by part")
+    dr.add_argument("--part", action="append", default=[], metavar="NODE=DONOR[:DONOR_NODE]",
+                    help="fill this node of --base from a donor model, taking "
+                         "the donor's same-named node unless DONOR_NODE says "
+                         "otherwise. Repeatable - one entry per head, arm, leg "
+                         "or torso being mixed in, e.g. "
+                         "--part head=p_t3m3 --part rarm=c_drdheavy")
+    dr.add_argument("--out", help="where builds are kept; required unless --dry-run")
+    dr.add_argument("--name", help="name this build; defaults to base plus its donors")
+    dr.add_argument("--save-as", metavar="RESREF",
+                    help="write the result as a NEW model with this name rather "
+                         "than overwriting the base")
+    dr.add_argument("--fit", action="store_true",
+                    help="scale each donor part down to the base part's size")
+    dr.add_argument("--scale", type=float, default=1.0)
+    dr.add_argument("--max-influences", type=int, default=4)
+    dr.add_argument("--reshape", action="store_true",
+                    help="keep the base's own vertices for each part and move "
+                         "them onto the donor's surface, instead of taking the "
+                         "donor's geometry whole")
+    dr.add_argument("--no-texture", dest="with_texture", action="store_false",
+                    help="keep the base's own texture on swapped parts instead "
+                         "of taking each donor's")
+    dr.set_defaults(with_texture=True)
+    dr.add_argument("--dry-run", action="store_true",
+                    help="report matches and fit, write nothing")
+
     hd = sub.add_parser("head", help="check or install a custom head pack")
     hd.add_argument("pack", help="folder holding head.obj, and optionally head.tga")
     hd.add_argument("--install", help="game install, needed to check against a target")
@@ -259,6 +299,8 @@ def main(argv: list[str] | None = None) -> int:
             return _build(args)
         if args.cmd == "transplant":
             return _transplant(args)
+        if args.cmd == "droid":
+            return _droid(args)
         if args.cmd == "head":
             return _head(args)
         if args.cmd == "import":
@@ -761,6 +803,159 @@ def _transplant(args) -> int:
 
     print()
     print(f"{len(done)}/{len(pairs)} node(s) transferred")
+    print(f"build '{build.name}' in {out_dir}")
+    print(f"  {', '.join(f['name'] for f in build.manifest['files'])}")
+    print("Install it from the app, or copy the folder's contents into Override.")
+    return 0
+
+
+def _droid(args) -> int:
+    """Head from one droid, arms from a second, legs from a third: one build.
+
+    Each `--part` is a node on `--base` and the donor model that fills it;
+    `droidbuild.build` applies them one at a time, each onto the result of
+    the last, through the same `transplant_node` a single head swap uses.
+    Nothing here does its own geometry work.
+    """
+    from pathlib import Path
+
+    from kmdlswap import layout as kl
+    from kmdlswap import validate as kv
+
+    from . import droidbuild as kdroid
+    from . import parts as kparts
+    from .library import ModelLibrary
+
+    lib = ModelLibrary(args.install)
+    donor_lib = ModelLibrary(args.donor_install) if args.donor_install else lib
+
+    if args.list or not args.base:
+        droids = kdroid.droid_models(args.install, library=lib)
+        print(f"{len(droids)} droid model(s) in {args.install}:")
+        for name in droids:
+            print(f"  {name}")
+        return 0
+
+    if not lib.has(args.base):
+        print(f"kmdlfun: no model {args.base!r} in the install", file=sys.stderr)
+        return 1
+
+    base_mdl, base_mdx = lib.read(args.base)
+    base_layout = kl.parse(base_mdl, base_mdx)
+    base_nodes = {n.name.lower(): n.name
+                  for n in kparts.mesh_nodes(base_layout, visible_only=False)}
+
+    if not args.part:
+        print(f"{args.base}'s own nodes, by part - name a --part NODE=DONOR to fill one:")
+        for label, nodes in kdroid.slot_groups(base_layout).items():
+            print(f"  {label}: {', '.join(n.name for n in nodes)}")
+        return 0
+
+    choices = []
+    for spec in args.part:
+        if "=" not in spec:
+            print(f"kmdlfun: --part wants NODE=DONOR, got {spec!r}", file=sys.stderr)
+            return 1
+        node_spec, donor_spec = (s.strip() for s in spec.split("=", 1))
+        donor_model, _, donor_node = donor_spec.partition(":")
+        donor_model, donor_node = donor_model.strip(), donor_node.strip() or None
+        host_node = base_nodes.get(node_spec.lower())
+        if not host_node:
+            print(f"kmdlfun: {args.base} has no node {node_spec!r}", file=sys.stderr)
+            return 1
+        if not donor_lib.has(donor_model):
+            where = "the donor install" if args.donor_install else "that install"
+            print(f"kmdlfun: no model {donor_model!r} in {where}", file=sys.stderr)
+            return 1
+        choices.append(kdroid.SlotChoice(host_node, donor_model, donor_node))
+
+    result = kdroid.build(
+        base_mdl, base_mdx, args.base, choices, donor_lib,
+        fit=args.fit, scale=args.scale, reshape=args.reshape,
+        with_texture=args.with_texture, max_influences=args.max_influences,
+    )
+
+    print(f"{args.base}  ({len(choices)} part(s))")
+    print()
+    for s in result.slots:
+        line = f"  {s.host_node:<16} <- {s.donor_model:<16} {s.donor_node or ''}"
+        if s.note:
+            print(f"{line} SKIPPED: {s.note}")
+            continue
+        r = s.transplant
+        if not r.ok:
+            print(f"{line} REFUSED: {r.error}")
+            continue
+        a, sw = r.alignment, r.swap
+        print(f"{line} {sw.old_vertices:>5} -> {sw.new_vertices:<5} verts"
+              f"   fit {a.worst_ratio:.2f}x   drift {a.drift:.3f}")
+        for w in r.warnings:
+            print(f"      ! {w}")
+
+    applied = result.applied
+    if args.dry_run:
+        print(f"\ndry run: {len(applied)}/{len(choices)} part(s) would transfer")
+        return 0
+    if not applied:
+        print("\nnothing transferred", file=sys.stderr)
+        return 1
+
+    final = kv.check(kl.parse(result.mdl, result.mdx))
+    if not final.ok:
+        print("kmdlfun: result failed validation; refusing to write it", file=sys.stderr)
+        return 1
+
+    if not args.out:
+        print("kmdlfun: --out is required to write a build (or pass --dry-run)",
+              file=sys.stderr)
+        return 1
+
+    from . import builds as kbuilds
+
+    mdl, mdx = result.mdl, result.mdx
+    root = Path(args.out)
+    root.mkdir(parents=True, exist_ok=True)
+    written_as = args.base
+    if args.save_as:
+        from kmdlswap import rename as krename
+
+        krename.check_name(args.save_as)
+        mdl, mdx = krename.rename(mdl, mdx, args.save_as)
+        written_as = args.save_as
+        print(f"\n  saved as {written_as}: a new model, not a replacement for {args.base}")
+
+    donors = sorted({s.donor_model for s in result.slots if s.ok})
+    name = args.name or kbuilds.unique_name(root, f"{written_as}-" + "-".join(donors))
+    out_dir = root / kbuilds.slug(name)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / f"{written_as}.mdl").write_bytes(mdl)
+    (out_dir / f"{written_as}.mdx").write_bytes(mdx)
+
+    if args.donor_install and args.with_texture:
+        # Donor textures live in the donor's game; without them the result
+        # loads untextured grey, which reads as a modelling failure rather
+        # than the missing file it actually is.
+        from . import textures as ktextures
+
+        for line in ktextures.export_donor_textures(
+            mdl, mdx, args.donor_install, out_dir, host_install=args.install
+        ):
+            print(f"  {line}")
+
+    build = kbuilds.adopt(out_dir, {
+        "name": name,
+        "kind": "droid",
+        "host": {"model": args.base, "game": base_layout.game, "install": args.install},
+        "donors": donors,
+        "nodes": [[s.host_node, s.donor_model, s.donor_node] for s in result.slots if s.ok],
+        "options": {
+            "fit": args.fit, "scale": args.scale, "reshape": args.reshape,
+            "with_texture": args.with_texture,
+        },
+    })
+
+    print()
+    print(f"{len(applied)}/{len(choices)} part(s) transferred")
     print(f"build '{build.name}' in {out_dir}")
     print(f"  {', '.join(f['name'] for f in build.manifest['files'])}")
     print("Install it from the app, or copy the folder's contents into Override.")
