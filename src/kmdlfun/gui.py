@@ -1125,13 +1125,24 @@ class App(ttk.Frame):
         ttk.Label(crop, text="of the height - for a bust rather than a head",
                   foreground="#666").pack(side="left")
 
-        ttk.Button(page, text="Check only", command=self._head_check).grid(
-            row=5, column=0, sticky="w", pady=(10, 0))
+        actions = ttk.Frame(page)
+        actions.grid(row=5, column=0, columnspan=5, sticky="w", pady=(10, 0))
+        ttk.Button(actions, text="Check only",
+                   command=self._head_check).pack(side="left")
+        # A head is judged by looking at it. Everything the checks measure is a
+        # proxy - a bounding box, a triangle count, a percentage facing
+        # outwards - and the two questions a head swap actually gets wrong,
+        # size and placement, are the ones a number is worst at. This builds
+        # into memory and draws it on its body beside the base, and writes
+        # nothing.
+        ttk.Button(actions, text="Preview the change",
+                   command=self._head_preview).pack(side="left", padx=(8, 0))
         ttk.Label(
             page,
-            text=("Checking writes nothing. A pack is rejected before anything is "
-                  "built, and solidity below 77% is the one that matters - it "
-                  "renders full of holes in game while looking fine in a viewer."),
+            text=("Checking and previewing both write nothing. A pack is rejected "
+                  "before anything is built, and solidity below 77% is the one "
+                  "that matters - it renders full of holes in game while looking "
+                  "fine in a viewer."),
             foreground="#666", wraplength=620,
         ).grid(row=6, column=0, columnspan=5, sticky="w", pady=(4, 0))
 
@@ -2976,7 +2987,11 @@ class App(ttk.Frame):
     def _head_check(self):
         self._head_start(build=False)
 
-    def _head_start(self, build: bool):
+    def _head_preview(self):
+        """Build it into memory and draw it. Nothing is written."""
+        self._head_start(build=False, preview=True)
+
+    def _head_start(self, build: bool, preview: bool = False):
         if self.worker and self.worker.is_alive():
             return
         pack = self.pack_dir.get().strip()
@@ -2984,8 +2999,9 @@ class App(ttk.Frame):
             self._say("choose a head pack folder first")
             return
         host = self.head_host.get().strip()
-        if build and not host:
-            self._say("choose a model to build the head onto")
+        if (build or preview) and not host:
+            self._say("choose a model to "
+                      + ("preview" if preview else "build") + " the head onto")
             return
 
         # Read on the main thread and handed over as plain values.
@@ -2999,21 +3015,26 @@ class App(ttk.Frame):
             fit=self.head_fit.get(),
             reshape=self.head_reshape.get(),
             hide=([] if self.head_hide.get() else None),
-            force=self.head_force.get(),
-            build=build,
+            # A preview writes nothing, so there is nothing to protect against
+            # by refusing to draw one. The case where seeing it matters most is
+            # exactly the case the checks reject - "1.4x too big" on a head
+            # whose face fits and whose hat does not - so a preview always
+            # builds into memory. The failures are still printed.
+            force=self.head_force.get() or preview,
+            build=build or preview,
         )
         self.build_btn.config(state="disabled")
-        self._say(f"\n=== {'building' if build else 'checking'} head pack "
-                  f"{Path(pack).name}"
+        doing = "building" if build else ("previewing" if preview else "checking")
+        self._say(f"\n=== {doing} head pack {Path(pack).name}"
                   + (f" onto {host}:{cfg['node']}" if host else "") + " ===")
         self.worker = threading.Thread(
             target=self._head_work,
-            args=(pack, cfg, self.out_dir.get(), build),
+            args=(pack, cfg, self.out_dir.get(), build, preview),
             daemon=True,
         )
         self.worker.start()
 
-    def _head_work(self, pack, cfg, out_dir, build):
+    def _head_work(self, pack, cfg, out_dir, build, preview=False):
         try:
             from . import builds as kbuilds
             from . import headbuild
@@ -3023,6 +3044,27 @@ class App(ttk.Frame):
             lines.append(result.verdict)
             if result.error:
                 lines.append(f"ERROR: {result.error}")
+            elif preview and result.built:
+                # Drawn on its body, beside the base, under one shared ruler -
+                # a head alone in space is close to unjudgeable, and two renders
+                # at two scales make a part that changed size look unchanged.
+                lines.append("preview only - nothing written")
+                try:
+                    from .library import ModelLibrary
+
+                    # The pack folder is where the head's own texture lives -
+                    # it is not in either game - so the lookup has to be
+                    # pointed at it or the preview draws grey.
+                    self._post_scenes(cfg["install"], cfg["host"],
+                                      Path(pack).name,
+                                      result.mdl, result.mdx,
+                                      ModelLibrary(cfg["install"]),
+                                      extra=[Path(pack)])
+                except Exception as exc:  # noqa: BLE001
+                    lines.append(f"(could not draw it: {type(exc).__name__}: {exc})")
+            elif preview:
+                lines.append("nothing to preview - the pack did not get as far "
+                             "as being built")
             elif build and result.built:
                 name = kbuilds.unique_name(
                     out_dir, f"{cfg['host']}-{Path(pack).name}")
@@ -3967,7 +4009,8 @@ class App(ttk.Frame):
             self.events.put(("error", f"{type(exc).__name__}: {exc}\n"
                                       f"{traceback.format_exc(limit=3)}"))
 
-    def _post_scenes(self, install, host, donor, mdl, mdx, lib, donor_install=""):
+    def _post_scenes(self, install, host, donor, mdl, mdx, lib, donor_install="",
+                     extra=None):
         """Draw the host as it is beside the host as it would be.
 
         Framed by one shared ruler, because two renders at two scales make a
@@ -3986,7 +4029,11 @@ class App(ttk.Frame):
         from . import textures as ktextures
         from .library import body_for_head
 
-        look = ktextures.lookup_across([install, donor_install])
+        # `extra` is for loose files that belong to no install - a head pack's
+        # own atlas sits beside the pack. Passing the folder as an install
+        # instead finds nothing, and a missing texture draws grey, which is
+        # exactly the wrong thing to show someone judging a head.
+        look = ktextures.lookup_across([install, donor_install], extra=extra)
         host_layout = kl.parse(*lib.read(host))
         built_layout = kl.parse(mdl, mdx)
 

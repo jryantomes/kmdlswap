@@ -2621,3 +2621,76 @@ def test_a_head_can_be_built_past_the_checks(app):
     assert app.head_force.get() is False, "it must start off"
     # And it has to actually reach the builder.
     assert "force=self.head_force.get()" in inspect.getsource(kgui.App._head_start)
+
+
+def test_previewing_a_head_pack_draws_it_and_writes_nothing(app, tmp_path):
+    """A head is judged by looking at it.
+
+    Everything the checks measure is a proxy - a bounding box, a triangle
+    count, a percentage facing outward - and the two things a head swap most
+    often gets wrong, size and placement, are the ones a number is worst at.
+    Check only ever returned text, because `headbuild.run(build=False)` returns
+    before any bytes exist.
+    """
+    from pathlib import Path
+
+    from kmdlfun import installs, jade as kjade
+
+    where = installs.detect().get(installs.JADE)
+    if not where:
+        pytest.skip("no Jade Empire install")
+    entry = next((e for e in kjade.catalogue(where)
+                  if e.resref.lower() == "h_common01_"), None)
+    if entry is None:
+        pytest.skip("h_common01_ not present")
+    pack = tmp_path / "pack"
+    kjade.to_pack(entry, pack, install=where)
+
+    out = tmp_path / "out"
+    out.mkdir()
+    drawn = []
+    app._post_scenes = lambda *a, **k: drawn.append((a, k))
+    cfg = dict(install=app.install.get().strip(), host="p_carthh", node="Head",
+               crop=None, decimate=None, repair=True, fit=False, reshape=False,
+               hide=None, force=False, build=True)
+    app._head_work(str(pack), cfg, str(out), build=False, preview=True)
+
+    kind, lines = take_event(app, "done_text")
+    assert kind == "done_text", lines
+    assert any("preview only" in line for line in lines), lines
+    assert drawn, "the preview drew nothing"
+    # The pack folder has to reach the texture lookup as `extra` - a head
+    # pack's atlas is a loose file belonging to no install, and passed as an
+    # install instead it is never found and the head draws grey.
+    extra = [Path(x) for x in (drawn[0][1].get("extra") or [])]
+    assert Path(pack) in extra, extra
+    # And nothing was written.
+    assert not list(out.iterdir()), list(out.iterdir())
+
+
+def test_the_head_preview_asks_for_a_host_like_a_build_does(app):
+    """It builds into memory, so it needs somewhere to build into."""
+    app.pack_dir.set("somewhere")
+    app.head_host.set("")
+    app.said = []
+    app._say = lambda text, **k: app.said.append(text)
+    app._head_preview()
+
+    assert any("preview" in s and "onto" in s for s in app.said), app.said
+
+
+def test_a_preview_draws_even_when_the_checks_reject_it(app, tmp_path):
+    """The case where seeing it matters most is the case the checks refuse.
+
+    A bounding box cannot tell a big head from an ordinary head wearing
+    hairpins, and "1.4x too big on its worst axis" is the same sentence for
+    both. A preview writes nothing, so there is nothing to protect against by
+    refusing to draw one.
+    """
+    import inspect
+
+    from kmdlfun import gui as kgui
+
+    source = inspect.getsource(kgui.App._head_start)
+    assert "force=self.head_force.get() or preview" in source
+    assert "build=build or preview" in source
