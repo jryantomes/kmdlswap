@@ -143,8 +143,14 @@ def main(argv: list[str] | None = None) -> int:
     dr.add_argument("--save-as", metavar="RESREF",
                     help="write the result as a NEW model with this name rather "
                          "than overwriting the base")
+    dr.add_argument("--align", choices=("joint", "none"), default="joint",
+                    help="'joint' (default) hangs each donor part off the base's "
+                         "matching joint - a short donor's head still lands at "
+                         "the base's neck. 'none' is the raw transplant, donor "
+                         "geometry kept at its own height")
     dr.add_argument("--fit", action="store_true",
-                    help="scale each donor part down to the base part's size")
+                    help="scale each donor part down to the base part's size; "
+                         "does its own centring, so it takes over from --align")
     dr.add_argument("--scale", type=float, default=1.0)
     dr.add_argument("--max-influences", type=int, default=4)
     dr.add_argument("--reshape", action="store_true",
@@ -869,9 +875,14 @@ def _droid(args) -> int:
             return 1
         choices.append(kdroid.SlotChoice(host_node, donor_model, donor_node))
 
+    if not args.out and not args.dry_run:
+        print("kmdlfun: --out is required to write a build (or pass --dry-run)",
+              file=sys.stderr)
+        return 1
+
     result = kdroid.build(
         base_mdl, base_mdx, args.base, choices, donor_lib,
-        fit=args.fit, scale=args.scale, reshape=args.reshape,
+        align=args.align, fit=args.fit, scale=args.scale, reshape=args.reshape,
         with_texture=args.with_texture, max_influences=args.max_influences,
     )
 
@@ -903,11 +914,6 @@ def _droid(args) -> int:
     final = kv.check(kl.parse(result.mdl, result.mdx))
     if not final.ok:
         print("kmdlfun: result failed validation; refusing to write it", file=sys.stderr)
-        return 1
-
-    if not args.out:
-        print("kmdlfun: --out is required to write a build (or pass --dry-run)",
-              file=sys.stderr)
         return 1
 
     from . import builds as kbuilds
@@ -949,8 +955,8 @@ def _droid(args) -> int:
         "donors": donors,
         "nodes": [[s.host_node, s.donor_model, s.donor_node] for s in result.slots if s.ok],
         "options": {
-            "fit": args.fit, "scale": args.scale, "reshape": args.reshape,
-            "with_texture": args.with_texture,
+            "align": args.align, "fit": args.fit, "scale": args.scale,
+            "reshape": args.reshape, "with_texture": args.with_texture,
         },
     })
 

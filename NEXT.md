@@ -36,6 +36,15 @@ folder name - `chitin.key` only says
 * **Transplant** - move geometry between models. Donors are listed **as faces**,
   can be sorted by measured fit, filtered by male / female / droid, taken from
   KOTOR 2, and aimed at a single named node instead of whole-model pairing.
+* **Droid** - mix a droid out of other droids' own parts: a head from one, an
+  arm or leg from another. Every droid the game ships is one unified body with
+  no `heads.2da` shortcut, so each part is a node transplant, applied once per
+  slot. Parts anchor at the **joint** by default (the donor node's own origin
+  moved onto the base's), so a short donor's head still lands at the base's
+  neck - it keeps its own size, `--scale` / `--fit` are the knobs for that.
+  Two similarly-built droids (HK-47 and a war droid) come out near 1:1; a
+  mismatched donor is placed correctly but stays its own size. Not yet in
+  front of the engine.
 * **Character** - body, wardrobe and head from three thumbnail grids, written
   as two table rows and a blueprint. No geometry, so it is the cheap path; the
   Transplant tab is for when no existing head will do.

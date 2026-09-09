@@ -685,8 +685,10 @@ class App(ttk.Frame):
                       "the shape.",
         "Droid": "Mix a droid together from other droids' own parts - a head "
                  "from one, an arm or a leg from another - each pulled straight "
-                 "from the game's models. The base keeps its skeleton; every "
-                 "part left on '(keep base)' stays exactly as it was.",
+                 "from the game's models. The base keeps its skeleton, and each "
+                 "part hangs off the base's matching joint, so a short donor's "
+                 "head still lands at the base's neck - it just keeps its own "
+                 "size. Every part left on '(keep base)' stays as it was.",
         "Custom head": "Build a head from a file you supply - a .glb sculpt, a "
                        "scan, or a head converted from another game - and fit "
                        "it to a KOTOR body.",
@@ -1048,20 +1050,24 @@ class App(ttk.Frame):
 
         opts = ttk.Frame(page)
         opts.grid(row=2, column=0, columnspan=5, sticky="w", pady=(8, 0))
+        self.droid_joint = tk.BooleanVar(value=True)
         self.droid_fit = tk.BooleanVar(value=False)
         self.droid_reshape = tk.BooleanVar(value=False)
         self.droid_texture = tk.BooleanVar(value=True)
         ttk.Checkbutton(
-            opts, text="Take each part's own texture", variable=self.droid_texture
+            opts, text="Attach each part at the base's joint", variable=self.droid_joint
         ).grid(row=0, column=0, sticky="w", padx=(0, 14))
+        ttk.Checkbutton(
+            opts, text="Take each part's own texture", variable=self.droid_texture
+        ).grid(row=0, column=1, sticky="w", padx=(0, 14))
         ttk.Checkbutton(
             opts, text="Shrink each part to the base's size (usually wrong)",
             variable=self.droid_fit,
-        ).grid(row=0, column=1, sticky="w", padx=(0, 14))
+        ).grid(row=1, column=0, sticky="w", padx=(0, 14), pady=(4, 0))
         ttk.Checkbutton(
             opts, text="Reshape: keep the base's own surface and texture mapping",
             variable=self.droid_reshape,
-        ).grid(row=0, column=2, sticky="w")
+        ).grid(row=1, column=1, sticky="w", pady=(4, 0))
 
         size = ttk.Frame(page)
         size.grid(row=3, column=0, columnspan=5, sticky="w", pady=(6, 0))
@@ -1189,6 +1195,7 @@ class App(ttk.Frame):
             return
 
         cfg = dict(
+            align="joint" if self.droid_joint.get() else "none",
             fit=self.droid_fit.get(), scale=self.droid_scale.get(),
             reshape=self.droid_reshape.get(), with_texture=self.droid_texture.get(),
             save_as=self.droid_save_as.get().strip(),
@@ -1220,8 +1227,8 @@ class App(ttk.Frame):
             choices = [kdroid.SlotChoice(node, donor) for node, donor in parts.items()]
             result = kdroid.build(
                 base_mdl, base_mdx, base, choices, lib,
-                fit=cfg["fit"], scale=cfg["scale"], reshape=cfg["reshape"],
-                with_texture=cfg["with_texture"],
+                align=cfg["align"], fit=cfg["fit"], scale=cfg["scale"],
+                reshape=cfg["reshape"], with_texture=cfg["with_texture"],
             )
 
             lines = []

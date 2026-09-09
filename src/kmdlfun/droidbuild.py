@@ -31,8 +31,20 @@ from dataclasses import dataclass, field
 from kmdlswap import layout as kl
 
 from . import parts as kparts
+from . import space as kspace
 from . import transplant as ktrans
 from . import who as kwho
+
+# How a donor part is placed relative to the host part it fills.
+#   "joint" - the donor node's own origin is moved onto the host node's origin,
+#             so the part hangs from the same articulation point. A short donor's
+#             head still lands at the tall host's neck; the part keeps its own
+#             size (which is the "goofy" the caller signed up for - `scale` and
+#             `fit` are the knobs for that).
+#   "none"  - the raw transplant, donor geometry carried at its own model-space
+#             height. A T3-M4 head on HK-47 ends up ~1 unit low.
+ALIGN_JOINT = "joint"
+ALIGN_NONE = "none"
 
 
 def droid_models(install, names=None, *, library=None) -> list[str]:
@@ -81,6 +93,24 @@ def auto_donor_node(host_node_name: str, donor_layout: kl.Layout) -> str | None:
         if ktrans.canonical(n.name) == key:
             return n.name
     return None
+
+
+def joint_offset(
+    host_layout: kl.Layout, host_node_name: str,
+    donor_layout: kl.Layout, donor_node_name: str,
+) -> tuple[float, float, float]:
+    """The model-space shift that puts the donor node's origin on the host's.
+
+    Droid parts are rigid nodes (only HK-47's hoses are skinned), so a part's
+    node *is* its joint: its rest-pose origin sits at the articulation point it
+    swings about. Matching those origins hangs the donor part off the host's
+    equivalent joint - the donor keeps its own shape and size, it just attaches
+    in the right place. Rotation is left to `transplant.to_host_space`, which
+    already re-expresses the donor's frame in the host's.
+    """
+    h = kspace.rest_pose(host_layout)[host_layout.node_by_name(host_node_name).index]
+    d = kspace.rest_pose(donor_layout)[donor_layout.node_by_name(donor_node_name).index]
+    return tuple(h.position[i] - d.position[i] for i in range(3))
 
 
 @dataclass
@@ -133,6 +163,7 @@ def build(
     choices: list[SlotChoice],
     library,
     *,
+    align: str = ALIGN_JOINT,
     fit: bool = False,
     scale: float = 1.0,
     reshape: bool = False,
@@ -141,14 +172,23 @@ def build(
 ) -> DroidBuildResult:
     """Apply one donor part per slot, each onto the result of the last.
 
-    A part left with no matching donor node is skipped rather than refused -
-    one bad `--part` should not sink the ones that were fine - and it is the
-    only thing skipped silently on success; every applied or refused part is
+    A part left with no matching donor node - none given and none inferable, or
+    an explicit one that the donor does not have - is skipped rather than
+    refused, so one bad `--part` does not sink the ones that were fine. A skip
+    is the only thing done silently on success; every applied or refused part is
     reported through `SlotResult`.
+
+    With ``align="joint"`` (the default) each donor part is moved so its own
+    node origin lands on the host node's, hanging it off the same joint; see
+    `joint_offset`. ``align="none"`` is the raw transplant. `fit` re-centres on
+    its own, so it takes over the placing when set.
     """
     result = DroidBuildResult(base=base_name)
     mdl, mdx = base_mdl, base_mdx
     donor_layouts: dict[str, kl.Layout] = {}
+    # Node headers are never rewritten, so every slot's host joint is read from
+    # the untouched base rather than from the part-by-part result.
+    host_layout = kl.parse(base_mdl, base_mdx)
 
     for choice in choices:
         if choice.donor_model not in donor_layouts:
@@ -163,11 +203,31 @@ def build(
                      f"name one explicitly",
             ))
             continue
+        try:
+            donor_layout.node_by_name(donor_node)
+        except KeyError as exc:
+            result.slots.append(SlotResult(
+                choice.host_node, choice.donor_model, donor_node,
+                note=f"{choice.donor_model} has no node {donor_node!r} ({exc})",
+            ))
+            continue
+
+        offset = None
+        if align == ALIGN_JOINT and not fit:
+            try:
+                offset = joint_offset(
+                    host_layout, choice.host_node, donor_layout, donor_node
+                )
+            except KeyError:
+                # A host node the base does not have: let `transplant_node`
+                # report it, the same way every other bad pairing is reported.
+                offset = None
 
         new_mdl, new_mdx, report = ktrans.transplant_node(
             mdl, mdx, donor_layout, choice.donor_model,
             choice.host_node, donor_node,
             fit=fit, scale=scale, reshape=reshape,
+            place=offset is not None, model_offset=offset,
             with_texture=with_texture, max_influences=max_influences,
         )
         result.slots.append(SlotResult(

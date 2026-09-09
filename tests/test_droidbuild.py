@@ -16,6 +16,7 @@ from kmdlfun.library import ModelLibrary
 
 UNIBODY = "p_hk47"
 OTHER_DROID = "p_t3m3"
+HUMANOID_DROID = "c_drdwar"
 
 
 @pytest.fixture(scope="module")
@@ -95,7 +96,9 @@ def test_build_applies_one_part_and_leaves_the_rest_alone(k1, install_path):
 
 def test_build_skips_a_part_with_no_matching_donor_node(k1):
     """A bad part is reported, not raised, so the parts that were fine still
-    build - one misnamed `--part` should not sink an otherwise good mix."""
+    build - one misnamed `--part` should not sink an otherwise good mix. An
+    explicit donor node the donor does not have is skipped the same way an
+    un-inferable one is: a note, not a REFUSED transplant."""
     base_mdl, base_mdx = k1.read(UNIBODY)
     choices = [
         kdroid.SlotChoice("head", OTHER_DROID),
@@ -105,4 +108,58 @@ def test_build_skips_a_part_with_no_matching_donor_node(k1):
 
     assert result.slots[0].ok
     assert not result.slots[1].ok
+    assert result.slots[1].transplant is None, "never handed to transplant_node"
     assert result.slots[1].note and "not-a-real-node" in result.slots[1].note
+
+
+def test_joint_align_lands_a_short_donors_head_at_the_base_neck(k1):
+    """T3-M4 stands ~1m; HK-47 ~1.9m. Carried at its own model-space height a
+    T3 head lands about a unit low. `align="joint"` (the default) moves the
+    donor node's own origin onto the host's, so the head hangs off HK's neck
+    joint instead - the part keeps its size, it just attaches in the right
+    place."""
+    base_mdl, base_mdx = k1.read(UNIBODY)
+    choices = [kdroid.SlotChoice("head", OTHER_DROID)]
+
+    raw = kdroid.build(base_mdl, base_mdx, UNIBODY, choices, k1, align="none")
+    joint = kdroid.build(base_mdl, base_mdx, UNIBODY, choices, k1)  # align defaults
+
+    assert raw.slots[0].ok and joint.slots[0].ok
+    assert raw.slots[0].transplant.alignment.drift > 0.5, "the problem being fixed"
+    assert joint.slots[0].transplant.alignment.drift < 0.05, "now sits on the joint"
+    # Same geometry either way - only where it sits changed, not its size.
+    assert (raw.slots[0].transplant.alignment.worst_ratio
+            == pytest.approx(joint.slots[0].transplant.alignment.worst_ratio))
+
+
+def test_two_humanoid_droids_swap_cleanly(k1):
+    """HK-47 and a war droid are built to the same proportions, so a
+    joint-aligned head/arm swap between them comes out close to 1:1 - the
+    'goofy' is only there when the donor is shaped nothing like the base."""
+    base_mdl, base_mdx = k1.read(UNIBODY)
+    choices = [
+        kdroid.SlotChoice("head", HUMANOID_DROID),
+        # c_drdwar names it R_UpperArm; auto-matching is by exact/alias name and
+        # does not bridge that, so the pairing is spelled out - the alignment is
+        # what this test is about.
+        kdroid.SlotChoice("R_upper_arm", HUMANOID_DROID, donor_node="R_UpperArm"),
+    ]
+    result = kdroid.build(base_mdl, base_mdx, UNIBODY, choices, k1)
+
+    assert result.applied == ["head", "R_upper_arm"]
+    for slot in result.slots:
+        a = slot.transplant.alignment
+        assert a.drift < 0.05, f"{slot.host_node} should sit on its joint"
+        assert a.worst_ratio < 1.4, f"{slot.host_node} should be near the base's size"
+
+
+def test_identity_swap_is_unmoved_and_unscaled(k1):
+    """A node filled from the same node of the same model: joint align must be
+    a no-op, not a nudge."""
+    base_mdl, base_mdx = k1.read(UNIBODY)
+    result = kdroid.build(base_mdl, base_mdx, UNIBODY,
+                          [kdroid.SlotChoice("head", UNIBODY)], k1)
+
+    a = result.slots[0].transplant.alignment
+    assert a.drift < 1e-4
+    assert a.worst_ratio == pytest.approx(1.0, abs=1e-3)
