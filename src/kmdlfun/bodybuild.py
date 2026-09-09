@@ -55,7 +55,8 @@ class Built:
     host: str = ""
     mdl: bytes = b""
     mdx: bytes = b""
-    texture: str = ""
+    texture: str = ""          # the file, and what the model points at
+    texture_base: str = ""     # what appearance.2da holds - see `_dress`
     texture_bytes: bytes = b""
     lines: list = field(default_factory=list)
     warnings: list = field(default_factory=list)
@@ -334,8 +335,21 @@ def _dress(out: Built, entry, parts: list, jade_install) -> None:
         name = jade.texture_name(root, material)
         data = jade.texture(root, name) if name else None
         if data:
+            # Two names, and they are not the same one.
+            #
+            # A model points at a texture file by name. `appearance.2da` does
+            # not: it holds a base, and the engine appends the creature's
+            # two-digit texture variation - `texb` PFBBM loads PFBBM01.tga,
+            # `texa` P_CarthBB loads P_CarthBB01.tga. Put the file's own name
+            # in that column and the game looks for n_mercf0101 and finds
+            # nothing, which is a body with no texture on it.
+            #
+            # Heads sidestep all this because heads.2da names only the model
+            # and leaves the texture to the model's own reference, which is why
+            # the same mistake never showed up there.
             stem = (entry.resref.strip("_").lower() or "jadebody")
-            out.texture = stem[:RESREF_STEM] + "01"
+            out.texture_base = stem[:RESREF_STEM]
+            out.texture = out.texture_base + "01"
             out.texture_bytes = data
             out.lines.append(f"texture {name} decoded from .txb")
             return

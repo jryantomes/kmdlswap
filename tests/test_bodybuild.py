@@ -534,3 +534,60 @@ class TestSeatingTheCollarAgainstTheHead:
         far no longer sits on the skeleton driving it. Past the limit it says
         the host is wrong instead."""
         assert 0.0 < bodybuild.SEAT_LIMIT <= 0.10
+
+
+class TestTheTwoTextureNames:
+    """A model points at a texture file by name. `appearance.2da` does not.
+
+    That column holds a base, and the engine appends the creature's two-digit
+    texture variation: vanilla's `texb` PFBBM loads PFBBM01.tga, `texa`
+    P_CarthBB loads P_CarthBB01.tga. Put the file's own name in it and the game
+    looks for n_mercf0101, finds nothing, and draws a body with no texture.
+
+    Heads never hit this. heads.2da names only the model and leaves the texture
+    to the model's own reference, so the same mistake could not show up there.
+    """
+
+    @staticmethod
+    def test_the_base_is_the_file_without_its_variation(built):
+        assert built.texture, built.warnings
+        assert built.texture_base, built.warnings
+        assert built.texture == built.texture_base + "01"
+        assert len(built.texture) <= 16
+
+    @staticmethod
+    def test_the_model_points_at_the_file_not_the_base(built):
+        from kmdlswap import layout as kl
+
+        lay = kl.parse(built.mdl, built.mdx)
+        for node in lay.nodes:
+            if node.in_animation is None and node.is_skin \
+                    and bodybuild.limb_for(node.name):
+                assert (node.textures[0] or "").lower() == built.texture
+
+    @staticmethod
+    def test_what_the_engine_would_look_up_actually_exists(built, k1_path,
+                                                           tmp_path):
+        """The check that would have caught it: resolve the name the way the
+        game does, against the game plus the file we are about to install."""
+        from pathlib import Path
+
+        from kmdlfun import textures as ktex
+
+        skin = tmp_path / f"{built.texture}.tga"
+        skin.write_bytes(built.texture_bytes)
+        look = ktex.lookup_across([Path(k1_path)], extra=[tmp_path])
+        assert look(built.texture_base + "01") is not None, \
+            f"the engine would look for {built.texture_base}01 and find nothing"
+
+    @staticmethod
+    def test_vanilla_names_a_base_too(k1_path):
+        """If this ever fails, the convention is not what this module assumes."""
+        from pathlib import Path
+
+        from kmdlfun import textures as ktex
+
+        look = ktex.lookup_across([Path(k1_path)])
+        # `texb` for every vanilla row using this body is the bare model name.
+        assert look("PFBBM") is None, "a bare body texture name should not resolve"
+        assert look("PFBBM01") is not None, "PFBBM01 is what the engine loads"
