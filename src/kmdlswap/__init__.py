@@ -11,4 +11,4 @@ PARTICULAR PURPOSE. See the GNU General Public License for more details. You
 should have received a copy of it along with this program, in ``LICENSE``.
 """
 
-__version__ = "0.0.1"
+__version__ = "0.1.0"

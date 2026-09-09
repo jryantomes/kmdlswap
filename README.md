@@ -5,6 +5,30 @@ KOTOR 1 model, leaving everything else byte-identical. **Not a character creator
 
 See [`MDL_SWAP_TOOL_BRIEF.md`](MDL_SWAP_TOOL_BRIEF.md) for the full project brief.
 
+## Download the app
+
+**[kmdlfun 0.1.0 for Windows](https://github.com/jryantomes/kmdlswap/releases/latest)**
+— a 35 MB zip. Unzip it anywhere and run `kmdlfun.exe`. Nothing to install, no
+Python needed, and no path to type: the app finds your KOTOR, KOTOR 2 and Jade
+Empire installs itself from Windows' own record of what is on the machine.
+
+`kmdlfun` is the desktop side of this repository. It builds a new KOTOR 1
+character out of a body, a wardrobe and a head; transplants geometry from one
+model into another and sorts the donors by measured fit; brings a head in from
+a `.glb` sculpt, scan or Blender export, or from Jade Empire's own models;
+writes a `.lip` for every line of a dialogue nobody recorded; and previews each
+result by drawing the MDL/MDX bytes it just wrote rather than the input it
+started from. It also carries the joke transforms it is named for — bighead,
+chibi, bobblehead and the rest.
+
+It opens in a basic mode that hides the controls assuming you already know the
+format, and `Settings ▸ Mode ▸ Advanced` shows the rest. Nothing is written
+into the game except one explicit action on the Builds tab.
+
+Everything it does goes through `kmdlswap`, the engine described below, so the
+same coverage, offset-closure and byte-identity checks guard a costume change
+as guard a real geometry swap. [What the app does, in full](#kmdlfun--the-app).
+
 ## Status
 
 | Milestone | State |
