@@ -1080,6 +1080,15 @@ class App(ttk.Frame):
         self.head_repair = tk.BooleanVar(value=True)
         self.head_hide = tk.BooleanVar(value=True)
         self.head_reshape = tk.BooleanVar(value=False)
+        # Off, and meant to stay off until a build actually refuses.
+        #
+        # The size check measures a bounding box, and a bounding box cannot
+        # tell a big head from an ordinary head wearing a tall hat. Jade's
+        # `h_bling01_` is 0.389 against the node's 0.281 - all of it headdress -
+        # and the face inside it fits. The check has no way to see that, so the
+        # answer is a way to say "I looked, build it" rather than a looser
+        # limit that would let a genuinely oversized head through unremarked.
+        self.head_force = tk.BooleanVar(value=False)
         ttk.Checkbutton(opts, text="Decimate to", variable=self.head_decimate).grid(
             row=0, column=0, sticky="w")
         self.head_budget = tk.IntVar(value=690)
@@ -1098,6 +1107,12 @@ class App(ttk.Frame):
         ttk.Checkbutton(opts, text="Reshape: keep the base's own surface and texture mapping",
                         variable=self.head_reshape).grid(
             row=2, column=0, columnspan=5, sticky="w", pady=(4, 0))
+        ttk.Checkbutton(
+            opts,
+            text="Build anyway, past the checks (for hats, horns and hair "
+                 "that reach past a head)",
+            variable=self.head_force).grid(
+            row=3, column=0, columnspan=5, sticky="w", pady=(4, 0))
 
         crop = self._advanced(ttk.Frame(page))
         crop.grid(row=4, column=0, columnspan=5, sticky="w", pady=(6, 0))
@@ -2709,10 +2724,17 @@ class App(ttk.Frame):
         kinds.bind("<<ComboboxSelected>>", lambda _e: self._refresh_jade())
         # The scale is a measurement, not a fact - it disagrees in direction
         # with the format author's own figure - so it is a box, not a constant.
+        #
+        # It is also not one number. A head needs 0.86 and a body 0.97, and
+        # this box used to open at 0.97 whatever was selected: every head
+        # converted here came out 13% too big and failed the size check with
+        # "1.4x too big on its worst axis", which reads like a bad model rather
+        # than a bad default. It follows the kind now.
         ttk.Label(bar, text="scale").pack(side="left", padx=(16, 4))
         from . import jade as kjade
 
-        self.jade_scale = tk.DoubleVar(value=kjade.SCALE)
+        self.jade_scale = tk.DoubleVar(
+            value=kjade.scale_for(self.jade_kind.get()))
         ttk.Spinbox(bar, from_=0.5, to=2.0, increment=0.01, width=6,
                     textvariable=self.jade_scale).pack(side="left")
         self.jade_note = ttk.Label(bar, text="", foreground="#666")
@@ -2760,6 +2782,13 @@ class App(ttk.Frame):
         if getattr(self, "_jade_window", None) is None:
             return
         wanted = self.jade_kind.get()
+        # Follow the kind, unless the modder has typed a figure of their own.
+        from . import jade as kjade
+
+        defaults = {kjade.scale_for(k) for k in (kjade.HEAD, kjade.BODY,
+                                                 kjade.MASK)}
+        if round(self.jade_scale.get(), 4) in {round(d, 4) for d in defaults}:
+            self.jade_scale.set(kjade.scale_for(wanted))
         entries = [e for e in getattr(self, "_jade_catalogue", [])
                    if e.kind == wanted]
         self._jade_labels = {e.resref: e for e in entries}
@@ -2970,6 +2999,7 @@ class App(ttk.Frame):
             fit=self.head_fit.get(),
             reshape=self.head_reshape.get(),
             hide=([] if self.head_hide.get() else None),
+            force=self.head_force.get(),
             build=build,
         )
         self.build_btn.config(state="disabled")

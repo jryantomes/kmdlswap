@@ -2560,3 +2560,64 @@ class TestBackgroundWorkKeepsQuiet:
         for should still say how it went."""
         app._say("preview only: 1/1 would transfer")
         assert app.status.cget("text") == "preview only: 1/1 would transfer"
+
+
+def _open_jade_window(app):
+    """The Jade controls only exist once the window is built."""
+    from kmdlfun import installs
+
+    where = installs.detect().get(installs.JADE)
+    if not where:
+        pytest.skip("no Jade Empire install")
+    app.jade.set(str(where))
+    app._open_jade()
+    if not hasattr(app, "jade_scale"):
+        pytest.skip("the Jade window did not build")
+    return app
+
+
+def test_the_jade_scale_box_follows_the_kind(app):
+    """A head needs 0.86 and a body 0.97, and the box used to open at 0.97
+    whatever was selected.
+
+    Every head converted through this window then came out 13 percent too big
+    and failed the size check with "1.4x too big on its worst axis" - which
+    reads like a bad model rather than a bad default.
+    """
+    from kmdlfun import jade as kjade
+
+    _open_jade_window(app)
+    assert app.jade_scale.get() == pytest.approx(kjade.scale_for(kjade.HEAD))
+
+    app.jade_kind.set("body")
+    app._refresh_jade()
+    assert app.jade_scale.get() == pytest.approx(kjade.scale_for(kjade.BODY))
+
+    app.jade_kind.set("head")
+    app._refresh_jade()
+    assert app.jade_scale.get() == pytest.approx(kjade.scale_for(kjade.HEAD))
+
+
+def test_a_figure_typed_into_the_jade_scale_box_is_kept(app):
+    """It is a box and not a constant on purpose - the scale is a measurement.
+    Following the kind must not overwrite a modder's own number."""
+    _open_jade_window(app)
+    app.jade_scale.set(1.25)
+    app.jade_kind.set("body")
+    app._refresh_jade()
+    assert app.jade_scale.get() == pytest.approx(1.25)
+
+
+def test_a_head_can_be_built_past_the_checks(app):
+    """The size check measures a bounding box, and a bounding box cannot tell a
+    big head from an ordinary head in a tall hat. Jade's `h_bling01_` is 0.389
+    against a node's 0.281, all of it headdress, and the face inside it fits.
+    """
+    import inspect
+
+    from kmdlfun import gui as kgui
+
+    assert hasattr(app, "head_force")
+    assert app.head_force.get() is False, "it must start off"
+    # And it has to actually reach the builder.
+    assert "force=self.head_force.get()" in inspect.getsource(kgui.App._head_start)

@@ -923,7 +923,9 @@ def _jade(args) -> int:
         print("kmdlfun: --out is required to convert", file=sys.stderr)
         return 1
 
-    scale = args.scale if args.scale is not None else jade.SCALE
+    # Per kind, not one figure for everything: a head needs 0.86 and a body
+    # 0.97, and `jade.SCALE` is the body's.
+    scale = args.scale if args.scale is not None else jade.scale_for(entry.kind)
     try:
         result = jade.to_pack(entry, _Path(args.out), scale=scale,
                               install=install,
