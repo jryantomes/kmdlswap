@@ -86,6 +86,77 @@ def limb_for(node_name: str) -> str | None:
     return None
 
 
+# How far a body may be resized to meet the head it wears. A Jade garment with
+# a lower collar than KOTOR's needs about 2 percent; anything asking for much
+# more is not a collar mismatch, it is the wrong host, and stretching a body
+# that far breaks it against the skeleton it hangs on - the bones stay the
+# host's whatever the mesh does.
+SEAT_LIMIT = 0.06
+
+
+def neck_column(body_positions, head_scene):
+    """Where the head's neck lands, and how high the body reaches under it.
+
+    Not a bounding box. The body's highest point is a shoulder, and comparing
+    that with the head's lowest says "covered" while the neck hangs over a
+    hole - which is exactly the check that passed while the gap was visible.
+
+    Nor a column around `headhook`: a head's neck sits a good way forward of
+    its hook, and a column on the hook measures the back of the collar, which
+    is the high side. It has to be the neck's own footprint.
+    """
+    import numpy as np
+
+    worn = np.asarray(head_scene.positions, dtype=float)
+    if not len(worn):
+        return None
+    bottom = worn[:, 2].min()
+    ring = worn[worn[:, 2] < bottom + 0.02]
+    if len(ring) < 3:
+        return None
+    cx, cy = float(ring[:, 0].mean()), float(ring[:, 1].mean())
+    radius = max(float(np.ptp(ring[:, 0])), float(np.ptp(ring[:, 1]))) / 2.0
+    body = np.asarray(body_positions, dtype=float)
+    under = body[np.hypot(body[:, 0] - cx, body[:, 1] - cy) <= radius]
+    if not len(under):
+        return bottom, float("-inf"), float(body[:, 2].min())
+    return bottom, float(under[:, 2].max()), float(body[:, 2].min())
+
+
+def seat_scale(parts, host_layout, head_layout):
+    """How to resize a body so its collar meets the head, as (factor, why).
+
+    The target is the host's own relationship with that head, whatever it is:
+    reproduce it and a head that sits right on the host sits right here.
+    Uniform and about the floor, so the feet stay on it.
+
+    `why` is one of `open` (the collar rings the neck rather than meeting it,
+    which is a garment with a neck hole and wants nothing done), `reaches`
+    (already tall enough - a collar is allowed to be high), or `raise`.
+    """
+    import numpy as np
+
+    from . import render as krender
+
+    placed = krender.place_head(host_layout, head_layout)
+    if placed is None:
+        return None, "no hook"
+    host = neck_column(krender.from_layout(host_layout).positions, placed)
+    ours = neck_column(
+        np.vstack([np.asarray(p.positions) for p in parts if p.positions]),
+        placed)
+    if host is None or ours is None:
+        return None, "no neck"
+    _bottom, host_top, _host_floor = host
+    _b, our_top, our_floor = ours
+    if our_top == float("-inf"):
+        return None, "open"
+    if host_top == float("-inf") or our_top <= our_floor:
+        return None, "no neck"
+    want = (host_top - our_floor) / (our_top - our_floor)
+    return want, ("raise" if want > 1.0 else "reaches")
+
+
 def _turn(rest, vector):
     """A direction in the node's space. Rotated, never moved."""
     return tuple(sum(rest.rotation[k][i] * vector[k] for k in range(3))
@@ -122,8 +193,14 @@ def _merge(parts: list):
 
 def run(entry, *, host: str = HOSTS[0], install=None, jade_install=None,
         pose: float | None = jade.KOTOR_ARM_REST,
-        scale: float = jade.BODY_SCALE) -> Built:
-    """Build one Jade body onto one KOTOR host. Returns the bytes, not a file."""
+        scale: float = jade.BODY_SCALE, head=None) -> Built:
+    """Build one Jade body onto one KOTOR host. Returns the bytes, not a file.
+
+    `head` is the head model this body will be worn with, and giving it seats
+    the collar against that head's neck. Without it the body is built at its
+    own size, which is right until you put a KOTOR head on it: Jade cuts some
+    of its collars lower than KOTOR does, and the neck then ends in mid air.
+    """
     from kmdlswap import edit as kedit
     from kmdlswap import layout as kl
     from kmdlswap import obj as kobj
@@ -137,6 +214,31 @@ def run(entry, *, host: str = HOSTS[0], install=None, jade_install=None,
 
     model = jade._parse(*jade.read(entry))
     parts = jade.partition(model, pose=pose, scale=scale)
+
+    if head is not None:
+        want, why = seat_scale(parts, kl.parse(mdl, mdx), head)
+        if why == "open":
+            out.lines.append(
+                "seated: the collar rings the neck rather than meeting it - "
+                "a garment with a neck hole, and nothing to close")
+        elif want is None:
+            out.warnings.append(
+                "could not find where this head's neck lands, so the body is "
+                "built at its own size")
+        elif why == "reaches":
+            out.lines.append(
+                "seated: the collar already reaches the head's neck")
+        elif want - 1.0 > SEAT_LIMIT:
+            out.warnings.append(
+                f"the collar falls {want - 1:.0%} short of this head's neck, "
+                f"past the {SEAT_LIMIT:.0%} worth correcting - built at its own "
+                f"size, and the host is probably the wrong one")
+        else:
+            scale *= want
+            parts = jade.partition(model, pose=pose, scale=scale)
+            out.lines.append(
+                f"seated: raised {want - 1:.1%} so the collar meets the head's "
+                f"neck, the way {host} meets it")
     by_limb: dict = {}
     for part in parts:
         by_limb.setdefault(part.limb, []).append(part)

@@ -423,3 +423,114 @@ class TestReachingTheHead:
         assert any("no Legs node" in line for line in built.lines), built.lines
         assert not any("not carried over" in w for w in built.warnings), \
             built.warnings
+
+
+class TestSeatingTheCollarAgainstTheHead:
+    """The check that "covered" got wrong.
+
+    It compared the body's highest vertex with the head's lowest. That is a
+    bounding box against a bounding box: a shoulder pad satisfies it while the
+    neck hangs over a hole, which is what it did - reported covered by 0.040
+    while there was a real gap of 0.018 under the neck.
+
+    A column around `headhook` is no better. A head's neck sits a good way
+    forward of its hook, so a column on the hook measures the back of the
+    collar, which is the high side; it made the same body read as too tall.
+    It has to be the neck's own footprint.
+    """
+
+    @staticmethod
+    def a_head():
+        from pathlib import Path
+
+        from kmdlswap import layout as kl
+
+        where = Path("out_fun/vex-eyelids")
+        if not (where / "p_brokerhd.mdl").is_file():
+            pytest.skip("no built head to seat against")
+        return kl.parse((where / "p_brokerhd.mdl").read_bytes(),
+                        (where / "p_brokerhd.mdx").read_bytes())
+
+    @staticmethod
+    def under_the_neck(built, head):
+        from kmdlfun import render as krender
+        from kmdlswap import layout as kl
+
+        lay = kl.parse(built.mdl, built.mdx)
+        placed = krender.place_head(lay, head)
+        return bodybuild.neck_column(krender.from_layout(lay).positions, placed)
+
+    def test_a_low_collar_is_raised_to_meet_the_neck(self, bodies, k1_path,
+                                                     jade_path):
+        head = self.a_head()
+        entry = next((e for e in bodies if e.resref.lower() == "n_mercf_"), None)
+        if entry is None:
+            pytest.skip("n_mercf_ not present")
+
+        loose = bodybuild.run(entry, host="PFBBM", install=k1_path,
+                              jade_install=jade_path)
+        bottom, top, _floor = self.under_the_neck(loose, head)
+        assert top < bottom, "this body is supposed to fall short without seating"
+
+        seated = bodybuild.run(entry, host="PFBBM", install=k1_path,
+                               jade_install=jade_path, head=head)
+        bottom, top, _floor = self.under_the_neck(seated, head)
+        assert top >= bottom, (top, bottom)
+        assert any("seated: raised" in line for line in seated.lines), seated.lines
+
+    def test_it_matches_the_host_rather_than_just_touching(self, bodies,
+                                                           k1_path, jade_path):
+        """The target is whatever the host does with that head. Reproduce it
+        and a head that sits right on the host sits right here."""
+        from kmdlfun import render as krender
+        from kmdlfun.library import ModelLibrary
+        from kmdlswap import layout as kl
+
+        head = self.a_head()
+        entry = next((e for e in bodies if e.resref.lower() == "n_mercf_"), None)
+        if entry is None:
+            pytest.skip("n_mercf_ not present")
+        host = kl.parse(*ModelLibrary(k1_path).read("PFBBM"))
+        placed = krender.place_head(host, head)
+        _b, host_top, _f = bodybuild.neck_column(
+            krender.from_layout(host).positions, placed)
+
+        seated = bodybuild.run(entry, host="PFBBM", install=k1_path,
+                               jade_install=jade_path, head=head)
+        _b, ours, _f = self.under_the_neck(seated, head)
+        assert abs(ours - host_top) < 0.005, (ours, host_top)
+
+    def test_it_never_shrinks_a_collar_that_already_reaches(self, bodies,
+                                                            k1_path, jade_path):
+        """A collar is allowed to be high. Pulling it down to match exactly
+        would only uncover more neck."""
+        head = self.a_head()
+        entry = next((e for e in bodies if e.resref.lower() == "n_silk_"), None)
+        if entry is None:
+            pytest.skip("n_silk_ not present")
+        loose = bodybuild.run(entry, host="PFBBM", install=k1_path,
+                              jade_install=jade_path)
+        seated = bodybuild.run(entry, host="PFBBM", install=k1_path,
+                               jade_install=jade_path, head=head)
+        assert len(loose.mdl) == len(seated.mdl)
+        assert any("already reaches" in line for line in seated.lines), seated.lines
+
+    def test_an_open_collar_is_left_alone(self, bodies, k1_path, jade_path):
+        """Some garments ring the neck rather than meeting it - there is a hole
+        for the neck to pass through, and nothing under it to raise."""
+        head = self.a_head()
+        entry = next((e for e in bodies if e.resref.lower() == "n_bandit_"), None)
+        if entry is None:
+            pytest.skip("n_bandit_ not present")
+        seated = bodybuild.run(entry, host="PFBBM", install=k1_path,
+                               jade_install=jade_path, head=head)
+        assert any("rings the neck" in line for line in seated.lines), seated.lines
+        assert not seated.warnings or all(
+            "collar" not in w for w in seated.warnings), seated.warnings
+
+    @staticmethod
+    def test_it_will_not_stretch_a_body_far_to_do_it():
+        """The bones stay the host's whatever the mesh does, so a body stretched
+        far no longer sits on the skeleton driving it. Past the limit it says
+        the host is wrong instead."""
+        assert 0.0 < bodybuild.SEAT_LIMIT <= 0.10
