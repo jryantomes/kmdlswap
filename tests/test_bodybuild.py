@@ -591,3 +591,90 @@ class TestTheTwoTextureNames:
         # `texb` for every vanilla row using this body is the bare model name.
         assert look("PFBBM") is None, "a bare body texture name should not resolve"
         assert look("PFBBM01") is not None, "PFBBM01 is what the engine loads"
+
+
+class TestTheSeamBetweenTwoNodes:
+    """A vertex on the cut lives in two meshes, and both copies have to follow
+    the same bones or the join pulls apart.
+
+    `partition` duplicates it with the same weights, and then the weights are
+    resampled per node from the host's own surface - which undoes that. The
+    host's Torso is blended across the collar and the upper torso at the
+    shoulder; its LArm, at the same place, is bound wholly to the bicep,
+    because a KOTOR arm mesh begins there and its bone map holds nothing else
+    that reaches. Every one of the fourteen shared vertices disagreed, and the
+    arms stretched away from the body in game.
+    """
+
+    @staticmethod
+    def shared(built):
+        import numpy as np
+
+        from kmdlfun import space
+        from kmdlswap import layout as kl
+        from kmdlswap import mdx as kmdx
+
+        lay = kl.parse(built.mdl, built.mdx)
+        rest = space.rest_pose(lay)
+        nodes = {}
+        for node in lay.nodes:
+            if node.in_animation is not None or not node.is_skin:
+                continue
+            if not bodybuild.limb_for(node.name):
+                continue
+            at = rest[node.index]
+            pts = np.asarray([[p[i] + at.position[i] for i in range(3)]
+                              for p in kmdx.positions(lay, node)], dtype=float)
+            slots = {s: nd.name.lower()
+                     for s, nd in kmdx.bone_slot_nodes(lay, node).items()}
+            nodes[node.name] = (pts, kmdx.influences(lay, node), slots)
+
+        def named(infl, slots):
+            return {slots.get(x.bone_slot, str(x.bone_slot)): round(x.weight, 3)
+                    for x in infl}
+
+        pairs = []
+        names = sorted(nodes)
+        for i, a in enumerate(names):
+            for b in names[i + 1:]:
+                pa, ia, sa = nodes[a]
+                pb, ib, sb = nodes[b]
+                for j, point in enumerate(pb):
+                    gap = np.linalg.norm(pa - point, axis=1)
+                    k = int(gap.argmin())
+                    if gap[k] < 1e-5:
+                        pairs.append((a, b, named(ia[k], sa), named(ib[j], sb)))
+        return pairs
+
+    def test_both_copies_follow_the_same_bones(self, a_body, k1_path, jade_path):
+        built = bodybuild.run(a_body, host="PFBBM", install=k1_path,
+                              jade_install=jade_path)
+        pairs = self.shared(built)
+        assert pairs, "no shared vertices found - the test is not looking at a seam"
+        wrong = [p for p in pairs if p[2] != p[3]]
+        assert not wrong, wrong[:3]
+
+    def test_the_build_says_how_many_it_joined(self, a_body, k1_path, jade_path):
+        built = bodybuild.run(a_body, host="PFBBM", install=k1_path,
+                              jade_install=jade_path)
+        assert any("seams:" in line for line in built.lines), built.lines
+
+    def test_a_seam_lands_on_a_bone_both_meshes_carry(self, a_body, k1_path,
+                                                      jade_path):
+        """Which is how vanilla holds its own seams together - the cut is put
+        where one shared bone drives both sides."""
+        from kmdlswap import layout as kl
+        from kmdlswap import mdx as kmdx
+
+        built = bodybuild.run(a_body, host="PFBBM", install=k1_path,
+                              jade_install=jade_path)
+        lay = kl.parse(built.mdl, built.mdx)
+        maps = {}
+        for node in lay.nodes:
+            if node.in_animation is None and node.is_skin \
+                    and bodybuild.limb_for(node.name):
+                maps[node.name] = {nd.name.lower() for nd
+                                   in kmdx.bone_slot_nodes(lay, node).values()}
+        for a, b, wa, _wb in self.shared(built):
+            for bone in wa:
+                assert bone in maps[a] and bone in maps[b], (a, b, bone)

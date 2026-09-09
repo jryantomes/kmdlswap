@@ -192,6 +192,76 @@ def _merge(parts: list):
     return positions, faces, uvs, normals, material, weight
 
 
+def _join_seams(layout, made) -> int:
+    """Give a vertex that lives in two nodes one set of weights.
+
+    `partition` duplicates a vertex on the cut into both parts with the same
+    weights, and then the weights are resampled per node from the host's own
+    surface - which undoes it. The host's Torso is blended across the collar
+    and the upper torso at the shoulder; its LArm, up at the same place, is
+    bound wholly to the bicep, because a KOTOR arm mesh begins at the bicep and
+    its bone map holds nothing else that reaches there. Two copies of one
+    vertex then follow different bones and the shoulder pulls apart, which
+    reads as an arm stretching away from the body.
+
+    Vanilla keeps its seams together by binding them to the one bone both
+    meshes carry. That is what the arm's own copy already says, and it is the
+    copy that can be expressed in both bone maps, so it is the one that wins.
+    """
+    import numpy as np
+
+    from kmdlswap import mdx as kmdx
+
+    from . import space as kspace
+
+    rest = kspace.rest_pose(layout)
+    world: list = []
+    for name, geo, _report, _positions in made:
+        node = layout.node_by_name(name)
+        at = rest[node.index]
+        pts = np.asarray([[p[i] + at.position[i] for i in range(3)]
+                          for p in geo.positions], dtype=float)
+        slots = {slot: nd.name.lower()
+                 for slot, nd in kmdx.bone_slot_nodes(layout, node).items()}
+        by_name = {v: k for k, v in slots.items()}
+        world.append((name, geo, pts, slots, by_name))
+
+    joined = 0
+    for i, (_a, geo_a, pts_a, slots_a, names_a) in enumerate(world):
+        for j, (_b, geo_b, pts_b, _slots_b, names_b) in enumerate(world):
+            if j <= i:
+                continue
+            # The narrower bone map is the one both can express - an arm's
+            # bones are a subset of the torso's where they touch.
+            if len(names_a) <= len(names_b):
+                src, dst = (geo_a, pts_a, slots_a), (geo_b, pts_b, names_b)
+            else:
+                src, dst = (geo_b, pts_b, _slots_b), (geo_a, pts_a, names_a)
+            src_geo, src_pts, src_slots = src
+            dst_geo, dst_pts, dst_names = dst
+            for k, point in enumerate(src_pts):
+                # Every match, not the nearest one. A node can hold two
+                # vertices at the same place - folding the legs into a torso
+                # puts the leg seam and the torso seam in one mesh - and fixing
+                # only the closest leaves the other still pulling its own way.
+                hits = np.flatnonzero(
+                    np.linalg.norm(dst_pts - point, axis=1) <= 1e-5)
+                if not len(hits):
+                    continue
+                moved = []
+                for x in src_geo.influences[k]:
+                    bone = src_slots.get(x.bone_slot)
+                    if bone is None or bone not in dst_names:
+                        moved = []
+                        break
+                    moved.append(type(x)(dst_names[bone], x.weight))
+                if moved:
+                    for m in hits:
+                        dst_geo.influences[int(m)] = list(moved)
+                        joined += 1
+    return joined
+
+
 def run(entry, *, host: str = HOSTS[0], install=None, jade_install=None,
         pose: float | None = jade.KOTOR_ARM_REST,
         scale: float = jade.BODY_SCALE, head=None) -> Built:
@@ -277,6 +347,10 @@ def run(entry, *, host: str = HOSTS[0], install=None, jade_install=None,
             f"{sum(len(p.faces) for p in moved)} triangles go in the torso - "
             f"which is where {host} keeps its own")
 
+    # Built first, all of them, then reconciled, then written. The seam
+    # between two nodes only makes sense once both exist.
+    host_layout = kl.parse(mdl, mdx)
+    made: list = []
     for node_name in wanted:
         limb = limb_for(node_name)
         group = by_limb.get(limb)
@@ -292,23 +366,33 @@ def run(entry, *, host: str = HOSTS[0], install=None, jade_install=None,
                 f"node wears one: {total - kept} of {total} triangles will "
                 f"take the wrong one")
 
-        layout = kl.parse(mdl, mdx)
-        node = layout.node_by_name(node_name)
+        node = host_layout.node_by_name(node_name)
         # A skinned mesh's vertices are stored in its *node's* space, and the
         # node is not always at the origin: `P_CarthBB` keeps all four within a
         # centimetre of it, but `PFBBM` hangs its torso at z 1.042 and offset
         # sideways. Written as model space they came out a metre high on that
         # host - and one centimetre low on Carth, which is small enough to look
         # like nothing and is a third of the gap under his head.
-        rest = space.rest_pose(layout)[node.index]
+        rest = space.rest_pose(host_layout)[node.index]
         local = [rest.to_local(p) for p in positions]
         turned = [_turn(rest, n) for n in normals] if normals else normals
         mesh = kobj.ObjMesh(name=node_name, positions=local, faces=faces,
                             uvs=uvs, normals=turned)
         # `facial_rig=False` matters: those two passes look for a brow band and
         # for lips, and on a torso they find something and rebind it.
-        geo, report = kswap.build_replacement(layout, node, mesh,
+        geo, report = kswap.build_replacement(host_layout, node, mesh,
                                               facial_rig=False)
+        made.append((node_name, geo, report, positions))
+
+    joined = _join_seams(host_layout, made)
+    if joined:
+        out.lines.append(
+            f"seams: {joined} vertices shared between two nodes given one set "
+            f"of weights, so the join moves as one")
+
+    for node_name, geo, report, _positions in made:
+        layout = kl.parse(mdl, mdx)
+        node = layout.node_by_name(node_name)
         mdl, mdx = kedit.replace_geometry(layout, node, geo,
                                           texture=out.texture or None)
         out.lines.append(
