@@ -77,6 +77,21 @@ class HeadPack:
         return str(self.manifest.get("anchor") or "chin").lower()
 
     @property
+    def drop(self) -> float:
+        """How far below the anchor this head sits, as a share of its height.
+
+        Anchoring puts a chin at the bottom of the host's head node, which is
+        where KOTOR wants one. A head drawn for another game may want to sit
+        lower: Jade hangs its heads about eight percent further down the neck,
+        and one anchored KOTOR's way wears a longer neck than it was drawn
+        with.
+        """
+        try:
+            return float(self.manifest.get("drop", 0.0))
+        except (TypeError, ValueError):
+            return 0.0
+
+    @property
     def facing(self) -> str:
         return str(self.manifest.get("facing") or "+y").lower()
 
@@ -149,6 +164,11 @@ def load(folder: str | Path) -> HeadPack:
         if pack.up not in VALID_UP:
             pack.problems.append(
                 f"up {pack.up!r} is not one of {', '.join(VALID_UP)}"
+            )
+        if not -0.5 <= pack.drop <= 0.5:
+            pack.problems.append(
+                f"drop {pack.drop} is more than half a head's height; that is "
+                f"not a placement, it is a different anchor"
             )
         if not 0.1 <= pack.scale <= 10.0:
             pack.problems.append(f"scale {pack.scale} is outside a sane 0.1 to 10")

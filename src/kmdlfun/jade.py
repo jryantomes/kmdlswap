@@ -538,8 +538,12 @@ def to_pack(entry: Entry, out_dir, *, scale: float | None = None,
     # conventions and needs no further correction.
     data["up"] = "z"
     data["facing"] = "+y"
+    if entry.kind in (HEAD, MASK):
+        data["drop"] = HEAD_DROP
     data["notes"] = (f"imported from Jade Empire {entry.resref} "
-                     f"(x{scale:.2f}, rotated upright)")
+                     f"(x{scale:.2f}, rotated upright"
+                     + (f", dropped {HEAD_DROP:.0%}"
+                        if entry.kind in (HEAD, MASK) else "") + ")")
     manifest.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
     return {
@@ -1052,9 +1056,24 @@ def scene(entry: Entry, *, install=None, scale: float | None = None,
     return built
 
 
+# How much lower Jade hangs a head than KOTOR does, as a share of the head's
+# own height.
+#
+# KOTOR anchors a chin to the bottom of the head node and every vanilla head
+# obeys it - Carth's chin and a converted one land at the same z on the same
+# body. Jade does not: line up the two `HeadBone`s the way Jade assembles a
+# figure and the chin sits at 0.813 of the figure's height against KOTOR's
+# 0.837. A Jade head anchored KOTOR's way is carried about two points of height
+# too high, and wears the neck it was never drawn with.
+#
+# 0.08 of a head's height closes it: measured against `n_mercf_`, where Jade
+# puts the chin at 0.957 of the body's own top and KOTOR's anchor puts it at
+# 0.973.
+HEAD_DROP = 0.08
+
 # Bump when the build pipeline changes what a converted head looks like, so
 # cached ones are redrawn rather than shown stale.
-BUILD_VERSION = "v1"
+BUILD_VERSION = "v2"
 
 
 # Jade heads whose geometry carries a collar rather than a neck.

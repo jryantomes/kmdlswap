@@ -154,6 +154,12 @@ def seat_scale(parts, host_layout, head_layout):
         return None, "open"
     if host_top == float("-inf") or our_top <= our_floor:
         return None, "no neck"
+    # Only ever to close a real gap. Raising a collar that already covers the
+    # chin - up to whatever overlap the host happens to keep - is a correction
+    # to nothing, and it carries the body away from the proportions it was
+    # drawn with.
+    if our_top >= _bottom:
+        return 1.0, "reaches"
     want = (host_top - our_floor) / (our_top - our_floor)
     return want, ("raise" if want > 1.0 else "reaches")
 

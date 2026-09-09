@@ -171,7 +171,7 @@ def vertex_normals(positions, faces):
     return out
 
 
-def place_at(positions, size, centre, anchor="chin"):
+def place_at(positions, size, centre, anchor="chin", drop=0.0):
     """Move a mesh onto the node without changing its size.
 
     Placing and resizing are different jobs and were one function, which meant
@@ -194,7 +194,26 @@ def place_at(positions, size, centre, anchor="chin"):
         bottom = min(p[2] for p in moved)
         want = centre[2] - size[2] / 2
         moved = [(p[0], p[1], p[2] + (want - bottom)) for p in moved]
-    return moved
+    return _drop(moved, drop)
+
+
+def _drop(positions, fraction):
+    """Lower a placed head by a share of its own height.
+
+    Anchoring puts a chin at the bottom of the host's head node, which is where
+    KOTOR wants one. A head from elsewhere may want to sit lower than that -
+    Jade hangs its heads about eight percent of a head's height further down
+    the neck, and a Jade head anchored KOTOR's way wears a longer neck than it
+    was drawn with.
+
+    A share rather than a distance, so it means the same on any host.
+    """
+    if not fraction or not positions:
+        return positions
+    lo = min(p[2] for p in positions)
+    hi = max(p[2] for p in positions)
+    by = (hi - lo) * fraction
+    return [(p[0], p[1], p[2] - by) for p in positions]
 
 
 # Which axis a fit is measured against. Height, because it is the one a viewer
@@ -215,7 +234,7 @@ def place_at(positions, size, centre, anchor="chin"):
 FIT_AXIS = 2
 
 
-def fit_to(positions, size, centre, anchor="chin"):
+def fit_to(positions, size, centre, anchor="chin", drop=0.0):
     """Scale uniformly to `size` on `FIT_AXIS` and place at `centre`.
 
     Right for a sculpt or a scan arriving at an arbitrary size; wrong for
@@ -237,10 +256,7 @@ def fit_to(positions, size, centre, anchor="chin"):
         bottom = min(p[2] for p in moved)
         want = centre[2] - size[2] / 2
         moved = [(p[0], p[1], p[2] + (want - bottom)) for p in moved]
-    return moved
-
-
-# --- texture ----------------------------------------------------------------
+    return _drop(moved, drop)
 
 
 def write_texture(path: Path, size: int = 256) -> None:

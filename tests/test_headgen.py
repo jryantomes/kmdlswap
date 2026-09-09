@@ -309,3 +309,108 @@ def test_a_jade_body_now_stands_up(jade_path, k1_path):
     assert high > low, "shoulders below the feet - it is upside down"
     assert 1.4 < np.ptp(P[:, 2]) < 1.8, (
         f"height {np.ptp(P[:, 2]):.2f}; a KOTOR body is about 1.58")
+
+
+class TestLoweringAHeadBelowTheAnchor:
+    """KOTOR anchors a chin to the bottom of the head node, and every vanilla
+    head obeys it. A head drawn for another game may want to sit lower.
+
+    Line up the two `HeadBone`s the way Jade assembles a figure and its chin
+    sits at 0.957 of the body's own top; KOTOR's anchor puts it at 0.973. A
+    Jade head anchored KOTOR's way wears a longer neck than it was drawn with,
+    which is what it looked like in game.
+    """
+
+    @staticmethod
+    def test_a_drop_lowers_by_a_share_of_the_head(): 
+        from kmdlfun import headgen
+
+        box = [(0.0, 0.0, 0.0), (0.0, 0.0, 2.0), (1.0, 1.0, 1.0)]
+        plain = headgen.place_at(box, [1, 1, 1], [0, 0, 0])
+        low = headgen.place_at(box, [1, 1, 1], [0, 0, 0], drop=0.1)
+        tall = max(p[2] for p in plain) - min(p[2] for p in plain)
+        moved = min(p[2] for p in plain) - min(p[2] for p in low)
+        assert abs(moved - tall * 0.1) < 1e-9, (moved, tall)
+
+    @staticmethod
+    def test_no_drop_changes_nothing():
+        from kmdlfun import headgen
+
+        box = [(0.0, 0.0, 0.0), (0.0, 0.0, 2.0), (1.0, 1.0, 1.0)]
+        assert (headgen.place_at(box, [1, 1, 1], [0, 0, 0])
+                == headgen.place_at(box, [1, 1, 1], [0, 0, 0], drop=0.0))
+
+    @staticmethod
+    def test_a_fit_drops_too():
+        from kmdlfun import headgen
+
+        box = [(0.0, 0.0, 0.0), (0.0, 0.0, 2.0), (1.0, 1.0, 1.0)]
+        plain = headgen.fit_to(box, [1, 1, 1], [0, 0, 0])
+        low = headgen.fit_to(box, [1, 1, 1], [0, 0, 0], drop=0.1)
+        assert min(p[2] for p in low) < min(p[2] for p in plain)
+
+    @staticmethod
+    def test_a_pack_can_ask_for_one(tmp_path):
+        import json
+
+        from kmdlfun import headpack
+
+        folder = tmp_path / "pack"
+        folder.mkdir()
+        (folder / "head.obj").write_text("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
+        (folder / "head.json").write_text(json.dumps(
+            {"name": "x", "drop": 0.08}), encoding="utf-8")
+        pack = headpack.load(folder)
+        assert pack.drop == pytest.approx(0.08)
+
+    @staticmethod
+    def test_a_daft_drop_is_refused(tmp_path):
+        """Half a head is not a placement, it is a different anchor."""
+        import json
+
+        from kmdlfun import headpack
+
+        folder = tmp_path / "pack"
+        folder.mkdir()
+        (folder / "head.obj").write_text("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
+        (folder / "head.json").write_text(json.dumps(
+            {"name": "x", "drop": 3.0}), encoding="utf-8")
+        pack = headpack.load(folder)
+        assert any("drop" in p for p in pack.problems), pack.problems
+
+    @staticmethod
+    def test_a_jade_head_pack_asks_for_the_jade_drop(tmp_path):
+        from kmdlfun import installs, jade
+
+        where = installs.detect().get(installs.JADE)
+        if not where:
+            pytest.skip("no Jade Empire install")
+        entry = next((e for e in jade.catalogue(where)
+                      if e.resref.lower() == "h_common01_"), None)
+        if entry is None:
+            pytest.skip("h_common01_ not present")
+        jade.to_pack(entry, tmp_path / "pack", install=where)
+
+        from kmdlfun import headpack
+
+        pack = headpack.load(tmp_path / "pack")
+        assert pack.drop == pytest.approx(jade.HEAD_DROP)
+        assert not pack.problems, pack.problems
+
+    @staticmethod
+    def test_a_body_pack_asks_for_none(tmp_path):
+        """The drop is a head's business - it is about where a chin hangs."""
+        import json
+
+        from kmdlfun import installs, jade
+
+        where = installs.detect().get(installs.JADE)
+        if not where:
+            pytest.skip("no Jade Empire install")
+        entry = next((e for e in jade.catalogue(where, kinds=(jade.BODY,))
+                      if e.resref.lower() == "n_bandit_"), None)
+        if entry is None:
+            pytest.skip("n_bandit_ not present")
+        jade.to_pack(entry, tmp_path / "pack", install=where)
+        data = json.loads((tmp_path / "pack" / "head.json").read_text())
+        assert "drop" not in data, data

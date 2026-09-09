@@ -92,7 +92,8 @@ def fit_mesh(mesh, pack, layout, node, lines: list[str], *, resize: bool = True)
     if pack.scale != 1.0:
         size = [s * pack.scale for s in size]
     move = headgen.fit_to if resize else headgen.place_at
-    positions = move(positions, size, centre, anchor=pack.anchor)
+    positions = move(positions, size, centre, anchor=pack.anchor,
+                     drop=pack.drop)
 
     before = mesh.positions
     mesh.positions = positions
@@ -108,7 +109,8 @@ def fit_mesh(mesh, pack, layout, node, lines: list[str], *, resize: bool = True)
     lines.append(f"{'fitted' if resize else 'placed'}: "
                  f"{fmt([b_hi[i] - b_lo[i] for i in range(3)])} -> "
                  f"{fmt([a_hi[i] - a_lo[i] for i in range(3)])}"
-                 f"   facing {pack.facing}, up {pack.up}, anchor {pack.anchor}")
+                 f"   facing {pack.facing}, up {pack.up}, anchor {pack.anchor}"
+                 + (f", dropped {pack.drop:.0%} of a head" if pack.drop else ""))
     return mesh
 
 
