@@ -17,6 +17,7 @@ import time
 import pytest
 
 tk = pytest.importorskip("tkinter", reason="the app needs Tk")
+ttk = pytest.importorskip("tkinter.ttk", reason="the app needs Tk")
 
 
 
@@ -226,15 +227,92 @@ def test_one_preview_run(app, tmp_path):
     assert not list(tmp_path.iterdir()), "preview must not write files"
 
 
+def _droid_cat():
+    """A stand-in droid catalogue: what `droidbuild.catalogue` returns for
+    these four, without the full-install scan that finds them."""
+    return {
+        "p_hk47": {"head", "neck", "hand", "foot", "torso", "limb"},
+        "c_drdwar": {"head", "neck", "hand", "foot", "torso", "limb"},
+        "p_t3m3": {"head", "neck", "foot", "torso", "limb"},
+        "c_drdspyder": {"head"},
+    }
+
+
+def test_the_droid_tab_only_offers_droids_that_have_the_part(app, install_path):
+    """Two filters, so a pick cannot silently do nothing: a base needs a head
+    and a torso, and a slot only lists donors that carry that part. The spider
+    droid is head-only - it may donate a head and nothing else, and it can
+    never be a base."""
+    app._show_page("Droid")
+    app._droid_catalogue_cache = {str(install_path): _droid_cat()}
+    app._refresh_droid_bases()
+
+    bases = list(app.droid_base_box.cget("values"))
+    assert "c_drdspyder" not in bases, "no torso, so nothing to build on"
+    assert {"p_hk47", "c_drdwar", "p_t3m3"} <= set(bases)
+    assert "left out" in app.droid_base_note.cget("text")
+
+    app.droid_base.set("p_hk47")
+    app._refresh_droid_slots()
+
+    from kmdlfun.gui import KEEP_BASE
+
+    heads = _donors_of(app, "head")
+    necks = _donors_of(app, "Neck")
+    assert heads and necks
+    assert heads[0] == KEEP_BASE and necks[0] == KEEP_BASE
+    assert "p_hk47" not in heads, "the base is not its own donor"
+    assert "c_drdspyder" in heads, "it does have a head"
+    assert "c_drdspyder" not in necks, "and it has no neck, so it is not offered"
+
+
+def _donors_of(app, node_name):
+    """The donor list the Parts box offers for one of the base's nodes.
+
+    Found by grid row: the node's label and its combobox share one.
+    """
+    rows = {int(c.grid_info()["row"]): c for c in app.droid_slots_box.winfo_children()
+            if isinstance(c, ttk.Combobox)}
+    for child in app.droid_slots_box.winfo_children():
+        if (isinstance(child, ttk.Label)
+                and child.cget("text").strip() == node_name):
+            box = rows.get(int(child.grid_info()["row"]))
+            if box is not None:
+                return list(box.cget("values"))
+    raise AssertionError(f"no donor list for {node_name!r}")
+
+
+def test_the_droid_parts_list_scrolls(app, install_path):
+    """HK-47 offers twenty-odd parts - more than fits a fixed panel - so the
+    list scrolls inside its frame instead of pushing the options and the log
+    off the bottom of the window."""
+    app._show_page("Droid")
+    app._droid_catalogue_cache = {str(install_path): _droid_cat()}
+    app.droid_base.set("p_hk47")
+    app._refresh_droid_slots()
+    app.master.update_idletasks()
+
+    box = app._droid_slots_canvas
+    content = box.bbox("all")
+    assert content is not None, "the canvas should hold the part list"
+    assert len(app.droid_slot_pick) > 12, "HK-47 has plenty of parts"
+    assert content[3] > int(box.cget("height")), (
+        "the content is taller than the window, which is why it must scroll"
+    )
+    # And the scrollbar has something to scroll: yview is a fraction pair.
+    first, last = box.yview()
+    assert (last - first) < 1.0, "part of the list is off-screen"
+
+
 def test_the_droid_tab_previews_the_result(app, tmp_path, install_path):
     """The Droid tab draws the mixed droid beside the base and writes nothing -
     the same contract every other tab's Preview button has. A droid is a
     self-contained model, so it is drawn as itself, no body to sit it on."""
     app._show_page("Droid")
     app.out_dir.set(str(tmp_path))
-    # Skip the full-install droid scan: the tab only needs the list to fill a
-    # combobox, and this test is about Preview, not the scan.
-    app._droid_cache = {str(install_path): ["p_hk47", "c_drdwar", "p_t3m3"]}
+    # Skip the full-install droid scan: the tab only needs the catalogue to
+    # fill its comboboxes, and this test is about Preview, not the scan.
+    app._droid_catalogue_cache = {str(install_path): _droid_cat()}
     app.droid_base.set("p_hk47")
     app._refresh_droid_slots()
     assert "head" in app.droid_slot_pick, "HK-47's head node should be offered"

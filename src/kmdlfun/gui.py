@@ -639,7 +639,7 @@ class App(ttk.Frame):
         path = self.install.get().strip()
         if not path or not (Path(path) / "chitin.key").is_file():
             return
-        if path in getattr(self, "_droid_cache", {}):
+        if path in getattr(self, "_droid_catalogue_cache", {}):
             return
         self._refresh_droid_bases()
 
@@ -1036,10 +1036,40 @@ class App(ttk.Frame):
         self.droid_base_note = ttk.Label(page, text="", foreground="#666")
         self.droid_base_note.grid(row=0, column=3, columnspan=2, sticky="w", padx=(8, 0))
 
-        self.droid_slots_box = ttk.LabelFrame(page, text="Parts", padding=8)
-        self.droid_slots_box.grid(row=1, column=0, columnspan=5, sticky="nsew", pady=(8, 0))
+        # A droid has more nodes than fit a fixed panel - HK-47 alone offers a
+        # head, a neck, four hands, four feet, four torso pieces and eight
+        # limb segments - so the part list scrolls inside its frame rather
+        # than pushing the options and the log off the window.
+        slots_outer = ttk.LabelFrame(page, text="Parts", padding=4)
+        slots_outer.grid(row=1, column=0, columnspan=5, sticky="nsew", pady=(8, 0))
+        slots_outer.rowconfigure(0, weight=1)
+        slots_outer.columnconfigure(0, weight=1)
+        page.rowconfigure(1, weight=1, minsize=200)
+        self._droid_slots_canvas = tk.Canvas(slots_outer, highlightthickness=0,
+                                             height=240)
+        slots_bar = ttk.Scrollbar(slots_outer, orient="vertical",
+                                  command=self._droid_slots_canvas.yview)
+        self._droid_slots_canvas.configure(yscrollcommand=slots_bar.set)
+        self._droid_slots_canvas.grid(row=0, column=0, sticky="nsew")
+        slots_bar.grid(row=0, column=1, sticky="ns")
+        self.droid_slots_box = ttk.Frame(self._droid_slots_canvas, padding=4)
         self.droid_slots_box.columnconfigure(1, weight=1)
-        page.rowconfigure(1, weight=1, minsize=160)
+        slots_win = self._droid_slots_canvas.create_window(
+            (0, 0), window=self.droid_slots_box, anchor="nw")
+        self.droid_slots_box.bind(
+            "<Configure>",
+            lambda _e: self._droid_slots_canvas.configure(
+                scrollregion=self._droid_slots_canvas.bbox("all")))
+        self._droid_slots_canvas.bind(
+            "<Configure>",
+            lambda e: self._droid_slots_canvas.itemconfigure(slots_win, width=e.width))
+        # The wheel scrolls the list only while the pointer is over it, so it
+        # does not fight the rest of the window.
+        self._droid_slots_canvas.bind(
+            "<Enter>", lambda _e: self._droid_slots_canvas.bind_all(
+                "<MouseWheel>", self._droid_wheel))
+        self._droid_slots_canvas.bind(
+            "<Leave>", lambda _e: self._droid_slots_canvas.unbind_all("<MouseWheel>"))
         self.droid_slot_pick: dict[str, tk.StringVar] = {}
         self.droid_slot_note = ttk.Label(
             self.droid_slots_box,
@@ -1102,32 +1132,45 @@ class App(ttk.Frame):
             foreground="#666", wraplength=620,
         ).grid(row=5, column=0, columnspan=5, sticky="w", pady=(6, 0))
 
-    def _droid_list(self, path: str) -> list[str]:
-        """Every droid model in an install, cached - a full-install structural
-        scan, same cost as the male/female/droid sort next to it."""
+    def _droid_wheel(self, event):
+        self._droid_slots_canvas.yview_scroll(-1 if event.delta > 0 else 1, "units")
+
+    def _droid_catalogue(self, path: str) -> dict[str, set]:
+        """Every droid model in an install mapped to the part categories it
+        carries, cached - a full-install structural scan plus one parse per
+        droid, same order of cost as the male/female/droid sort next to it."""
         if not path:
-            return []
-        cache = getattr(self, "_droid_cache", {})
+            return {}
+        cache = getattr(self, "_droid_catalogue_cache", {})
         if path not in cache:
             from . import droidbuild as kdroid
 
             try:
-                cache[path] = kdroid.droid_models(path)
+                cache[path] = kdroid.catalogue(path)
             except Exception as exc:  # noqa: BLE001
-                self._say(f"could not find droid models: {exc}")
-                cache[path] = []
-            self._droid_cache = cache
+                self._say(f"could not read the droid models: {exc}")
+                cache[path] = {}
+            self._droid_catalogue_cache = cache
         return cache[path]
 
     def _refresh_droid_bases(self):
+        from . import droidbuild as kdroid
+
         path = self.install.get().strip()
-        droids = self._droid_list(path)
-        self.droid_base_box.config(values=droids)
-        self.droid_base_note.config(
-            text=f"{len(droids)} droid model(s) found" if droids else
-                 "no droid models found - is the install folder set?")
-        if droids and self.droid_base.get() not in droids:
-            self.droid_base.set(droids[0])
+        cat = self._droid_catalogue(path)
+        bases = kdroid.buildable_bases(cat)
+        self.droid_base_box.config(values=bases)
+        if bases:
+            skipped = len(cat) - len(bases)
+            self.droid_base_note.config(
+                text=f"{len(bases)} droid(s) to build on"
+                     + (f" ({skipped} without a head and torso left out)"
+                        if skipped else ""))
+        else:
+            self.droid_base_note.config(
+                text="no full droid models found - is the install folder set?")
+        if bases and self.droid_base.get() not in bases:
+            self.droid_base.set(bases[0])
         self._refresh_droid_slots()
 
     def _refresh_droid_slots(self):
@@ -1156,15 +1199,18 @@ class App(ttk.Frame):
 
         try:
             layout = kl.parse(*ModelLibrary(path).read(base))
-            groups = kdroid.slot_groups(layout)
+            slots = kdroid.fillable_slots(layout)
         except Exception as exc:  # noqa: BLE001
             ttk.Label(self.droid_slots_box, text=f"could not read {base}: {exc}",
                      foreground="#a35").grid(row=0, column=0, sticky="w")
             return
 
-        donors = [KEEP_BASE] + [d for d in self._droid_list(path) if d != base]
+        cat = self._droid_catalogue(path)
         row = 0
-        for label, nodes in groups.items():
+        for key, label, nodes in slots:
+            # A slot only offers donors that actually carry that part, so a
+            # pick cannot silently skip for want of a matching node.
+            donors = [KEEP_BASE] + kdroid.donors_for(cat, key, exclude=base)
             ttk.Label(self.droid_slots_box, text=label,
                      font=("", 9, "bold")).grid(row=row, column=0, columnspan=2,
                                                 sticky="w", pady=(6 if row else 0, 0))
@@ -1179,8 +1225,10 @@ class App(ttk.Frame):
                     row=row, column=1, sticky="w", padx=(6, 0))
                 row += 1
         if row == 0:
-            ttk.Label(self.droid_slots_box, text=f"{base} has no visible mesh nodes",
+            ttk.Label(self.droid_slots_box,
+                     text=f"{base} has no head, torso, arm or leg to swap",
                      foreground="#666").grid(row=0, column=0, sticky="w")
+        self._droid_slots_canvas.yview_moveto(0)
 
     def _droid_start(self, preview: bool = False):
         if self.worker and self.worker.is_alive():

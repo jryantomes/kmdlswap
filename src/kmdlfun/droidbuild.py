@@ -75,6 +75,69 @@ def slot_groups(layout: kl.Layout) -> dict[str, list]:
             for k, v in survey.items() if v}
 
 
+def fillable_slots(layout: kl.Layout) -> list[tuple[str, str, list]]:
+    """The standard part groups a droid offers as mix points, in part order,
+    each as ``(part key, label, [nodes])``.
+
+    `slot_groups` keeps every mesh, "Other" included; this drops it. HK-47's
+    hoses and finger plates, T3-M4's probe arm, a war droid's blaster - none
+    of that is geometry anyone swaps between droids, and offering it is only
+    more ways to pick a node that will not pair. A guided picker wants the
+    six real slots (head, neck, hands, feet, torso, arms & legs); the command
+    line still lists everything.
+    """
+    survey = kparts.survey(layout)
+    return [(k, kparts.BY_KEY[k].label, survey[k])
+            for k in kparts.BY_KEY if survey.get(k)]
+
+
+def part_categories(layout: kl.Layout) -> set[str]:
+    """The standard `parts.py` keys this model actually carries geometry in -
+    'other' excluded. `{"head", "torso", "limb", ...}`."""
+    return {k for k, _label, nodes in fillable_slots(layout) if nodes}
+
+
+# What a droid needs before it is worth offering as a base to build on: a
+# head and a torso. A turret (`c_drdsentry`), a spider walker (`c_drdspyder`)
+# or a bare astromech dome (`l_astro02`) has one or neither, and every part
+# of it lands in "other" - picking it as a base produces a slot list with
+# nothing mixable in it.
+BASE_MINIMUM = frozenset({"head", "torso"})
+
+
+def catalogue(install, *, library=None) -> dict[str, set[str]]:
+    """Every droid model in the install mapped to the part categories it has.
+
+    Built once and read for both the base list (which droids are complete
+    enough to build on) and the per-slot donor lists (which droids can fill
+    a head, an arm, ...). One parse per droid, on top of the structural scan
+    `droid_models` already does.
+    """
+    from .library import ModelLibrary
+
+    lib = library or ModelLibrary(install)
+    out: dict[str, set[str]] = {}
+    for name in droid_models(install, library=lib):
+        try:
+            out[name] = part_categories(kl.parse(*lib.read(name)))
+        except Exception:  # noqa: BLE001
+            out[name] = set()
+    return out
+
+
+def buildable_bases(cat: dict[str, set[str]]) -> list[str]:
+    """The droids from `catalogue` complete enough to be a base - `BASE_MINIMUM`
+    met."""
+    return sorted(name for name, cats in cat.items() if BASE_MINIMUM <= cats)
+
+
+def donors_for(cat: dict[str, set[str]], part_key: str, *, exclude: str = "") -> list[str]:
+    """The droids from `catalogue` that carry `part_key`, so a slot only ever
+    offers a donor that can actually fill it."""
+    return sorted(name for name, cats in cat.items()
+                  if part_key in cats and name != exclude)
+
+
 def auto_donor_node(host_node_name: str, donor_layout: kl.Layout) -> str | None:
     """The donor node that would fill a given host node, worked out the same
     way `transplant.match_nodes` pairs a whole model: the same name first,

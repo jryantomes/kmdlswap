@@ -47,6 +47,49 @@ def test_slot_groups_reads_the_models_own_nodes(k1):
     assert all_names <= visible
 
 
+def test_fillable_slots_drops_other_and_keeps_part_order(k1):
+    from kmdlswap import layout as kl
+
+    slots = kdroid.fillable_slots(kl.parse(*k1.read(UNIBODY)))
+    keys = [key for key, _label, _nodes in slots]
+
+    assert "other" not in keys, "hoses and finger plates are not mix points"
+    assert keys[0] == "head", "head comes first, as in parts.PARTS"
+    assert {"head", "torso", "limb"} <= set(keys)
+    assert all(nodes for _k, _l, nodes in slots), "no empty group is offered"
+
+
+def test_catalogue_and_base_filter_leave_out_the_turrets(install_path, k1):
+    cat = kdroid.catalogue(str(install_path), library=k1)
+    assert kdroid.part_categories(_layout(k1, UNIBODY)) == cat[UNIBODY]
+
+    bases = kdroid.buildable_bases(cat)
+    assert UNIBODY in bases and OTHER_DROID in bases and HUMANOID_DROID in bases
+    # A spider walker / bare astromech / turret has no torso, so it is not a
+    # base - every one of its parts would land in "other".
+    for headless_body in ("c_drdspyder", "l_astro02", "c_drdsentry"):
+        if headless_body in cat:
+            assert headless_body not in bases
+
+
+def test_donors_for_only_offers_droids_that_have_the_part(install_path, k1):
+    cat = kdroid.catalogue(str(install_path), library=k1)
+
+    neck_donors = kdroid.donors_for(cat, "neck", exclude=UNIBODY)
+    assert UNIBODY not in neck_donors
+    assert all("neck" in cat[d] for d in neck_donors)
+    # T3-M4 has a neck; the spider droid does not.
+    assert OTHER_DROID in neck_donors
+    if "c_drdspyder" in cat:
+        assert "c_drdspyder" not in neck_donors
+
+
+def _layout(lib, name):
+    from kmdlswap import layout as kl
+
+    return kl.parse(*lib.read(name))
+
+
 def test_auto_donor_node_matches_by_name_then_by_alias(k1):
     from kmdlswap import layout as kl
 
