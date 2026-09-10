@@ -109,6 +109,90 @@ def test_auto_donor_node_ignores_separators_but_not_ambiguity(k1):
     assert kdroid.auto_donor_node("F-1", hk) == "F-1"
 
 
+def test_positional_matching_pairs_what_no_name_could(k1):
+    """`R_calf` and `R_Shin` are the same part named by two people who did not
+    confer, and no string work pairs them - but both sit in the same place on a
+    droid, which is a fact about the model rather than about the naming."""
+    from kmdlswap import layout as kl
+
+    hk = kl.parse(*k1.read(UNIBODY))
+    war = kl.parse(*k1.read(HUMANOID_DROID))
+
+    assert kdroid.auto_donor_node("R_calf", war) is None, "no name in common"
+    m = kdroid.match_donor_node(hk, "R_calf", war)
+    assert m is not None and m.donor_node == "R_Shin"
+    assert m.by_position and m.distance < 0.1
+
+    # A palm answers for a palm, not for the finger on it: `parts.py` buckets
+    # both as "hand", and the hierarchy is what separates them.
+    palm = kdroid.match_donor_node(hk, "L_hand", war)
+    assert palm is not None and palm.donor_node == "LHandDrd"
+
+    # Off by default nowhere, but switchable off everywhere.
+    assert kdroid.match_donor_node(hk, "R_calf", war, positional=False) is None
+
+
+def test_positional_matching_keeps_left_and_right_apart(k1):
+    """A left arm on a right shoulder reads as a rigging fault rather than a
+    naming one, so the pairing must not cross sides. It does not need a rule:
+    normalised, a left part sits at a low x and a right part at a high one.
+
+    HK-47's `L_hand01` is the exception that proves it - the model calls it
+    left and hangs it off `R_lower_arm`, so pairing it with a *right* hand is
+    the correct answer and the one position gives.
+    """
+    from kmdlswap import layout as kl
+
+    hk = kl.parse(*k1.read(UNIBODY))
+    war = kl.parse(*k1.read(HUMANOID_DROID))
+
+    for host, donor in (("L_hand", "LHandDrd"), ("L_calf", "L_Shin"),
+                        ("R_calf", "R_Shin"), ("LTrgrFngr", "LFngr1")):
+        m = kdroid.match_donor_node(hk, host, war)
+        assert m is not None and m.donor_node == donor, f"{host} -> {m and m.donor_node}"
+
+    assert hk.nodes[hk.node_by_name("L_hand01").parent].name == "R_lower_arm", (
+        "the premise: HK-47's 'L_hand01' is really its right hand"
+    )
+    m = kdroid.match_donor_node(hk, "L_hand01", war)
+    assert m is not None and m.donor_node == "RHandDrd"
+
+
+def test_positional_matching_refuses_rather_than_reaching(k1):
+    """A donor with nothing in that region says so instead of offering its
+    nearest unrelated lump."""
+    from kmdlswap import layout as kl
+
+    hk = kl.parse(*k1.read(UNIBODY))
+    spider = kl.parse(*k1.read("c_drdspyder"))
+
+    # The spider walker's only standard part is a head, so it cannot answer
+    # for a calf however far the search is willing to reach.
+    assert kdroid.match_donor_node(hk, "R_calf", spider) is None
+    found, distance = kdroid.positional_donor_node(hk, "R_calf", spider)
+    assert found is None
+
+    # And the limit is what refuses it: a wide enough one finds something.
+    assert kdroid.POSITION_LIMIT < 1.0
+
+
+def test_build_records_how_each_part_was_paired(k1):
+    base_mdl, base_mdx = k1.read(UNIBODY)
+    result = kdroid.build(base_mdl, base_mdx, UNIBODY, [
+        kdroid.SlotChoice("head", HUMANOID_DROID),          # same name
+        kdroid.SlotChoice("R_upper_arm", HUMANOID_DROID),   # separators
+        kdroid.SlotChoice("R_calf", HUMANOID_DROID),        # position only
+    ], k1)
+
+    by_node = {s.host_node: s for s in result.slots}
+    assert by_node["head"].matched_by == "name"
+    assert by_node["R_upper_arm"].matched_by == "separators"
+    assert by_node["R_calf"].matched_by == "position"
+    assert "by position" in by_node["R_calf"].how
+    assert by_node["head"].how == "", "a plain name match needs no explaining"
+    assert result.applied == ["head", "R_upper_arm", "R_calf"]
+
+
 def test_split_donor_reads_the_game_namespace():
     assert kdroid.split_donor("c_drdwar") == ("", "c_drdwar")
     assert kdroid.split_donor("k2/c_condrdl") == ("K2", "c_condrdl")

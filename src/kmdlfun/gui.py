@@ -1099,6 +1099,11 @@ class App(ttk.Frame):
             opts, text="Reshape: keep the base's own surface and texture mapping",
             variable=self.droid_reshape,
         ).grid(row=1, column=1, sticky="w", pady=(4, 0))
+        self.droid_positional = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            opts, text="Pair by where a part sits when the names differ",
+            variable=self.droid_positional,
+        ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
         size = ttk.Frame(page)
         size.grid(row=3, column=0, columnspan=5, sticky="w", pady=(6, 0))
@@ -1287,6 +1292,7 @@ class App(ttk.Frame):
 
         cfg = dict(
             align="joint" if self.droid_joint.get() else "none",
+            positional=self.droid_positional.get(),
             fit=self.droid_fit.get(), scale=self.droid_scale.get(),
             reshape=self.droid_reshape.get(), with_texture=self.droid_texture.get(),
             save_as=self.droid_save_as.get().strip(),
@@ -1334,6 +1340,7 @@ class App(ttk.Frame):
             base_mdl, base_mdx = lib.read(base)
             result = kdroid.build(
                 base_mdl, base_mdx, base, choices, lib, donor_libraries=donor_libs,
+                positional=cfg.get("positional", True),
                 align=cfg["align"], fit=cfg["fit"], scale=cfg["scale"],
                 reshape=cfg["reshape"], with_texture=cfg["with_texture"],
             )
@@ -1348,8 +1355,10 @@ class App(ttk.Frame):
                     lines.append(f"  {s.host_node} <- {s.donor_label}: REFUSED {r.error}")
                     continue
                 a = r.alignment
-                lines.append(f"  {s.host_node} <- {s.donor_label}   "
+                lines.append(f"  {s.host_node} <- {s.donor_label}:{s.donor_node}   "
                             f"fit {a.worst_ratio:.2f}x   drift {a.drift:.3f}")
+                if s.matched_by == "position":
+                    lines.append(f"      ~ paired {s.how} - no name in common")
                 for w in r.warnings:
                     lines.append(f"      ! {w}")
 
@@ -1423,6 +1432,8 @@ class App(ttk.Frame):
                                    if cross_game else {"": install}),
                 "nodes": [[s.host_node, s.donor_label, s.donor_node]
                          for s in result.slots if s.ok],
+                "matched_by": {s.host_node: s.matched_by
+                               for s in result.slots if s.ok},
                 "options": cfg,
             })
             lines.append(f"{len(result.applied)}/{len(choices)} part(s) transferred")

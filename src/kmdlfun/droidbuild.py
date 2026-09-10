@@ -191,6 +191,139 @@ def auto_donor_node(host_node_name: str, donor_layout: kl.Layout) -> str | None:
     return None
 
 
+# How far apart two joints may sit, once both models are normalised to their
+# own size, and still be called the same part. Measured rather than guessed:
+# across every droid pair in both games the correct pairings sit under 0.15 and
+# the first plainly wrong one (a hand answering for a foot) is past 0.3.
+POSITION_LIMIT = 0.25
+
+
+def normalised_joints(layout: kl.Layout) -> dict[str, tuple[float, float, float]]:
+    """Every visible mesh node's joint, centred and scaled to this model's own
+    size, so a metre-tall T3-M4 and a two-metre HK-47 are directly comparable.
+
+    The box is taken over the joints themselves rather than the geometry: it is
+    joints being compared, and it needs no vertex reading.
+
+    Scaled by **one** factor for all three axes, not per axis. Per-axis
+    normalisation stretches whichever axis the joints span least - which is
+    depth, the axis that carries how a droid is *posed* rather than what its
+    parts are. It put a war droid's hands at 0.82 against HK-47's at 0.48 and
+    refused a pairing that is plainly right. One scale keeps height dominant,
+    which is what actually tells a shoulder from an elbow from a hip.
+    """
+    pose = kspace.rest_pose(layout)
+    nodes = kparts.mesh_nodes(layout)
+    origins = {n.name: pose[n.index].position for n in nodes if n.index in pose}
+    if not origins:
+        return {}
+    lo = [min(p[i] for p in origins.values()) for i in range(3)]
+    hi = [max(p[i] for p in origins.values()) for i in range(3)]
+    mid = [(lo[i] + hi[i]) / 2 for i in range(3)]
+    scale = max(hi[i] - lo[i] for i in range(3)) or 1.0
+    return {name: tuple((p[i] - mid[i]) / scale for i in range(3))
+            for name, p in origins.items()}
+
+
+def positional_donor_node(
+    host_layout: kl.Layout, host_node_name: str, donor_layout: kl.Layout,
+    *, limit: float = POSITION_LIMIT,
+) -> tuple[str | None, float]:
+    """The donor node of the *same part* whose joint sits in the most similar
+    place, once both models are normalised to their own proportions.
+
+    The last resort, after every name-based pass. Two modellers name the same
+    part `R_calf` and `R_Shin`, or `L_hand` and `LHandDrd`, and no amount of
+    string work pairs those - but both sit in the same place on a droid, and
+    that is a fact about the model rather than about the person who named it.
+
+    Confined to one part category, so a hand can only ever answer for a hand;
+    and refused past `limit`, because a donor with nothing in that region
+    should say so rather than offer its nearest unrelated lump. Sides look
+    after themselves: a left arm normalises to a low x and a right arm to a
+    high one, so nearest-joint keeps them apart without a rule about it.
+
+    Where the category is coarse the hierarchy breaks the tie. `parts.py` buckets
+    a palm and the fingers on it both as "hand", and a palm's joint is close
+    enough to a finger's that distance alone answered `L_hand` with `LFngr02`.
+    What separates them is what they hang from: a palm hangs off a forearm, a
+    finger off a palm. Candidates whose parent is the same kind of part as the
+    host's parent are preferred, and only if none is does the search fall back
+    to the whole category.
+    """
+    key = kparts.classify(host_node_name)
+    if key is None:
+        return None, 0.0
+    host = normalised_joints(host_layout).get(host_node_name)
+    if host is None:
+        return None, 0.0
+    donor = normalised_joints(donor_layout)
+
+    def parent_kind(layout, node):
+        if node.parent is None:
+            return None
+        return kparts.classify(layout.nodes[node.parent].name)
+
+    try:
+        want_parent = parent_kind(host_layout,
+                                  host_layout.node_by_name(host_node_name))
+    except KeyError:
+        want_parent = None
+
+    candidates = [n for n in kparts.mesh_nodes(donor_layout)
+                  if kparts.classify(n.name) == key and n.name in donor]
+    same_parent = [n for n in candidates
+                   if parent_kind(donor_layout, n) == want_parent]
+    pool = same_parent or candidates
+
+    best, best_d = None, float("inf")
+    for node in pool:
+        p = donor[node.name]
+        d = sum((p[i] - host[i]) ** 2 for i in range(3)) ** 0.5
+        if d < best_d:
+            best, best_d = node.name, d
+    if best is None or best_d > limit:
+        return None, best_d if best is not None else 0.0
+    return best, best_d
+
+
+@dataclass(frozen=True)
+class NodeMatch:
+    """Which donor node fills a host node, and what made the pairing."""
+
+    donor_node: str
+    how: str            # "name", "separators", "alias" or "position"
+    distance: float = 0.0
+
+    @property
+    def by_position(self) -> bool:
+        return self.how == "position"
+
+
+def match_donor_node(
+    host_layout: kl.Layout, host_node_name: str, donor_layout: kl.Layout,
+    *, positional: bool = True,
+) -> NodeMatch | None:
+    """Pair one host node with a donor node, by name if the names agree and by
+    where the joint sits if they do not. `None` if neither works."""
+    named = auto_donor_node(host_node_name, donor_layout)
+    if named is not None:
+        nodes = kparts.mesh_nodes(donor_layout)
+        if any(n.name.lower() == host_node_name.lower() for n in nodes):
+            how = "name"
+        elif _squash(named) == _squash(host_node_name):
+            how = "separators"
+        else:
+            how = "alias"
+        return NodeMatch(named, how)
+    if not positional:
+        return None
+    found, distance = positional_donor_node(host_layout, host_node_name, donor_layout)
+    if found is None:
+        return None
+    return NodeMatch(found, "position", distance)
+
+
 def joint_offset(
     host_layout: kl.Layout, host_node_name: str,
     donor_layout: kl.Layout, donor_node_name: str,
@@ -244,6 +377,8 @@ class SlotResult:
     transplant: ktrans.TransplantResult | None = None
     note: str | None = None
     donor_game: str = ""
+    matched_by: str = ""
+    distance: float = 0.0
 
     @property
     def ok(self) -> bool:
@@ -252,6 +387,19 @@ class SlotResult:
     @property
     def donor_label(self) -> str:
         return f"{self.donor_game}/{self.donor_model}" if self.donor_game else self.donor_model
+
+    @property
+    def how(self) -> str:
+        """How the donor node was chosen, for a caller that wants to say so - a
+        pairing made by where the joint sits is a guess the tool made and the
+        one worth showing."""
+        if self.matched_by == "position":
+            return f"by position, {self.distance:.2f} off"
+        if self.matched_by == "separators":
+            return "same name, punctuated differently"
+        if self.matched_by == "alias":
+            return "by part alias"
+        return ""
 
 
 @dataclass
@@ -278,6 +426,7 @@ def build(
     library,
     *,
     donor_libraries: dict[str, object] | None = None,
+    positional: bool = True,
     align: str = ALIGN_JOINT,
     fit: bool = False,
     scale: float = 1.0,
@@ -303,6 +452,10 @@ def build(
     its arm from KOTOR II. Each donor is cached under `(game, model)` rather
     than model alone: both games ship a `c_drdwar`, and they are not the same
     file.
+
+    With `positional` (the default) a slot whose names do not agree is paired by
+    where the joint sits instead; `positional=False` leaves it to the names.
+    Every slot says which it was, through `SlotResult.matched_by`.
     """
     result = DroidBuildResult(base=base_name)
     mdl, mdx = base_mdl, base_mdx
@@ -336,15 +489,22 @@ def build(
                 continue
         donor_layout = donor_layouts[key]
 
-        donor_node = choice.donor_node or auto_donor_node(choice.host_node, donor_layout)
+        matched_by, distance = "given", 0.0
+        donor_node = choice.donor_node
         if donor_node is None:
-            result.slots.append(SlotResult(
-                choice.host_node, choice.donor_model, None,
-                donor_game=choice.donor_game,
-                note=f"no node on {choice.donor_label} matches {choice.host_node!r}; "
-                     f"name one explicitly",
-            ))
-            continue
+            found = match_donor_node(host_layout, choice.host_node, donor_layout,
+                                     positional=positional)
+            if found is None:
+                tried = ("by name or by where it sits" if positional
+                         else "by name, and pairing by position is off")
+                result.slots.append(SlotResult(
+                    choice.host_node, choice.donor_model, None,
+                    donor_game=choice.donor_game,
+                    note=f"nothing on {choice.donor_label} answers for "
+                         f"{choice.host_node!r} {tried}; name a node explicitly",
+                ))
+                continue
+            donor_node, matched_by, distance = found.donor_node, found.how, found.distance
         try:
             donor_layout.node_by_name(donor_node)
         except KeyError as exc:
@@ -375,7 +535,7 @@ def build(
         )
         result.slots.append(SlotResult(
             choice.host_node, choice.donor_model, donor_node, transplant=report,
-            donor_game=choice.donor_game,
+            donor_game=choice.donor_game, matched_by=matched_by, distance=distance,
         ))
         if report.ok:
             mdl, mdx = new_mdl, new_mdx

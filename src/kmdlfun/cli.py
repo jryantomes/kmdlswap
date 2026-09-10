@@ -147,6 +147,12 @@ def main(argv: list[str] | None = None) -> int:
     dr.add_argument("--save-as", metavar="RESREF",
                     help="write the result as a NEW model with this name rather "
                          "than overwriting the base")
+    dr.add_argument("--no-positional", dest="positional", action="store_false",
+                    help="pair parts by name only. By default a slot whose names "
+                         "do not agree is paired with the donor part whose joint "
+                         "sits in the same place, which is what pairs a calf with "
+                         "a shin; the report says which pairings were made that way")
+    dr.set_defaults(positional=True)
     dr.add_argument("--align", choices=("joint", "none"), default="joint",
                     help="'joint' (default) hangs each donor part off the base's "
                          "matching joint - a short donor's head still lands at "
@@ -904,6 +910,7 @@ def _droid(args) -> int:
 
     result = kdroid.build(
         base_mdl, base_mdx, args.base, choices, lib, donor_libraries=donor_libs,
+        positional=args.positional,
         align=args.align, fit=args.fit, scale=args.scale, reshape=args.reshape,
         with_texture=args.with_texture, max_influences=args.max_influences,
     )
@@ -922,6 +929,10 @@ def _droid(args) -> int:
         a, sw = r.alignment, r.swap
         print(f"{line} {sw.old_vertices:>5} -> {sw.new_vertices:<5} verts"
               f"   fit {a.worst_ratio:.2f}x   drift {a.drift:.3f}")
+        if s.matched_by == "position":
+            # Worth saying: the names did not agree and this pairing is the
+            # tool's own reading of where the part sits.
+            print(f"      ~ paired {s.how} - no name in common")
         for w in r.warnings:
             print(f"      ! {w}")
 
@@ -985,7 +996,9 @@ def _droid(args) -> int:
         "options": {
             "align": args.align, "fit": args.fit, "scale": args.scale,
             "reshape": args.reshape, "with_texture": args.with_texture,
+            "positional": args.positional,
         },
+        "matched_by": {s.host_node: s.matched_by for s in result.slots if s.ok},
     })
 
     print()
