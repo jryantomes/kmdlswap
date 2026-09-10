@@ -1089,10 +1089,14 @@ class App(ttk.Frame):
             side="left", padx=(6, 0))
         ttk.Label(saveas, text="a new game name, e.g. p_mydroid - blank replaces the base",
                   foreground="#666").pack(side="left", padx=(8, 0))
+        ttk.Button(saveas, text="Preview",
+                   command=lambda: self._droid_start(preview=True)).pack(
+            side="left", padx=(12, 0))
 
         ttk.Label(
             page,
             text="Each part left on '(keep the base's own part)' is untouched. "
+                 "Preview draws the result on the Preview tab and writes nothing; "
                  "Building writes a new, named folder under Builds, same as "
                  "every other tab.",
             foreground="#666", wraplength=620,
@@ -1178,7 +1182,7 @@ class App(ttk.Frame):
             ttk.Label(self.droid_slots_box, text=f"{base} has no visible mesh nodes",
                      foreground="#666").grid(row=0, column=0, sticky="w")
 
-    def _droid_start(self):
+    def _droid_start(self, preview: bool = False):
         if self.worker and self.worker.is_alive():
             return
         if not self._check_install():
@@ -1201,16 +1205,18 @@ class App(ttk.Frame):
             save_as=self.droid_save_as.get().strip(),
         )
         self.build_btn.config(state="disabled")
-        self._say(f"\n=== {base}: {', '.join(f'{n} <- {d}' for n, d in parts.items())} ===")
+        verb = "preview" if preview else "==="
+        self._say(f"\n{verb} {base}: "
+                  f"{', '.join(f'{n} <- {d}' for n, d in parts.items())} ===")
         self.worker = threading.Thread(
             target=self._droid_work,
             args=(self.install.get().strip(), self.out_dir.get().strip(),
-                  base, parts, cfg),
+                  base, parts, cfg, preview),
             daemon=True,
         )
         self.worker.start()
 
-    def _droid_work(self, install, out_dir, base, parts, cfg):
+    def _droid_work(self, install, out_dir, base, parts, cfg, preview=False):
         try:
             from kmdlswap import layout as kl
             from kmdlswap import validate as kv
@@ -1249,6 +1255,22 @@ class App(ttk.Frame):
             if not result.applied:
                 lines.append("nothing transferred")
                 self.events.put(("error", "\n".join(lines)))
+                return
+
+            if preview:
+                # The result is already in memory; draw it beside the base and
+                # write nothing. A droid is a self-contained model, so
+                # `_post_scenes` draws it as-is rather than looking for a body.
+                donors = ", ".join(sorted({s.donor_model for s in result.slots if s.ok}))
+                lines.append(f"preview only: {len(result.applied)}/{len(choices)} "
+                             f"part(s) would transfer")
+                try:
+                    self._post_scenes(install, base, donors,
+                                      result.mdl, result.mdx, lib,
+                                      highlight=frozenset(result.applied))
+                except Exception as exc:  # noqa: BLE001
+                    lines.append(f"(could not draw it: {type(exc).__name__}: {exc})")
+                self.events.put(("done_text", lines))
                 return
 
             if not kv.check(kl.parse(result.mdl, result.mdx)).ok:
@@ -4326,7 +4348,7 @@ class App(ttk.Frame):
                                       f"{traceback.format_exc(limit=3)}"))
 
     def _post_scenes(self, install, host, donor, mdl, mdx, lib, donor_install="",
-                     extra=None):
+                     extra=None, highlight=frozenset()):
         """Draw the host as it is beside the host as it would be.
 
         Framed by one shared ruler, because two renders at two scales make a
@@ -4363,12 +4385,12 @@ class App(ttk.Frame):
                 except Exception:  # noqa: BLE001
                     body_layout = None
 
-        def draw(layout):
+        def draw(layout, hi=frozenset()):
             if body_layout is None:
-                return krender.from_layout(layout, texture_lookup=look)
+                return krender.from_layout(layout, texture_lookup=look, highlight=hi)
             return krender.character(body_layout, layout, texture_lookup=look)
 
-        before, after = draw(host_layout), draw(built_layout)
+        before, after = draw(host_layout), draw(built_layout, highlight)
         worn = f" on {body_name}" if body_layout is not None else ""
         note = (f"{before.triangles} vs {after.triangles} triangles   -   "
                 f"nothing written; this is what Build would produce")

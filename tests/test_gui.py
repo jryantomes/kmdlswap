@@ -226,6 +226,33 @@ def test_one_preview_run(app, tmp_path):
     assert not list(tmp_path.iterdir()), "preview must not write files"
 
 
+def test_the_droid_tab_previews_the_result(app, tmp_path, install_path):
+    """The Droid tab draws the mixed droid beside the base and writes nothing -
+    the same contract every other tab's Preview button has. A droid is a
+    self-contained model, so it is drawn as itself, no body to sit it on."""
+    app._show_page("Droid")
+    app.out_dir.set(str(tmp_path))
+    # Skip the full-install droid scan: the tab only needs the list to fill a
+    # combobox, and this test is about Preview, not the scan.
+    app._droid_cache = {str(install_path): ["p_hk47", "c_drdwar", "p_t3m3"]}
+    app.droid_base.set("p_hk47")
+    app._refresh_droid_slots()
+    assert "head" in app.droid_slot_pick, "HK-47's head node should be offered"
+    app.droid_slot_pick["head"].set("c_drdwar")
+
+    app._droid_start(preview=True)
+    pump(app, seconds=15.0)
+
+    log = app.log.get("1.0", "end")
+    assert "main thread is not in main loop" not in log
+    assert "could not draw" not in log, log[-300:]
+    assert "preview only: 1/1 part(s) would transfer" in log
+    assert len(app.viewport.scenes) == 2, "base before and after"
+    assert app.viewport.labels == ["p_hk47 (now)", "p_hk47 <- c_drdwar"]
+    assert app.viewport.bounds is not None, "one shared ruler for both"
+    assert not list(tmp_path.iterdir()), "preview must not write files"
+
+
 @pytest.mark.slow
 def test_the_app_builds_what_the_library_builds(app, tmp_path):
     """Same settings through the app and through `transplant_node` must give the
