@@ -90,6 +90,78 @@ def _layout(lib, name):
     return kl.parse(*lib.read(name))
 
 
+def test_auto_donor_node_ignores_separators_but_not_ambiguity(k1):
+    """`R_upper_arm` and `R_UpperArm` are the same word punctuated by two
+    different modellers, and that mismatch was the commonest reason a droid mix
+    silently skipped a part. Squashing case and separators pairs them - but only
+    when one donor node squashes to that form, because HK-47 itself carries both
+    `F-1` and `F_1` and guessing between two is worse than saying so."""
+    from kmdlswap import layout as kl
+
+    hk = kl.parse(*k1.read(UNIBODY))
+    war = kl.parse(*k1.read(HUMANOID_DROID))
+
+    assert kdroid.auto_donor_node("R_upper_arm", war) == "R_UpperArm"
+    assert kdroid.auto_donor_node("R-upper-arm", hk) == "R_upper_arm"
+    # 'F1' squashes onto both F-1 and F_1, so it must refuse rather than pick.
+    assert kdroid.auto_donor_node("F1", hk) is None
+    # An exact name still wins outright, before any squashing.
+    assert kdroid.auto_donor_node("F-1", hk) == "F-1"
+
+
+def test_split_donor_reads_the_game_namespace():
+    assert kdroid.split_donor("c_drdwar") == ("", "c_drdwar")
+    assert kdroid.split_donor("k2/c_condrdl") == ("K2", "c_condrdl")
+    assert kdroid.split_donor("K2/c_condrdl") == ("K2", "c_condrdl")
+
+
+def test_build_takes_each_part_from_the_game_its_choice_names(k1, k2_path):
+    """One droid, both games: the head from KOTOR II and an arm from KOTOR.
+
+    The donor cache has to key on (game, model), not model - both games ship a
+    `c_drdwar`, and they are not the same file.
+    """
+    from kmdlfun.library import ModelLibrary
+
+    k2 = ModelLibrary(str(k2_path))
+    base_mdl, base_mdx = k1.read(UNIBODY)
+    choices = [
+        kdroid.SlotChoice("head", "c_condrdl", "Head", donor_game="K2"),
+        kdroid.SlotChoice("R_upper_arm", HUMANOID_DROID),
+    ]
+    result = kdroid.build(base_mdl, base_mdx, UNIBODY, choices, k1,
+                          donor_libraries={"K2": k2})
+
+    assert result.applied == ["head", "R_upper_arm"], [
+        s.note or (s.transplant and s.transplant.error) for s in result.slots]
+    assert result.slots[0].donor_game == "K2"
+    assert result.slots[0].donor_label == "K2/c_condrdl"
+    assert result.slots[1].donor_game == "" and result.slots[1].donor_label == "c_drdwar"
+    for slot in result.slots:
+        assert slot.transplant.alignment.drift < 0.05, "both sit on their joint"
+
+    from kmdlswap import layout as kl
+    from kmdlswap import validate as kv
+
+    assert kv.check(kl.parse(result.mdl, result.mdx)).ok
+
+
+def test_a_part_from_a_game_with_no_library_is_skipped_not_raised(k1):
+    """Naming K2 without a K2 install is a note on that part, not a crash that
+    loses the parts that were fine."""
+    base_mdl, base_mdx = k1.read(UNIBODY)
+    choices = [
+        kdroid.SlotChoice("head", HUMANOID_DROID),
+        kdroid.SlotChoice("R_upper_arm", "c_condrdl", donor_game="K2"),
+    ]
+    result = kdroid.build(base_mdl, base_mdx, UNIBODY, choices, k1)
+
+    assert result.slots[0].ok
+    assert not result.slots[1].ok
+    assert "no K2 install" in result.slots[1].note
+    assert result.applied == ["head"]
+
+
 def test_auto_donor_node_matches_by_name_then_by_alias(k1):
     from kmdlswap import layout as kl
 

@@ -684,8 +684,8 @@ class App(ttk.Frame):
                       "base keeps its body and animations; the source supplies "
                       "the shape.",
         "Droid": "Mix a droid together from other droids' own parts - a head "
-                 "from one, an arm or a leg from another - each pulled straight "
-                 "from the game's models. The base keeps its skeleton, and each "
+                 "from one, an arm or a leg from another, from either game if "
+                 "KOTOR II is set up. The base keeps its skeleton, and each "
                  "part hangs off the base's matching joint, so a short donor's "
                  "head still lands at the base's neck - it just keeps its own "
                  "size. Every part left on '(keep base)' stays as it was.",
@@ -1071,6 +1071,7 @@ class App(ttk.Frame):
         self._droid_slots_canvas.bind(
             "<Leave>", lambda _e: self._droid_slots_canvas.unbind_all("<MouseWheel>"))
         self.droid_slot_pick: dict[str, tk.StringVar] = {}
+        self.droid_donor_of: dict[str, tuple[str, str]] = {}
         self.droid_slot_note = ttk.Label(
             self.droid_slots_box,
             text="Pick a base droid above to see its own parts.",
@@ -1126,9 +1127,11 @@ class App(ttk.Frame):
         ttk.Label(
             page,
             text="Each part left on '(keep the base's own part)' is untouched. "
-                 "Preview draws the result on the Preview tab and writes nothing; "
-                 "Building writes a new, named folder under Builds, same as "
-                 "every other tab.",
+                 "Donors marked [K2] come from the KOTOR II folder, one part at "
+                 "a time - their texture is copied into the build. Preview draws "
+                 "the result on the Preview tab and writes nothing; Building "
+                 "writes a new, named folder under Builds, same as every other "
+                 "tab.",
             foreground="#666", wraplength=620,
         ).grid(row=5, column=0, columnspan=5, sticky="w", pady=(6, 0))
 
@@ -1152,6 +1155,31 @@ class App(ttk.Frame):
                 cache[path] = {}
             self._droid_catalogue_cache = cache
         return cache[path]
+
+    def _droid_donor_options(self, part_key: str, base: str) -> dict[str, tuple[str, str]]:
+        """Label -> (model, game) for every droid that carries `part_key`.
+
+        Both games at once, K2 marked, because the whole point of a per-slot
+        picker is that one droid can take its head from KOTOR and its arm from
+        KOTOR II. The labels have to be distinct: fourteen droids ship under
+        the same name in both games, and seven of those are the same geometry
+        while the rest are not.
+
+        The base is excluded only from its *own* game - KOTOR II's `p_hk47` is
+        a perfectly good donor for a KOTOR `p_hk47`.
+        """
+        from . import droidbuild as kdroid
+
+        out: dict[str, tuple[str, str]] = {}
+        for model in kdroid.donors_for(
+            self._droid_catalogue(self.install.get().strip()), part_key, exclude=base
+        ):
+            out[model] = (model, "")
+        other = self.install2.get().strip()
+        if other:
+            for model in kdroid.donors_for(self._droid_catalogue(other), part_key):
+                out[f"{model}  [K2]"] = (model, "K2")
+        return out
 
     def _refresh_droid_bases(self):
         from . import droidbuild as kdroid
@@ -1205,12 +1233,16 @@ class App(ttk.Frame):
                      foreground="#a35").grid(row=0, column=0, sticky="w")
             return
 
-        cat = self._droid_catalogue(path)
+        # Label -> (model, game) for every donor offered anywhere on this tab,
+        # so a pick can be turned back into the file it names.
+        self.droid_donor_of: dict[str, tuple[str, str]] = {}
         row = 0
         for key, label, nodes in slots:
             # A slot only offers donors that actually carry that part, so a
             # pick cannot silently skip for want of a matching node.
-            donors = [KEEP_BASE] + kdroid.donors_for(cat, key, exclude=base)
+            options = self._droid_donor_options(key, base)
+            self.droid_donor_of.update(options)
+            donors = [KEEP_BASE] + sorted(options)
             ttk.Label(self.droid_slots_box, text=label,
                      font=("", 9, "bold")).grid(row=row, column=0, columnspan=2,
                                                 sticky="w", pady=(6 if row else 0, 0))
@@ -1239,8 +1271,15 @@ class App(ttk.Frame):
         if not base:
             self._say("pick a base droid first")
             return
-        parts = {node: var.get() for node, var in self.droid_slot_pick.items()
-                 if var.get() not in ("", KEEP_BASE)}
+        # Resolved here, on the main thread: the worker must never read a Tk
+        # variable, and a label like "c_drdwar  [K2]" only means a file once
+        # `droid_donor_of` has turned it back into (model, game).
+        parts = {}
+        for node, var in self.droid_slot_pick.items():
+            label = var.get()
+            if label in ("", KEEP_BASE):
+                continue
+            parts[node] = self.droid_donor_of.get(label, (label, ""))
         if not parts:
             self._say("every part is set to 'keep the base's own part' - "
                       "nothing to build")
@@ -1254,17 +1293,19 @@ class App(ttk.Frame):
         )
         self.build_btn.config(state="disabled")
         verb = "preview" if preview else "==="
-        self._say(f"\n{verb} {base}: "
-                  f"{', '.join(f'{n} <- {d}' for n, d in parts.items())} ===")
+        shown = ", ".join(f"{n} <- {g + '/' if g else ''}{m}"
+                          for n, (m, g) in parts.items())
+        self._say(f"\n{verb} {base}: {shown} ===")
         self.worker = threading.Thread(
             target=self._droid_work,
             args=(self.install.get().strip(), self.out_dir.get().strip(),
-                  base, parts, cfg, preview),
+                  base, parts, cfg, preview, self.install2.get().strip()),
             daemon=True,
         )
         self.worker.start()
 
-    def _droid_work(self, install, out_dir, base, parts, cfg, preview=False):
+    def _droid_work(self, install, out_dir, base, parts, cfg, preview=False,
+                    install2=""):
         try:
             from kmdlswap import layout as kl
             from kmdlswap import validate as kv
@@ -1277,10 +1318,22 @@ class App(ttk.Frame):
                 self.events.put(("error", f"no model named {base!r} in the install"))
                 return
 
+            # `parts` maps a node to (model, game); the second library is only
+            # opened when a part actually comes from the other game.
+            choices = [kdroid.SlotChoice(node, model, donor_game=game)
+                       for node, (model, game) in parts.items()]
+            donor_libs = {}
+            if any(c.donor_game == "K2" for c in choices):
+                if not install2:
+                    self.events.put(("error",
+                                     "a part is set to come from KOTOR II, but "
+                                     "no KOTOR II folder is configured"))
+                    return
+                donor_libs["K2"] = ModelLibrary(install2)
+
             base_mdl, base_mdx = lib.read(base)
-            choices = [kdroid.SlotChoice(node, donor) for node, donor in parts.items()]
             result = kdroid.build(
-                base_mdl, base_mdx, base, choices, lib,
+                base_mdl, base_mdx, base, choices, lib, donor_libraries=donor_libs,
                 align=cfg["align"], fit=cfg["fit"], scale=cfg["scale"],
                 reshape=cfg["reshape"], with_texture=cfg["with_texture"],
             )
@@ -1292,10 +1345,10 @@ class App(ttk.Frame):
                     continue
                 r = s.transplant
                 if not r.ok:
-                    lines.append(f"  {s.host_node} <- {s.donor_model}: REFUSED {r.error}")
+                    lines.append(f"  {s.host_node} <- {s.donor_label}: REFUSED {r.error}")
                     continue
                 a = r.alignment
-                lines.append(f"  {s.host_node} <- {s.donor_model}   "
+                lines.append(f"  {s.host_node} <- {s.donor_label}   "
                             f"fit {a.worst_ratio:.2f}x   drift {a.drift:.3f}")
                 for w in r.warnings:
                     lines.append(f"      ! {w}")
@@ -1309,12 +1362,13 @@ class App(ttk.Frame):
                 # The result is already in memory; draw it beside the base and
                 # write nothing. A droid is a self-contained model, so
                 # `_post_scenes` draws it as-is rather than looking for a body.
-                donors = ", ".join(sorted({s.donor_model for s in result.slots if s.ok}))
+                donors = ", ".join(sorted({s.donor_label for s in result.slots if s.ok}))
                 lines.append(f"preview only: {len(result.applied)}/{len(choices)} "
                              f"part(s) would transfer")
                 try:
                     self._post_scenes(install, base, donors,
                                       result.mdl, result.mdx, lib,
+                                      donor_install=install2,
                                       highlight=frozenset(result.applied))
                 except Exception as exc:  # noqa: BLE001
                     lines.append(f"(could not draw it: {type(exc).__name__}: {exc})")
@@ -1344,17 +1398,30 @@ class App(ttk.Frame):
                 lines.append(f"saved as {written_as}, a new model rather than a "
                             f"replacement for {base}")
 
-            donors = sorted({s.donor_model for s in result.slots if s.ok})
-            out = root / kbuilds.unique_name(root, f"{written_as}-" + "-".join(donors))
+            donors = sorted({s.donor_label for s in result.slots if s.ok})
+            out = root / kbuilds.unique_name(
+                root, f"{written_as}-" + "-".join(d.replace("/", "-") for d in donors))
             out.mkdir(parents=True, exist_ok=True)
             (out / f"{written_as}.mdl").write_bytes(mdl)
             (out / f"{written_as}.mdx").write_bytes(mdx)
+
+            cross_game = any(s.donor_game for s in result.slots if s.ok)
+            if cross_game and cfg["with_texture"]:
+                # A K2 part names a texture that lives only in K2. Without the
+                # file the build loads grey, which reads as a modelling failure
+                # rather than the missing asset it is.
+                from . import textures as ktextures
+
+                lines.extend(ktextures.export_donor_textures(
+                    mdl, mdx, install2, out, host_install=install))
 
             build = kbuilds.adopt(out, {
                 "kind": "droid",
                 "host": {"model": base, "install": install},
                 "donors": donors,
-                "nodes": [[s.host_node, s.donor_model, s.donor_node]
+                "donor_installs": ({"": install, "K2": install2}
+                                   if cross_game else {"": install}),
+                "nodes": [[s.host_node, s.donor_label, s.donor_node]
                          for s in result.slots if s.ok],
                 "options": cfg,
             })

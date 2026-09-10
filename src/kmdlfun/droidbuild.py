@@ -26,6 +26,7 @@ already buckets a model's own visible meshes into head / torso / limb / hand
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from kmdlswap import layout as kl
@@ -45,6 +46,21 @@ from . import who as kwho
 #             height. A T3-M4 head on HK-47 ends up ~1 unit low.
 ALIGN_JOINT = "joint"
 ALIGN_NONE = "none"
+
+
+def split_donor(spec: str) -> tuple[str, str]:
+    """Pull an optional game off a donor name: ``"k2/c_condrdl"`` gives
+    ``("K2", "c_condrdl")``, a bare ``"c_drdwar"`` gives ``("", "c_drdwar")``.
+
+    A namespace rather than a flag because the choice is per part - the whole
+    point of naming the game here is that one build can take a head from one
+    game and an arm from the other. `/` is safe as the separator: a resref is
+    letters, digits and underscores, so no existing `--part` can contain one.
+    """
+    game, sep, model = spec.partition("/")
+    if not sep:
+        return "", spec.strip()
+    return game.strip().upper(), model.strip()
 
 
 def droid_models(install, names=None, *, library=None) -> list[str]:
@@ -138,17 +154,34 @@ def donors_for(cat: dict[str, set[str]], part_key: str, *, exclude: str = "") ->
                   if part_key in cats and name != exclude)
 
 
+def _squash(name: str) -> str:
+    """A node name with case and separators taken out: `R_upper_arm` and
+    `R_UpperArm` both become `rupperarm`."""
+    return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
 def auto_donor_node(host_node_name: str, donor_layout: kl.Layout) -> str | None:
     """The donor node that would fill a given host node, worked out the same
     way `transplant.match_nodes` pairs a whole model: the same name first,
-    case-insensitive, then the canonical alias (`arm.l`, `torso`, ...) if the
-    literal name differs. `None` means the caller has to say which donor node
-    they mean.
+    case-insensitive, then the same name ignoring separators, then the
+    canonical alias (`arm.l`, `torso`, ...) if the literal name differs.
+    `None` means the caller has to say which donor node they mean.
+
+    The separator pass is what pairs HK-47's `R_upper_arm` with a war droid's
+    `R_UpperArm` - the same word, punctuated differently by two modellers, and
+    the single most common reason a droid mix silently skipped a part. It only
+    counts when exactly one donor node squashes to that form: HK-47 itself has
+    both `F-1` and `F_1`, and guessing between two nodes is worse than saying
+    so.
     """
     nodes = kparts.mesh_nodes(donor_layout)
     for n in nodes:
         if n.name.lower() == host_node_name.lower():
             return n.name
+    wanted = _squash(host_node_name)
+    same = [n.name for n in nodes if _squash(n.name) == wanted]
+    if len(same) == 1:
+        return same[0]
     key = ktrans.canonical(host_node_name)
     if key is None:
         return None
@@ -183,11 +216,24 @@ class SlotChoice:
     `donor_node` may be left as ``None`` to let `auto_donor_node` work it
     out; a droid whose parts are named unlike the base needs it spelled out,
     the same way the Transplant tab's donor-node box does for a single node.
+
+    `donor_game` names which install the donor comes from - ``""`` for the
+    base's own, `"K2"` for a second game passed in `build`'s
+    `donor_libraries`. It is part of the choice rather than a setting for the
+    whole build because the two games ship fourteen droids under the *same
+    name*: a build can take a head from K1's `c_drdwar` and an arm from K2's,
+    and only the pair (game, model) says which file that is.
     """
 
     host_node: str
     donor_model: str
     donor_node: str | None = None
+    donor_game: str = ""
+
+    @property
+    def donor_label(self) -> str:
+        """The donor as a person would write it: `c_drdwar`, or `K2/c_drdwar`."""
+        return f"{self.donor_game}/{self.donor_model}" if self.donor_game else self.donor_model
 
 
 @dataclass
@@ -197,10 +243,15 @@ class SlotResult:
     donor_node: str | None
     transplant: ktrans.TransplantResult | None = None
     note: str | None = None
+    donor_game: str = ""
 
     @property
     def ok(self) -> bool:
         return self.note is None and self.transplant is not None and self.transplant.ok
+
+    @property
+    def donor_label(self) -> str:
+        return f"{self.donor_game}/{self.donor_model}" if self.donor_game else self.donor_model
 
 
 @dataclass
@@ -226,6 +277,7 @@ def build(
     choices: list[SlotChoice],
     library,
     *,
+    donor_libraries: dict[str, object] | None = None,
     align: str = ALIGN_JOINT,
     fit: bool = False,
     scale: float = 1.0,
@@ -245,24 +297,51 @@ def build(
     node origin lands on the host node's, hanging it off the same joint; see
     `joint_offset`. ``align="none"`` is the raw transplant. `fit` re-centres on
     its own, so it takes over the placing when set.
+
+    `library` reads the base's own game; `donor_libraries` maps a game tag to
+    another one, which is what lets a single build take its head from KOTOR and
+    its arm from KOTOR II. Each donor is cached under `(game, model)` rather
+    than model alone: both games ship a `c_drdwar`, and they are not the same
+    file.
     """
     result = DroidBuildResult(base=base_name)
     mdl, mdx = base_mdl, base_mdx
-    donor_layouts: dict[str, kl.Layout] = {}
+    donor_layouts: dict[tuple[str, str], kl.Layout] = {}
+    libraries = dict(donor_libraries or {})
+    libraries.setdefault("", library)
     # Node headers are never rewritten, so every slot's host joint is read from
     # the untouched base rather than from the part-by-part result.
     host_layout = kl.parse(base_mdl, base_mdx)
 
     for choice in choices:
-        if choice.donor_model not in donor_layouts:
-            donor_layouts[choice.donor_model] = kl.parse(*library.read(choice.donor_model))
-        donor_layout = donor_layouts[choice.donor_model]
+        key = (choice.donor_game, choice.donor_model)
+        if key not in donor_layouts:
+            donor_lib = libraries.get(choice.donor_game)
+            if donor_lib is None:
+                result.slots.append(SlotResult(
+                    choice.host_node, choice.donor_model, choice.donor_node,
+                    donor_game=choice.donor_game,
+                    note=f"no {choice.donor_game} install is set, so "
+                         f"{choice.donor_label} cannot be read",
+                ))
+                continue
+            try:
+                donor_layouts[key] = kl.parse(*donor_lib.read(choice.donor_model))
+            except Exception as exc:  # noqa: BLE001
+                result.slots.append(SlotResult(
+                    choice.host_node, choice.donor_model, choice.donor_node,
+                    donor_game=choice.donor_game,
+                    note=f"could not read {choice.donor_label}: {exc}",
+                ))
+                continue
+        donor_layout = donor_layouts[key]
 
         donor_node = choice.donor_node or auto_donor_node(choice.host_node, donor_layout)
         if donor_node is None:
             result.slots.append(SlotResult(
                 choice.host_node, choice.donor_model, None,
-                note=f"no node on {choice.donor_model} matches {choice.host_node!r}; "
+                donor_game=choice.donor_game,
+                note=f"no node on {choice.donor_label} matches {choice.host_node!r}; "
                      f"name one explicitly",
             ))
             continue
@@ -271,7 +350,8 @@ def build(
         except KeyError as exc:
             result.slots.append(SlotResult(
                 choice.host_node, choice.donor_model, donor_node,
-                note=f"{choice.donor_model} has no node {donor_node!r} ({exc})",
+                donor_game=choice.donor_game,
+                note=f"{choice.donor_label} has no node {donor_node!r} ({exc})",
             ))
             continue
 
@@ -295,6 +375,7 @@ def build(
         )
         result.slots.append(SlotResult(
             choice.host_node, choice.donor_model, donor_node, transplant=report,
+            donor_game=choice.donor_game,
         ))
         if report.ok:
             mdl, mdx = new_mdl, new_mdx

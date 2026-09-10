@@ -304,6 +304,29 @@ def test_the_droid_parts_list_scrolls(app, install_path):
     assert (last - first) < 1.0, "part of the list is off-screen"
 
 
+def test_the_droid_tab_offers_both_games_at_once(app, install_path, tmp_path):
+    """Each slot lists K1 and K2 droids together, K2 marked, so one build can
+    take a head from one game and an arm from the other. The base is excluded
+    only from its own game - KOTOR II's `p_hk47` is a fine donor for KOTOR's."""
+    app._show_page("Droid")
+    other = str(tmp_path / "k2")
+    app.install2.set(other)
+    app._droid_catalogue_cache = {
+        str(install_path): _droid_cat(),
+        other: {"c_condrdl": {"head", "torso", "limb"}, "p_hk47": {"head", "torso"}},
+    }
+    app.droid_base.set("p_hk47")
+    app._refresh_droid_slots()
+
+    heads = _donors_of(app, "head")
+    assert "c_condrdl  [K2]" in heads, "a K2-only droid is reachable"
+    assert "p_hk47  [K2]" in heads, "the other game's same-named model is a donor"
+    assert "p_hk47" not in heads, "but the base itself still is not"
+    # And a label resolves back to the file it names.
+    assert app.droid_donor_of["c_condrdl  [K2]"] == ("c_condrdl", "K2")
+    assert app.droid_donor_of["c_drdwar"] == ("c_drdwar", "")
+
+
 def test_the_droid_tab_previews_the_result(app, tmp_path, install_path):
     """The Droid tab draws the mixed droid beside the base and writes nothing -
     the same contract every other tab's Preview button has. A droid is a

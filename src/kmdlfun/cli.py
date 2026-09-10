@@ -122,9 +122,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="mix heads, arms, legs and torsos between droid models")
     dr.add_argument("--install", required=True)
     dr.add_argument("--donor-install",
-                    help="a second game to pull donor parts from - only their "
-                         "geometry crosses over, same as --donor-install on "
-                         "transplant")
+                    help="a second game to pull donor parts from, reached by "
+                         "prefixing a --part donor with 'k2/'. Only geometry "
+                         "crosses over, same as --donor-install on transplant")
     dr.add_argument("--base", help="the droid that keeps its skeleton and "
                                    "animations; omit with --list to see droids "
                                    "in the install")
@@ -132,12 +132,16 @@ def main(argv: list[str] | None = None) -> int:
                     help="list every droid model in the install and stop. With "
                          "--base and no --part, list that droid's own nodes "
                          "instead, grouped by part")
-    dr.add_argument("--part", action="append", default=[], metavar="NODE=DONOR[:DONOR_NODE]",
+    dr.add_argument("--part", action="append", default=[],
+                    metavar="NODE=[k2/]DONOR[:DONOR_NODE]",
                     help="fill this node of --base from a donor model, taking "
                          "the donor's same-named node unless DONOR_NODE says "
                          "otherwise. Repeatable - one entry per head, arm, leg "
                          "or torso being mixed in, e.g. "
-                         "--part head=p_t3m3 --part rarm=c_drdheavy")
+                         "--part head=p_t3m3 --part rarm=c_drdheavy. Prefix a "
+                         "donor with 'k2/' to take it from --donor-install "
+                         "instead, one part at a time: "
+                         "--part head=k2/c_condrdl:Head")
     dr.add_argument("--out", help="where builds are kept; required unless --dry-run")
     dr.add_argument("--name", help="name this build; defaults to base plus its donors")
     dr.add_argument("--save-as", metavar="RESREF",
@@ -833,13 +837,24 @@ def _droid(args) -> int:
     from .library import ModelLibrary
 
     lib = ModelLibrary(args.install)
-    donor_lib = ModelLibrary(args.donor_install) if args.donor_install else lib
+    # The base's own game is always reachable by a bare name; a second game is
+    # reached one part at a time by prefixing the donor with `k2/`, so a build
+    # can mix the two rather than being all one or all the other.
+    donor_libs = {}
+    if args.donor_install:
+        donor_libs["K2"] = ModelLibrary(args.donor_install)
 
     if args.list or not args.base:
         droids = kdroid.droid_models(args.install, library=lib)
         print(f"{len(droids)} droid model(s) in {args.install}:")
         for name in droids:
             print(f"  {name}")
+        if "K2" in donor_libs:
+            other = kdroid.droid_models(args.donor_install, library=donor_libs["K2"])
+            print(f"\n{len(other)} in {args.donor_install} - "
+                  f"name these as k2/NAME:")
+            for name in other:
+                print(f"  k2/{name}")
         return 0
 
     if not lib.has(args.base):
@@ -863,17 +878,24 @@ def _droid(args) -> int:
             print(f"kmdlfun: --part wants NODE=DONOR, got {spec!r}", file=sys.stderr)
             return 1
         node_spec, donor_spec = (s.strip() for s in spec.split("=", 1))
-        donor_model, _, donor_node = donor_spec.partition(":")
-        donor_model, donor_node = donor_model.strip(), donor_node.strip() or None
+        donor_ref, _, donor_node = donor_spec.partition(":")
+        donor_node = donor_node.strip() or None
+        donor_game, donor_model = kdroid.split_donor(donor_ref)
         host_node = base_nodes.get(node_spec.lower())
         if not host_node:
             print(f"kmdlfun: {args.base} has no node {node_spec!r}", file=sys.stderr)
             return 1
+        if donor_game and donor_game not in donor_libs:
+            print(f"kmdlfun: {donor_game.lower()}/ needs --donor-install to say "
+                  f"which game that is", file=sys.stderr)
+            return 1
+        donor_lib = donor_libs[donor_game] if donor_game else lib
         if not donor_lib.has(donor_model):
-            where = "the donor install" if args.donor_install else "that install"
+            where = args.donor_install if donor_game else args.install
             print(f"kmdlfun: no model {donor_model!r} in {where}", file=sys.stderr)
             return 1
-        choices.append(kdroid.SlotChoice(host_node, donor_model, donor_node))
+        choices.append(kdroid.SlotChoice(host_node, donor_model, donor_node,
+                                         donor_game=donor_game))
 
     if not args.out and not args.dry_run:
         print("kmdlfun: --out is required to write a build (or pass --dry-run)",
@@ -881,7 +903,7 @@ def _droid(args) -> int:
         return 1
 
     result = kdroid.build(
-        base_mdl, base_mdx, args.base, choices, donor_lib,
+        base_mdl, base_mdx, args.base, choices, lib, donor_libraries=donor_libs,
         align=args.align, fit=args.fit, scale=args.scale, reshape=args.reshape,
         with_texture=args.with_texture, max_influences=args.max_influences,
     )
@@ -889,7 +911,7 @@ def _droid(args) -> int:
     print(f"{args.base}  ({len(choices)} part(s))")
     print()
     for s in result.slots:
-        line = f"  {s.host_node:<16} <- {s.donor_model:<16} {s.donor_node or ''}"
+        line = f"  {s.host_node:<16} <- {s.donor_label:<19} {s.donor_node or ''}"
         if s.note:
             print(f"{line} SKIPPED: {s.note}")
             continue
@@ -930,17 +952,20 @@ def _droid(args) -> int:
         written_as = args.save_as
         print(f"\n  saved as {written_as}: a new model, not a replacement for {args.base}")
 
-    donors = sorted({s.donor_model for s in result.slots if s.ok})
-    name = args.name or kbuilds.unique_name(root, f"{written_as}-" + "-".join(donors))
+    donors = sorted({s.donor_label for s in result.slots if s.ok})
+    name = args.name or kbuilds.unique_name(
+        root, f"{written_as}-" + "-".join(d.replace("/", "-") for d in donors))
     out_dir = root / kbuilds.slug(name)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / f"{written_as}.mdl").write_bytes(mdl)
     (out_dir / f"{written_as}.mdx").write_bytes(mdx)
 
-    if args.donor_install and args.with_texture:
+    cross_game = any(s.donor_game for s in result.slots if s.ok)
+    if cross_game and args.with_texture:
         # Donor textures live in the donor's game; without them the result
         # loads untextured grey, which reads as a modelling failure rather
-        # than the missing file it actually is.
+        # than the missing file it actually is. Only needed when a part
+        # actually came from the second game.
         from . import textures as ktextures
 
         for line in ktextures.export_donor_textures(
@@ -953,7 +978,10 @@ def _droid(args) -> int:
         "kind": "droid",
         "host": {"model": args.base, "game": base_layout.game, "install": args.install},
         "donors": donors,
-        "nodes": [[s.host_node, s.donor_model, s.donor_node] for s in result.slots if s.ok],
+        "donor_installs": ({"": args.install, "K2": args.donor_install}
+                           if cross_game else {"": args.install}),
+        "nodes": [[s.host_node, s.donor_label, s.donor_node]
+                  for s in result.slots if s.ok],
         "options": {
             "align": args.align, "fit": args.fit, "scale": args.scale,
             "reshape": args.reshape, "with_texture": args.with_texture,
