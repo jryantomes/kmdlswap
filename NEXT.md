@@ -43,8 +43,11 @@ folder name - `chitin.key` only says
   moved onto the base's), so a short donor's head still lands at the base's
   neck - it keeps its own size, `--scale` / `--fit` are the knobs for that.
   Two similarly-built droids (HK-47 and a war droid) come out near 1:1; a
-  mismatched donor is placed correctly but stays its own size. Not yet in
-  front of the engine.
+  mismatched donor is placed correctly but stays its own size. Parts whose
+  names do not agree are paired by where the joint sits, which is what pairs a
+  `R_calf` with a `R_Shin`; that took name matching from 82 of 263 possible
+  HK-47 pairings to 146. Donors come from either game, one part at a time.
+  **Confirmed in game 2026-09-10** - see below.
 * **Character** - body, wardrobe and head from three thumbnail grids, written
   as two table rows and a blueprint. No geometry, so it is the cheap path; the
   Transplant tab is for when no existing head will do.
@@ -97,7 +100,10 @@ facial animation, or whether a head sits on a neck.
 
 The one with no offline substitute is **tangent lighting**: the basis was
 reverse-engineered and its *sign* measured rather than derived, and a flipped
-tangent looks identical in every viewer and wrong in game.
+tangent looks identical in every viewer and wrong in game. **Answered
+2026-09-10** on a mixed droid, from two camera angles - the sign is right. That
+is one model and one lighting setup, not the whole of `TESTING.md`, but the
+claim with no offline substitute is no longer untested.
 
 ## Open work, roughly in order of value
 
@@ -153,6 +159,19 @@ tangent looks identical in every viewer and wrong in game.
   movement comes from a `.lip` found by the line's `VO_ResRef`, and neither a
   `.wav` nor the CSLU toolkit the community treats as mandatory is needed when
   there is nothing to sync to.
+- **A mixed droid works, and its parts meet.** Confirmed in game 2026-09-10:
+  HK-47 with a war droid's head, both hands and both shins, replacing `p_hk47`
+  in Override. Four of the five parts were paired by joint position rather than
+  by name - including `L_hand01`, which HK-47 calls left and hangs off
+  `R_lower_arm`, so position got a hand the names would have put on the wrong
+  arm. **Tangent lighting is right**: two camera angles with opposite light
+  incidence, correct highlight falloff and real depth in the panel lines, which
+  is the one thing no viewer could have told us. Nothing needed welding - the
+  donor parts meet the host's thigh, forearm and foot cleanly at 1.1-1.3x size.
+- **A dark region in a screenshot is not a gap.** Read as seams at the knees and
+  wrists of the droid above and reported as such; a gamma lift showed contiguous
+  geometry and the "gaps" were the donor's own dark knee and ankle collars in
+  shadow. Lift the exposure before judging a join.
 
 - **Vanilla is the oracle.** Grades, thresholds and budgets come from measuring
   shipped content, not from judgement. "Rough" means no worse than a head the
