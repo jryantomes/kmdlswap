@@ -63,18 +63,25 @@ def split_donor(spec: str) -> tuple[str, str]:
     return game.strip().upper(), model.strip()
 
 
-def droid_models(install, names=None, *, library=None) -> list[str]:
+def droid_models(install, names=None, *, library=None, progress=None) -> list[str]:
     """Every model in the install that is structurally a droid.
 
     Reuses `who.looks`, which already runs this exact test - a rigid head
     with no facial bones - for the donor filters elsewhere in the app. Not
     limited to HK-47 and T3-M4: any droid NPC the install carries, including
     ones the roster does not name.
+
+    That means parsing every model in the install, which is most of the
+    eighteen seconds this takes the first time - seven of the seventeen droids
+    KOTOR ships are not named like character models, so a cheaper shortlist
+    would quietly lose them. `progress` is passed straight through, so a
+    caller can say how far along it is rather than showing a bar that only
+    slides.
     """
     from .library import ModelLibrary
 
     lib = library or ModelLibrary(install)
-    looked = kwho.looks(install, names=names, library=lib)
+    looked = kwho.looks(install, names=names, library=lib, progress=progress)
     return sorted(name for name, look in looked.items() if look == kwho.DROID)
 
 
@@ -121,7 +128,7 @@ def part_categories(layout: kl.Layout) -> set[str]:
 BASE_MINIMUM = frozenset({"head", "torso"})
 
 
-def catalogue(install, *, library=None) -> dict[str, set[str]]:
+def catalogue(install, *, library=None, progress=None) -> dict[str, set[str]]:
     """Every droid model in the install mapped to the part categories it has.
 
     Built once and read for both the base list (which droids are complete
@@ -133,7 +140,11 @@ def catalogue(install, *, library=None) -> dict[str, set[str]]:
 
     lib = library or ModelLibrary(install)
     out: dict[str, set[str]] = {}
-    for name in droid_models(install, library=lib):
+    # Only the first phase reports. It is 2,832 models against the seventeen
+    # droids it finds, so a second count starting over at 1 of 17 would send
+    # a bar that had just reached the end back to the start.
+    found = droid_models(install, library=lib, progress=progress)
+    for name in found:
         try:
             out[name] = part_categories(kl.parse(*lib.read(name)))
         except Exception:  # noqa: BLE001

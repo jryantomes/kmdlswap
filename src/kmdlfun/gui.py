@@ -176,6 +176,15 @@ class App(ttk.Frame):
 
         self.events: queue.Queue = queue.Queue()
         self.worker: threading.Thread | None = None
+        # Nothing can be clicked while the tables are being read. See `_busy`.
+        # Set up here rather than after the tabs, because building a tab can
+        # ask for a survey and a survey raises the shade.
+        self._busy_reasons: dict[str, str] = {}
+        self._busy_panel = None
+        self._scanning = False
+        # The whole-install answers a thread is working on right now, so two
+        # callers asking the same question start one read. See `_survey`.
+        self._reading: set[tuple[str, str]] = set()
         self.models: list[str] = []
         self.index = None
         self.donor_labels: dict[str, str] = {}
@@ -192,11 +201,6 @@ class App(ttk.Frame):
         self._build_log()
         self._build_actions()
         self._apply_mode(announce=True)
-
-        # Nothing can be clicked while the tables are being read. See `_busy`.
-        self._busy_reasons: dict[str, str] = {}
-        self._busy_panel = None
-        self._scanning = False
 
         self.after(100, self._drain)
         self._on_effect_change()
@@ -239,6 +243,91 @@ class App(ttk.Frame):
         # it stood still - which reads as a frozen window rather than a busy
         # one, since standing still is exactly what a hung app looks like.
         bar.start(12)
+
+    # ---- reading the install without freezing the window -------------------
+
+    def _survey(self, name: str, install: str, work, *, text: str, cache: dict,
+                then=None, to_disk=None, from_disk=None, shade: bool = True):
+        """One whole-install answer: from memory, from disk, or off the thread.
+
+        Three of these - which models are heads, who each model looks like,
+        and which droids carry which parts - each cost seconds of parsing,
+        because none of it can be told from a model's name. They were being
+        worked out on the Tk thread, which is what "the window locked up when
+        I opened that tab" was: twelve seconds of reading HK-47's install with
+        no main loop running to redraw anything.
+
+        So the caller asks, and either gets the answer straight away or gets
+        `None`, and is called back through the queue when the reading is done.
+        Every caller already had to cope with an empty list, because that is
+        what a wrong install folder gives them.
+
+        `shade` covers the window while it reads. That is right when the list
+        cannot be drawn at all until the answer lands, and wrong when it can -
+        greying out the whole window to refine a filter on a list somebody is
+        already looking at is a worse interruption than the wait.
+        """
+        if not install:
+            return {}
+        if install in cache:
+            return cache[install]
+        if not (Path(install) / "chitin.key").is_file():
+            # Half a path typed into the Folders box, or a folder that is not
+            # a game. Every one of these surveys reads the packs, so there is
+            # nothing to read - and shading the window to find that out would
+            # make each keystroke feel like a hang.
+            return {}
+        key = (name, install)
+        if key in self._reading:
+            # Somebody already asked. Their callback will refill the list.
+            return None
+        self._reading.add(key)
+        if shade:
+            self._busy(f"survey:{name}", text)
+        else:
+            self._say(text + " ...", status=True)
+
+        def job():
+            from . import surveys as ksurveys
+            from .library import ModelLibrary
+
+            try:
+                # Read the install's index here even when the survey itself
+                # comes off disk. It costs about half a second, it is cached
+                # per folder from then on, and whatever redraws when this
+                # lands is going to read a model - on the Tk thread.
+                ModelLibrary(install)
+            except Exception:  # noqa: BLE001
+                pass            # the survey below will report it properly
+            try:
+                found = ksurveys.cached(install, name, work,
+                                        to_disk=to_disk, from_disk=from_disk)
+            except Exception as exc:  # noqa: BLE001
+                self.events.put(
+                    ("surveyed", (name, install, {}, cache, then, str(exc))))
+                return
+            self.events.put(("surveyed", (name, install, found, cache, then, "")))
+
+        threading.Thread(target=job, daemon=True).start()
+        return None
+
+    def _finish_survey(self, name, install, found, cache, then, failed):
+        self._reading.discard((name, install))
+        self._busy_done(f"survey:{name}")
+        cache[install] = found
+        if failed:
+            self._say(f"could not read that install: {failed}")
+        if then is None:
+            return
+        try:
+            then()
+        except Exception as exc:  # noqa: BLE001
+            # The drain loop reschedules itself at the end of `_drain`, so
+            # anything that escapes here stops the queue being read at all -
+            # and a window whose queue is dead is the exact symptom this
+            # whole change is about.
+            self._say(f"could not redraw after reading {install}: "
+                      f"{type(exc).__name__}: {exc}")
 
     def _busy_progress(self, done: int, total: int, label: str) -> None:
         """Put a real count on the shade, and fill the bar rather than slide it."""
@@ -283,6 +372,7 @@ class App(ttk.Frame):
         self.install2 = tk.StringVar(value="")
         self.out_dir = tk.StringVar(value=str(Path.cwd() / "out_fun"))
         self.jade = tk.StringVar(value="")
+        self.nwn = tk.StringVar(value="")
 
         self.where = ttk.Label(bar, text="looking for your games...",
                                foreground="#666")
@@ -425,7 +515,7 @@ class App(ttk.Frame):
 
         already = {k: v.get().strip() for k, v in
                    (("kotor", self.install), ("kotor2", self.install2),
-                    ("jade", self.jade))}
+                    ("jade", self.jade), ("nwn", self.nwn))}
 
         def work():
             try:
@@ -443,7 +533,7 @@ class App(ttk.Frame):
         from . import installs
 
         pairs = ((installs.K1, self.install), (installs.K2, self.install2),
-                 (installs.JADE, self.jade))
+                 (installs.JADE, self.jade), (installs.NWN, self.nwn))
         filled = []
         for key, var in pairs:
             path = found.get(key)
@@ -528,6 +618,7 @@ class App(ttk.Frame):
             ("Output folder", self.out_dir, self._pick_out),
             ("KOTOR II (optional)", self.install2, self._pick_install2),
             ("Jade Empire (optional)", self.jade, self._pick_jade),
+            ("Neverwinter Nights (optional)", self.nwn, self._pick_nwn),
         )
         for i, (label, var, browse) in enumerate(rows):
             ttk.Label(box, text=label).grid(row=i, column=0, sticky="w",
@@ -564,6 +655,12 @@ class App(ttk.Frame):
         chosen = filedialog.askdirectory(title="Pick the Jade Empire folder")
         if chosen:
             self.jade.set(chosen)
+
+    def _pick_nwn(self):
+        chosen = filedialog.askdirectory(
+            title="Pick the Neverwinter Nights folder")
+        if chosen:
+            self.nwn.set(chosen)
 
     # Where each page lives and what it is called there.
     #
@@ -632,16 +729,18 @@ class App(ttk.Frame):
 
         A structural scan of the whole install, so it waits for the tab to be
         wanted rather than running at startup - the same reasoning as
-        `_scan_if_needed` next to it, just for a cheaper, synchronous scan.
+        `_scan_if_needed` next to it. And off the Tk thread for the same
+        reason the install scan is: it takes about twelve seconds on a real
+        install, and a window that does not redraw for twelve seconds is not
+        a busy window, it is a hung one.
         """
         if self._current_page() != "Droid":
             return
         path = self.install.get().strip()
         if not path or not (Path(path) / "chitin.key").is_file():
             return
-        if path in getattr(self, "_droid_catalogue_cache", {}):
-            return
-        self._refresh_droid_bases()
+        if self._read_droid_catalogue(path, then=self._refresh_droid_bases):
+            self._refresh_droid_bases()
 
     def _show_page(self, key: str) -> None:
         """Bring one page to the front, whichever group it is inside."""
@@ -800,7 +899,7 @@ class App(ttk.Frame):
 
         # A rescan, not the way in: every page that needs the index now asks for
         # it when it is opened. Kept for a model added to Override since.
-        ttk.Button(page, text="Rescan", command=self._scan).grid(row=0, column=4)
+        ttk.Button(page, text="Rescan", command=self._rescan).grid(row=0, column=4)
 
         # A name does not tell you what a face looks like. `n_shaardanh` and
         # `n_lashoweh` are both clean fits on Carth and one of them is the one
@@ -1143,23 +1242,54 @@ class App(ttk.Frame):
     def _droid_wheel(self, event):
         self._droid_slots_canvas.yview_scroll(-1 if event.delta > 0 else 1, "units")
 
+    DROIDS = "droid parts"
+
     def _droid_catalogue(self, path: str) -> dict[str, set]:
         """Every droid model in an install mapped to the part categories it
-        carries, cached - a full-install structural scan plus one parse per
-        droid, same order of cost as the male/female/droid sort next to it."""
+        carries. `{}` until it has been read - see `_read_droid_catalogue`.
+
+        A pure lookup, because both callers redraw a list and neither can wait:
+        this is the twelve-second scan, and doing it here is what froze the
+        Droid tab for the length of it.
+        """
         if not path:
             return {}
-        cache = getattr(self, "_droid_catalogue_cache", {})
-        if path not in cache:
-            from . import droidbuild as kdroid
+        # `_droid_catalogue_cache` is the older name for the same thing and
+        # the tests set it directly, so it is still what the answers live in.
+        return getattr(self, "_droid_catalogue_cache", {}).get(path) or {}
 
-            try:
-                cache[path] = kdroid.catalogue(path)
-            except Exception as exc:  # noqa: BLE001
-                self._say(f"could not read the droid models: {exc}")
-                cache[path] = {}
-            self._droid_catalogue_cache = cache
-        return cache[path]
+    def _read_droid_catalogue(self, path: str, then=None) -> bool:
+        """Start reading `path`'s droids if they are not read yet.
+
+        Returns whether the answer is already in hand, so a caller that is in
+        the middle of drawing a list knows whether to draw it now or wait for
+        `then`.
+        """
+        if not path:
+            return False
+        cache = getattr(self, "_droid_catalogue_cache", {})
+        self._droid_catalogue_cache = cache
+        if path in cache:
+            return True
+
+        from . import droidbuild as kdroid
+        from . import surveys as ksurveys
+
+        def read():
+            # Every hundredth, not every twentieth like the install scan:
+            # this reads 2,832 models rather than 233, and every message is
+            # a line in the log as well as a tick on the shade.
+            def along(i, total, name):
+                if not i % 100:
+                    self.events.put(("progress", (i, total, f"reading {name}")))
+
+            return kdroid.catalogue(path, progress=along)
+
+        self._survey(self.DROIDS, path, read,
+                     text="reading the droid models in your install",
+                     cache=cache, then=then, to_disk=ksurveys.sets,
+                     from_disk=ksurveys.unsets)
+        return False
 
     def _droid_donor_options(self, part_key: str, base: str) -> dict[str, tuple[str, str]]:
         """Label -> (model, game) for every droid that carries `part_key`.
@@ -1182,11 +1312,17 @@ class App(ttk.Frame):
             out[model] = (model, "")
         other = self.install2.get().strip()
         if other:
+            # The second game is a second full scan. Asking for it here rather
+            # than reading it here means the slots draw with KOTOR's droids in
+            # them straight away, and redraw with KOTOR II's when they arrive.
+            self._read_droid_catalogue(other, then=self._refresh_droid_slots)
             for model in kdroid.donors_for(self._droid_catalogue(other), part_key):
                 out[f"{model}  [K2]"] = (model, "K2")
         return out
 
     def _refresh_droid_bases(self):
+        """Redraw the base list from whatever has been read. A lookup, never a
+        scan - `_droid_tab_shown_if_needed` is what starts the reading."""
         from . import droidbuild as kdroid
 
         path = self.install.get().strip()
@@ -1504,17 +1640,31 @@ class App(ttk.Frame):
         ttk.Entry(page, textvariable=self.pack_dir).grid(
             row=0, column=1, columnspan=2, sticky="ew", padx=6)
         ttk.Button(page, text="Browse", command=self._pick_pack).grid(row=0, column=3)
+        # Where a pack can come from, gathered behind one word.
+        #
+        # These were three buttons spelled "Import .glb", "From Jade Empire"
+        # and "From Neverwinter Nights", laid out along the same row as the
+        # path box. Three of them asked for 896px of an 860px window, so the
+        # last one fell off the edge - and the word "From" was carrying no
+        # meaning that the label in front of them cannot carry once.
+        #
         # A .glb was command-line only, which meant the one route in for
         # geometry the game never had - a sculpt, a scan, a generated head,
-        # anything through Blender - was the one thing the window could not do.
-        ttk.Button(page, text="Import .glb", command=self._import_glb).grid(
-            row=0, column=4, padx=(6, 0))
-        # Jade's file layout shares almost nothing with KOTOR's, so its models
-        # can never go through the splice engine. Their geometry can come in
-        # the same way a sculpt does, and from here it is the same path.
-        self.jade_btn = ttk.Button(page, text="From Jade Empire",
+        # anything through Blender - was the one thing the window could not
+        # do. Jade Empire and Neverwinter Nights come in the same way: their
+        # file layouts share almost nothing with KOTOR's, so the splice engine
+        # can never touch one of their models, but geometry is geometry.
+        sources = ttk.Frame(page)
+        sources.grid(row=0, column=4, columnspan=2, sticky="w", padx=(6, 0))
+        ttk.Label(sources, text="Import").pack(side="left", padx=(0, 6))
+        ttk.Button(sources, text=".glb", command=self._import_glb).pack(
+            side="left")
+        self.jade_btn = ttk.Button(sources, text="Jade Empire",
                                    command=self._open_jade)
-        self.jade_btn.grid(row=0, column=5, padx=(6, 0))
+        self.jade_btn.pack(side="left", padx=(6, 0))
+        self.nwn_btn = ttk.Button(sources, text="Neverwinter Nights",
+                                  command=self._open_nwn)
+        self.nwn_btn.pack(side="left", padx=(6, 0))
 
         ttk.Label(page, text="Onto").grid(row=1, column=0, sticky="w", pady=(6, 0))
         self.head_host = tk.StringVar()
@@ -1978,15 +2128,37 @@ class App(ttk.Frame):
 
         threading.Thread(target=work, daemon=True).start()
 
-    def _show_part_thumb(self, key: str, job: int, label: str, path: str):
+    def _take_part_thumb(self, key: str, job: int, label: str, path: str):
+        """Turn one drawn part into an image, or None if it is no longer
+        wanted. Put on the canvas in batches - see `_flush_part_thumbs`."""
         if job != self.part_jobs[key] or label not in self.part_labels[key]:
-            return
+            return None
         try:
             photo = tk.PhotoImage(file=path)
         except tk.TclError:
-            return
+            return None
+        # Tk collects an image nothing references, and the canvas does not
+        # count as a reference; dropping this dict blanks every face.
         self.part_photos[key][label] = photo
-        self.part_gallery[key].set_image(label, photo)
+        return photo
+
+    def _flush_part_thumbs(self, pending: dict) -> None:
+        """Put a pass worth of parts on their galleries, one redraw each.
+
+        The head gallery holds 328 entries and the gallery redraws every cell
+        each time it is handed one image, so doing this per thumbnail is a
+        hundred thousand canvas items - which Tk does not survive. It only
+        ever got away with it because nothing was pumping the event loop hard
+        enough to drain them while the pictures were still arriving.
+        """
+        for key, images in pending.items():
+            gallery = self.part_gallery.get(key)
+            if gallery is None:
+                continue
+            try:
+                gallery.set_images(images)
+            except tk.TclError:
+                continue        # the page went while the queue was draining
 
     # ---- picking -----------------------------------------------------------
 
@@ -2953,26 +3125,34 @@ class App(ttk.Frame):
         else:
             subprocess.run(["xdg-open", str(d)], check=False)
 
-    def _donor_kinds(self, path: str) -> dict[str, str]:
-        """What each model in an install can donate, worked out once.
+    KINDS = "donor kinds"
 
-        A couple of seconds of reading, against scrolling three hundred names
-        to find the ones that are heads. Cached per install path.
+    def _donor_kinds(self, path: str) -> dict[str, str]:
+        """What each model in an install can donate. `{}` until it is read.
+
+        Several seconds of reading, against scrolling three hundred names to
+        find the ones that are heads - so it is worth doing, and worth doing
+        somewhere other than the Tk thread. Reading it here is what made
+        pointing the app at a KOTOR II folder stall the window for seven
+        seconds. `_refresh_donors` redraws when the answer lands.
         """
         if not path:
             return {}
         cache = getattr(self, "_kind_cache", {})
-        if path not in cache:
+        self._kind_cache = cache
+        if path in cache:
+            return cache[path]
+
+        def work():
             from .library import ModelLibrary, character_models, classify
 
-            try:
-                lib = ModelLibrary(path)
-                cache[path] = classify(lib, character_models(path, lib))
-            except Exception as exc:  # noqa: BLE001
-                self._say(f"could not read that install: {exc}")
-                cache[path] = {}
-            self._kind_cache = cache
-        return cache[path]
+            lib = ModelLibrary(path)
+            return classify(lib, character_models(path, lib))
+
+        self._survey(self.KINDS, path, work, cache=cache,
+                     text="sorting the models in that install",
+                     then=self._refresh_donors)
+        return {}
 
     def _head_donors(self, path: str) -> list[str]:
         """Models a head can be taken from, best kind first."""
@@ -3141,17 +3321,26 @@ class App(ttk.Frame):
         # summary had, on a different message.
         self._say(f"{len(rack)} outfits available to wear", status=False)
 
-    def _show_thumb(self, job: int, label: str, path: str):
+    def _take_thumb(self, job: int, label: str, path: str):
+        """Turn one drawn donor into an image, or None if it is stale."""
         if job != self._thumb_job or label not in self.donor_labels:
-            return
+            return None
         try:
             photo = tk.PhotoImage(file=path)
         except tk.TclError:
-            return
+            return None
         # Tk collects an image with no live reference, and the widget does not
         # count as one; dropping this dict blanks every face.
         self._donor_photos[label] = photo
-        self.donor_tree.set_image(label, photo)
+        return photo
+
+    def _flush_thumbs(self, pending: dict) -> None:
+        if not pending:
+            return
+        try:
+            self.donor_tree.set_images(pending)
+        except tk.TclError:
+            return
 
     # ---- Jade Empire -------------------------------------------------------
 
@@ -3291,17 +3480,26 @@ class App(ttk.Frame):
 
         threading.Thread(target=work, daemon=True).start()
 
-    def _show_jade_thumb(self, job: int, label: str, path: str):
+    def _take_jade_thumb(self, job: int, label: str, path: str):
+        """Turn one drawn Jade face into an image, or None if it is stale."""
         if (job != self._jade_thumb_job
                 or getattr(self, "_jade_window", None) is None
                 or label not in self._jade_labels):
-            return
+            return None
         try:
             photo = tk.PhotoImage(file=path)
         except tk.TclError:
-            return
+            return None
         self._jade_photos[label] = photo
-        self.jade_gallery.set_image(label, photo)
+        return photo
+
+    def _flush_jade_thumbs(self, pending: dict) -> None:
+        if not pending or getattr(self, "_jade_window", None) is None:
+            return
+        try:
+            self.jade_gallery.set_images(pending)
+        except tk.TclError:
+            return
 
     def _convert_jade(self, label: str):
         entry = self._jade_labels.get(label)
@@ -3335,6 +3533,260 @@ class App(ttk.Frame):
             lines.append("Build it onto a base with Fit ticked - the geometry "
                          "arrives at Jade's origin, not the head node's.")
             self.events.put(("imported", (out, lines, result["triangles"])))
+        except Exception as exc:  # noqa: BLE001
+            self.events.put(("error", f"{type(exc).__name__}: {exc}"))
+
+    # ---- Neverwinter Nights ------------------------------------------------
+
+    def _open_nwn(self):
+        """Pick a Neverwinter Nights model, convert it, and select the pack.
+
+        A window rather than a tab, for the same reason the Jade one is: this
+        is one step on the way to a head, not a place anybody stays.
+        """
+        install = self.nwn.get().strip()
+        if not install:
+            self._say("no Neverwinter Nights folder set - Settings > Folders, "
+                      "or Find my games")
+            return
+        if getattr(self, "_nwn_window", None) is not None:
+            try:
+                self._nwn_window.lift()
+                return
+            except tk.TclError:
+                pass
+        # Counted across windows, not reset with each one: a worker from a
+        # window that has been closed has to be able to tell that its job
+        # number is stale.
+        self._nwn_thumb_job = getattr(self, "_nwn_thumb_job", 0) + 1
+
+        from . import gallery as kgallery
+        from . import nwn as knwn
+        from . import thumbs as kthumbs
+
+        win = tk.Toplevel(self)
+        win.title("Neverwinter Nights")
+        win.transient(self.winfo_toplevel())
+        win.columnconfigure(0, weight=1)
+        win.rowconfigure(1, weight=1)
+        self._nwn_window = win
+
+        def closed():
+            # Stop the drawing worker and let go of the faces. It renders 434
+            # of them and would otherwise carry on for half a minute after
+            # the window it was drawing into has gone - and every one of them
+            # is a Tk image held alive by this dictionary.
+            self._nwn_thumb_job += 1
+            self._nwn_photos = {}
+            self._nwn_labels = {}
+            self._nwn_window = None
+            win.destroy()
+
+        win.protocol("WM_DELETE_WINDOW", closed)
+        # Kept so a caller that is not a person clicking the close box - a
+        # test, mostly - shuts it down the same way rather than destroying
+        # the window out from under a worker still feeding it.
+        self._nwn_close = closed
+
+        bar = ttk.Frame(win, padding=(8, 8, 8, 0))
+        bar.grid(row=0, column=0, sticky="ew")
+        ttk.Label(bar, text="Show").pack(side="left", padx=(0, 6))
+        self.nwn_kind = tk.StringVar(value=knwn.HEAD)
+        kinds = ttk.Combobox(bar, textvariable=self.nwn_kind, width=10,
+                             state="readonly",
+                             values=[knwn.HEAD, knwn.PLACEABLE])
+        kinds.pack(side="left")
+        kinds.bind("<<ComboboxSelected>>", lambda _e: self._refresh_nwn())
+
+        # A compromise rather than a conversion - NWN heads arrive the right
+        # height and a third too wide - so it is a box, and it follows the
+        # kind, because a placeable needs no correction at all.
+        ttk.Label(bar, text="scale").pack(side="left", padx=(16, 4))
+        self.nwn_scale = tk.DoubleVar(value=knwn.HEAD_SCALE)
+        ttk.Spinbox(bar, from_=0.4, to=2.0, increment=0.01, width=6,
+                    textvariable=self.nwn_scale).pack(side="left")
+
+        # A head has no picture of itself in the game, only a layer and a
+        # brightness per pixel, so the colour is chosen here rather than read.
+        ttk.Label(bar, text="skin").pack(side="left", padx=(16, 4))
+        self.nwn_skin = tk.IntVar(value=0)
+        ttk.Spinbox(bar, from_=0, to=175, width=5, textvariable=self.nwn_skin,
+                    command=self._draw_nwn).pack(side="left")
+        ttk.Label(bar, text="hair").pack(side="left", padx=(10, 4))
+        self.nwn_hair = tk.IntVar(value=0)
+        ttk.Spinbox(bar, from_=0, to=175, width=5, textvariable=self.nwn_hair,
+                    command=self._draw_nwn).pack(side="left")
+
+        self.nwn_note = ttk.Label(bar, text="", foreground="#666")
+        self.nwn_note.pack(side="left", padx=(12, 0))
+
+        self.nwn_gallery = kgallery.Gallery(
+            win, cell=kthumbs.SIZE,
+            on_pick=lambda label: self._convert_nwn(label))
+        self.nwn_gallery.grid(row=1, column=0, sticky="nsew", padx=8, pady=8)
+        self._nwn_photos: dict[str, object] = {}
+        self._nwn_labels: dict[str, object] = {}
+
+        ttk.Label(
+            win,
+            text=("Pick a face to convert it into a head pack and load it on "
+                  "the Custom head tab. Both games measure in the same units "
+                  "and stand their models the same way up, so nothing is "
+                  "rotated on the way in - but an NWN head is a third wider "
+                  "than a KOTOR one, and the scale above is what keeps it "
+                  "from clipping through the body. Check the result before "
+                  "trusting it."),
+            foreground="#666", wraplength=620,
+        ).grid(row=2, column=0, sticky="w", padx=8, pady=(0, 8))
+
+        self._load_nwn()
+
+    def _nwn_colours(self) -> dict:
+        return {"skin": self.nwn_skin.get(), "hair": self.nwn_hair.get()}
+
+    def _load_nwn(self):
+        """Read the catalogue off the Tk thread. The key names 113,483
+        resources and the archives behind it are several gigabytes."""
+        install = self.nwn.get().strip()
+        self.nwn_note.config(text="reading the archives...")
+
+        def work():
+            try:
+                from . import nwn as knwn
+
+                index = knwn.index_of(install)
+                self.events.put(("nwn_catalogue",
+                                 (knwn.catalogue(install, index=index), index)))
+            except Exception as exc:  # noqa: BLE001
+                self.events.put(
+                    ("error", f"could not read Neverwinter Nights: {exc}"))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _show_nwn_catalogue(self, catalogue, index):
+        self._nwn_catalogue = catalogue
+        # Kept, so every later read - a thumbnail, a conversion - is spared
+        # the second it costs to build.
+        self._nwn_index = index
+        self._refresh_nwn()
+
+    def _refresh_nwn(self):
+        if getattr(self, "_nwn_window", None) is None:
+            return
+        from . import nwn as knwn
+
+        wanted = self.nwn_kind.get()
+        # Follow the kind, unless the modder has typed a figure of their own.
+        defaults = {round(knwn.HEAD_SCALE, 4), round(knwn.SCALE, 4)}
+        if round(self.nwn_scale.get(), 4) in defaults:
+            self.nwn_scale.set(knwn.HEAD_SCALE if wanted == knwn.HEAD
+                               else knwn.SCALE)
+        entries = [e for e in getattr(self, "_nwn_catalogue", [])
+                   if e.kind == wanted]
+        self._nwn_labels = {e.resref: e for e in entries}
+        self._nwn_photos = {k: v for k, v in self._nwn_photos.items()
+                            if k in self._nwn_labels}
+        self.nwn_gallery.show(list(self._nwn_labels))
+        self.nwn_note.config(text=f"{len(entries)} to choose from")
+        self._draw_nwn()
+
+    def _draw_nwn(self):
+        self._nwn_thumb_job += 1
+        job = self._nwn_thumb_job
+        entries = list(self._nwn_labels.values())
+        install = self.nwn.get().strip()
+        index = getattr(self, "_nwn_index", None)
+        colours = self._nwn_colours()
+
+        def work():
+            from . import nwn as knwn
+
+            for entry in entries:
+                if job != self._nwn_thumb_job:
+                    return
+                found = knwn.thumbnail(entry, install=install, index=index,
+                                       colours=colours)
+                if found is not None:
+                    self.events.put(("nwn_thumb", (job, entry.resref,
+                                                   str(found))))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _take_nwn_thumb(self, job: int, label: str, path: str):
+        """Turn one drawn face into an image, or None if it is no longer wanted.
+
+        Kept apart from putting it on the canvas: 434 faces arrive over a few
+        seconds and the gallery redraws every cell each time it is given one,
+        so they are gathered and handed over together. See `_flush_nwn_thumbs`.
+        """
+        if (job != self._nwn_thumb_job
+                or getattr(self, "_nwn_window", None) is None
+                or label not in self._nwn_labels):
+            return None
+        try:
+            photo = tk.PhotoImage(file=path)
+        except tk.TclError:
+            return None
+        # Tk collects an image nothing references, and the canvas does not
+        # count as a reference; dropping this dict blanks every face.
+        self._nwn_photos[label] = photo
+        return photo
+
+    def _flush_nwn_thumbs(self, pending: dict) -> None:
+        if not pending or getattr(self, "_nwn_window", None) is None:
+            return
+        try:
+            self.nwn_gallery.set_images(pending)
+        except tk.TclError:
+            return          # the window went while the queue was draining
+
+    def _convert_nwn(self, label: str):
+        entry = self._nwn_labels.get(label)
+        if entry is None or (self.worker and self.worker.is_alive()):
+            return
+        out = str(Path(self.out_dir.get().strip() or ".") / "packs"
+                  / f"nwn_{entry.resref.strip('_')}")
+        # Every Tk variable is read here, on the main thread, and handed over
+        # as plain values. A worker that reads one survives only while the
+        # main loop happens to be spinning.
+        cfg = {
+            "out": out,
+            "scale": self.nwn_scale.get(),
+            "install": self.nwn.get().strip(),
+            "index": getattr(self, "_nwn_index", None),
+            "colours": self._nwn_colours(),
+        }
+        self.build_btn.config(state="disabled")
+        self._say(NEWLINE + f"=== converting {entry.resref} from "
+                  f"Neverwinter Nights ===")
+        self.worker = threading.Thread(
+            target=self._nwn_work, args=(entry, cfg), daemon=True)
+        self.worker.start()
+
+    def _nwn_work(self, entry, cfg):
+        try:
+            from . import nwn as knwn
+
+            result = knwn.to_pack(entry, cfg["out"], install=cfg["install"],
+                                  index=cfg["index"], scale=cfg["scale"],
+                                  colours=cfg["colours"])
+            wears = result["texture"] or "none - it wears the base's"
+            lines = [
+                f"{result['resref']}",
+                f"  vertices  {result['vertices']}",
+                f"  triangles {result['triangles']}",
+                f"  uvs       {result['uvs'] or 'NONE - it will render untextured'}",
+                f"  texture   {wears}",
+                f"  scale     x{cfg['scale']:.2f}",
+            ]
+            lines.extend(f"  note: {n}" for n in result["notes"])
+            lines.append(f"wrote a head pack to {result['pack']}")
+            # No Fit: an NWN head already knows how big it is, and fitting
+            # scales by height, which is the one axis that was never wrong.
+            lines.append("Build it onto a base with Fit left off - the "
+                         "geometry already arrives at KOTOR's own scale.")
+            self.events.put(("imported", (cfg["out"], lines,
+                                          result["triangles"])))
         except Exception as exc:  # noqa: BLE001
             self.events.put(("error", f"{type(exc).__name__}: {exc}"))
 
@@ -3599,6 +4051,8 @@ class App(ttk.Frame):
         else:
             self.target_note.config(text="")
 
+    LOOKS = "donor looks"
+
     def _donor_looks(self, path: str) -> dict[str, str]:
         """Male, female or droid for every model in an install, worked out once.
 
@@ -3609,16 +4063,22 @@ class App(ttk.Frame):
         if not path:
             return {}
         cache = getattr(self, "_look_cache", {})
-        if path not in cache:
+        self._look_cache = cache
+        if path in cache:
+            return cache[path]
+        heads = self._head_donors(path)
+        if not heads:
+            return {}               # the kinds are still being read; wait
+
+        def work():
             from . import who
 
-            try:
-                cache[path] = who.looks(path, self._head_donors(path))
-            except Exception as exc:  # noqa: BLE001
-                self._say(f"could not sort the source models by who they are: {exc}")
-                cache[path] = {}
-            self._look_cache = cache
-        return cache[path]
+            return who.looks(path, heads)
+
+        self._survey(self.LOOKS, path, work, cache=cache, shade=False,
+                     text="working out who each model is",
+                     then=self._refresh_donors)
+        return {}
 
     def _look_note(self, path: str) -> str:
         """Say when a filter is hiding things, so a short list is not a puzzle."""
@@ -3635,6 +4095,10 @@ class App(ttk.Frame):
         from . import who
 
         looks = self._donor_looks(path)
+        if not looks:
+            # Still being read. Show everything and narrow it when the answer
+            # lands - an unfiltered list is a better guess than an empty one.
+            return models
         # `who.matches` rather than equality, so a head that is deliberately
         # both - Revan's - shows up under male and under female alike.
         return [m for m in models if who.matches(looks.get(m, "unknown"), wanted)]
@@ -3984,6 +4448,26 @@ class App(ttk.Frame):
             )
             return False
         return True
+
+    def _rescan(self) -> bool:
+        """Read the install again from scratch, as if the app had just opened.
+
+        Everything the app learns about an install is now kept - in memory,
+        and on disk between launches - because none of it changes unless the
+        install does. This is the button that says it did: somebody has put a
+        model in Override and wants the app to notice.
+        """
+        from . import surveys as ksurveys
+        from .library import forget_indexes
+
+        path = self.install.get().strip()
+        forget_indexes()
+        ksurveys.forget()
+        for cache in ("_kind_cache", "_look_cache", "_droid_catalogue_cache",
+                      "_mesh_cache", "_rank_cache"):
+            setattr(self, cache, {})
+        self._say(NEWLINE + "forgetting everything read about " + (path or "no install"))
+        return self._scan()
 
     def _scan(self) -> bool:
         """Index the install. Returns whether it actually started.
@@ -4575,6 +5059,20 @@ class App(ttk.Frame):
         self.scale_label.config(text=f"{self.opt_scale.get():.2f}x")
 
     def _drain(self):
+        # Faces gathered across this whole pass and put on their galleries
+        # once at the end. A gallery redraws every cell each time it is handed
+        # an image, so applying them one at a time is quadratic in the size of
+        # the gallery - and these run to 328 heads on the Character tab and
+        # 434 in the Neverwinter Nights window. See `gallery.set_images`.
+        #
+        # This was survivable only for as long as nothing pumped the event
+        # loop hard while the pictures were arriving. The moment the install
+        # index was cached the workers stopped queueing behind each other,
+        # and Tk started going down inside its own drawing code.
+        nwn_thumbs: dict[str, object] = {}
+        part_thumbs: dict[str, dict] = {}
+        jade_thumbs: dict[str, object] = {}
+        donor_thumbs: dict[str, object] = {}
         try:
             while True:
                 kind, payload = self.events.get_nowait()
@@ -4639,17 +5137,32 @@ class App(ttk.Frame):
                     self._detecting = False
                     self._busy_done("installs")
                     self._say("could not look for your games: " + payload)
+                elif kind == "surveyed":
+                    self._finish_survey(*payload)
                 elif kind == "catalogue":
                     self._busy_done("catalogue")
                     self._show_catalogue(payload)
                 elif kind == "part_thumb":
-                    self._show_part_thumb(*payload)
+                    key, job, label, path = payload
+                    photo = self._take_part_thumb(key, job, label, path)
+                    if photo is not None:
+                        part_thumbs.setdefault(key, {})[label] = photo
                 elif kind == "character_drawn":
                     self._show_character(*payload)
                 elif kind == "jade_catalogue":
                     self._show_jade_catalogue(payload)
                 elif kind == "jade_thumb":
-                    self._show_jade_thumb(*payload)
+                    job, label, path = payload
+                    photo = self._take_jade_thumb(job, label, path)
+                    if photo is not None:
+                        jade_thumbs[label] = photo
+                elif kind == "nwn_catalogue":
+                    self._show_nwn_catalogue(*payload)
+                elif kind == "nwn_thumb":
+                    job, label, path = payload
+                    photo = self._take_nwn_thumb(job, label, path)
+                    if photo is not None:
+                        nwn_thumbs[label] = photo
                 elif kind == "imported":
                     pack, lines, triangles = payload
                     self.pack_dir.set(pack)
@@ -4660,7 +5173,10 @@ class App(ttk.Frame):
                 elif kind == "wardrobe":
                     self._show_wardrobe(payload)
                 elif kind == "thumb":
-                    self._show_thumb(*payload)
+                    job, label, path = payload
+                    photo = self._take_thumb(job, label, path)
+                    if photo is not None:
+                        donor_thumbs[label] = photo
                 elif kind == "ranked":
                     self._finish_rank(*payload)
                 elif kind == "rank_failed":
@@ -4675,6 +5191,10 @@ class App(ttk.Frame):
                     self.build_btn.config(state="normal")
         except queue.Empty:
             pass
+        self._flush_nwn_thumbs(nwn_thumbs)
+        self._flush_part_thumbs(part_thumbs)
+        self._flush_jade_thumbs(jade_thumbs)
+        self._flush_thumbs(donor_thumbs)
         self.after(100, self._drain)
 
     def _finish_effect(self, report):

@@ -52,3 +52,7 @@ dist/
 /dist/
 /build/
 *.spec.bak
+
+# Built models. Output of the tool, reproducible in one command, and game
+# geometry besides - the same reason the diagnostic renders are not carried.
+/builds/

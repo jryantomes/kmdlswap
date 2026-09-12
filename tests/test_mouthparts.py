@@ -74,6 +74,28 @@ def test_only_depth_is_corrected():
     assert "UniformScale(1.0, local)" in source
 
 
+def test_the_replacement_is_read_through_its_own_node_record():
+    """`seat` is handed the node the caller found in the *host*, and the model
+    it is asked to measure is the one after the replacement. Reading the new
+    model through the host's record worked only while the replacement was at
+    least as dense: a 166-vertex head from Neverwinter Nights against Carth's
+    565 asked for a vertex twelve bytes past the end of the new MDX and took
+    the whole build down with a struct error.
+
+    Both layouts have to be asked for their own record of the node, by name.
+    """
+    import inspect
+
+    source = inspect.getsource(mouthparts.seat)
+    assert "new_node = next(" in source, (
+        "the new layout needs its own node record, not the host's"
+    )
+    assert "_model_space(layout, new_node, rest)" in source
+    assert "_model_space(layout, node, rest)" not in source, (
+        "reading the new model through the host's node is the bug"
+    )
+
+
 class TestAgainstTheGame:
     """Against the real install, so the numbers in the docstring stay honest."""
 

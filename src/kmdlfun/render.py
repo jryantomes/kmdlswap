@@ -44,6 +44,7 @@ preview is not proof either.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 
@@ -484,7 +485,59 @@ def _to_uint8(img: np.ndarray, size: int, ss: int) -> np.ndarray:
     return (np.clip(img, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
 
 
+# How hard to try to move a finished picture into place, and how long to wait
+# between goes. Windows refuses the rename while another thread has the
+# destination open, and that window is a single file read.
+WRITE_ATTEMPTS = 5
+WRITE_PAUSE = 0.02
+
+
 def to_png(pixels: np.ndarray, path) -> None:
+    """Write a PNG, whole or not at all.
+
+    Every thumbnail cache in the app keys its file on the bytes of the model,
+    so two workers drawing the same model - two galleries open, or two panes
+    of one - agree on the filename and race to write it. A half-written PNG
+    is worse than a missing one: the reader is Tk's own image loader, which
+    is C, and handing it a truncated file takes the interpreter down with an
+    access violation rather than an exception anybody can catch.
+
+    So it goes to a private name alongside and is moved into place, which is
+    atomic. A reader sees the old file or the new one, never half of either.
+
+    Windows will not rename over a file somebody has open, which is the
+    common case here: the reader is a gallery loading the thumbnail the
+    other worker has just finished. That is not worth reporting, because the
+    file already there is a complete picture of the same model. It is only an
+    error if there is no file at the end of it.
+    """
+    import os
+    import tempfile
+    import time
+
     from PIL import Image
 
-    Image.fromarray(pixels, mode="RGB").save(path)
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle, temporary = tempfile.mkstemp(dir=path.parent, suffix=".part")
+    os.close(handle)
+    try:
+        Image.fromarray(pixels, mode="RGB").save(temporary, format="PNG")
+        for attempt in range(WRITE_ATTEMPTS):
+            try:
+                os.replace(temporary, path)
+                return
+            except PermissionError:
+                if attempt + 1 == WRITE_ATTEMPTS:
+                    if path.is_file():
+                        return      # somebody else wrote the same picture
+                    raise
+                time.sleep(WRITE_PAUSE)
+    finally:
+        # The rename consumes the temporary file when it works; every other
+        # path leaves it behind, and a stray `.part` beside a cache is litter
+        # at best and something a reader trips over at worst.
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
