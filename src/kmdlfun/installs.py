@@ -46,10 +46,19 @@ MAX_DEPTH = 5              # deep enough for D:\Games\Steam\steamapps\common\x
 K1 = "kotor"
 K2 = "kotor2"
 JADE = "jade"
+NWN = "nwn"
 
 
 @dataclass(frozen=True)
 class Game:
+    """One game this tool can read, and how to recognise its folder.
+
+    `exe` and `needs` are paths relative to the folder, not bare filenames.
+    Three of the four games put both at the top level and read as plain
+    names; Neverwinter Nights puts its executable in `bin/win32` and its key
+    file in `data`, so the test has to be able to look inside.
+    """
+
     key: str
     label: str
     exe: tuple[str, ...]           # any one of these identifies it
@@ -70,6 +79,14 @@ GAMES: tuple[Game, ...] = (
           "STAR WARS Knights of the Old Republic II - The Sith Lords")),
     Game(JADE, "Jade Empire", ("JadeEmpire.exe",),
          ("Jade Empire", "Jade Empire Special Edition")),
+    # The engine KOTOR's grew out of, and a source of heads and props. Both
+    # the Enhanced Edition and the 2002 release are recognised: the former
+    # keeps everything a folder down, the latter at the top, so both spellings
+    # of each path are offered and any one of them is enough.
+    Game(NWN, "Neverwinter Nights",
+         ("bin/win32/nwmain.exe", "nwmain.exe", "nwn.exe"),
+         ("Neverwinter Nights", "NWN", "Neverwinter Nights Enhanced Edition"),
+         needs=("data/nwn_base.key",)),
 )
 
 # Subkeys to enumerate, and the value under each child holding a path. The
@@ -132,10 +149,22 @@ def identify(folder) -> str | None:
         names = {p.name.lower() for p in folder.iterdir() if p.is_file()}
     except (OSError, PermissionError):
         return None
+
+    def has(rel: str) -> bool:
+        # A bare filename is answered from the listing already taken, which
+        # is one directory read for however many games name it. Only a path
+        # with a folder in it costs another look at the disk.
+        if "/" not in rel:
+            return rel.lower() in names
+        try:
+            return (folder / rel).is_file()
+        except OSError:
+            return False
+
     for game in GAMES:
-        if not all(n.lower() in names for n in game.needs):
+        if not all(has(n) for n in game.needs):
             continue
-        if any(exe.lower() in names for exe in game.exe):
+        if any(has(exe) for exe in game.exe):
             return game.key
     return None
 

@@ -301,6 +301,28 @@ def main(argv: list[str] | None = None) -> int:
                          "it is a measurement rather than a fact - see "
                          "reports/JADE_FINDINGS.md")
 
+    nw = sub.add_parser("nwn",
+                        help="turn a Neverwinter Nights model into a head pack")
+    nw.add_argument("resref", nargs="?",
+                    help="the model to convert; omit to list what is there")
+    nw.add_argument("--install", help="the Neverwinter Nights folder (found "
+                                      "automatically if left out)")
+    nw.add_argument("--out", help="pack folder to create")
+    nw.add_argument("--kind", choices=["head", "placeable", "all"],
+                    default="head",
+                    help="which models to list (default: heads)")
+    nw.add_argument("--no-texture", action="store_true",
+                    help="skip the texture; the model then wears the host's")
+    nw.add_argument("--scale", type=float,
+                    help="size correction. NWN heads are the right height and "
+                         "a third too wide, so the default of 0.80 is a "
+                         "compromise rather than a conversion - see nwn.py")
+    nw.add_argument("--skin", type=int, default=0, metavar="N",
+                    help="which of the 176 skin tones to bake in (default: 0)")
+    nw.add_argument("--hair", type=int, default=0, metavar="N",
+                    help="which hair colour to bake in (default: 0)")
+
+
     sub.add_parser("gui", help="launch the desktop app")
 
     args = p.parse_args(argv)
@@ -331,6 +353,8 @@ def main(argv: list[str] | None = None) -> int:
             return _lips(args)
         if args.cmd == "jade":
             return _jade(args)
+        if args.cmd == "nwn":
+            return _nwn(args)
         if args.cmd == "gui":
             from .gui import run
 
@@ -1190,6 +1214,79 @@ def _jade(args) -> int:
           + " --install \"<K1 root>\" --host p_carthh --node Head "
             "--decimate --fit")
     return 0
+
+
+def _nwn(args) -> int:
+    """Neverwinter Nights geometry, out as a head pack.
+
+    NWN is the engine KOTOR's grew out of, and every structure in its model
+    format is a different size, so the splice engine will never edit one in
+    place. What it can do is take the geometry, by the same route a sculpt or
+    a Jade Empire head comes in.
+    """
+    from pathlib import Path as _Path
+
+    from . import installs, nwn
+
+    install = args.install or installs.detect().get(installs.NWN)
+    if not install:
+        print("kmdlfun: no Neverwinter Nights install found; pass --install",
+              file=sys.stderr)
+        return 1
+
+    kinds = ((nwn.HEAD, nwn.PLACEABLE) if args.kind == "all"
+             else (args.kind,))
+    try:
+        index = nwn.index_of(install)
+        catalogue = nwn.catalogue(install, kinds=kinds, index=index)
+    except nwn.NwnError as exc:
+        print(f"kmdlfun: {exc}", file=sys.stderr)
+        return 1
+
+    if not args.resref:
+        print(f"{len(catalogue)} model(s) in {install}")
+        for entry in catalogue:
+            print(f"  {entry.kind:<9} {entry.resref}")
+        print("\nPass one of these and --out to convert it.")
+        return 0
+
+    wanted = args.resref.lower()
+    entry = next((e for e in catalogue if e.resref.lower() == wanted), None)
+    if entry is None:
+        print(f"kmdlfun: no model named {args.resref!r} in {install}",
+              file=sys.stderr)
+        return 1
+    if not args.out:
+        print("kmdlfun: --out is required to convert", file=sys.stderr)
+        return 1
+
+    scale = (args.scale if args.scale is not None
+             else (nwn.HEAD_SCALE if entry.kind == nwn.HEAD else nwn.SCALE))
+    try:
+        result = nwn.to_pack(entry, _Path(args.out), install=install,
+                             index=index, scale=scale,
+                             colours={"skin": args.skin, "hair": args.hair},
+                             with_texture=not args.no_texture)
+    except nwn.NwnError as exc:
+        print(f"kmdlfun: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"{entry.resref}  ({entry.kind})")
+    print(f"  vertices  {result['vertices']}")
+    print(f"  triangles {result['triangles']}")
+    print(f"  uvs       {result['uvs'] or 'NONE - it will render untextured'}")
+    wears = result["texture"] or "none - it will wear the host's"
+    print(f"  texture   {wears}")
+    print(f"  scale     x{scale}")
+    for note in result["notes"]:
+        print(f"  note: {note}")
+    print(f"\nwrote a head pack to {result['pack']}")
+    # No --fit: an NWN head already knows how big it is, and fitting scales by
+    # height, which is the one axis that was never wrong.
+    print("Build it with:  kmdlfun head " + str(result["pack"])
+          + " --install \"<K1 root>\" --host p_carthh --node Head")
+    return 0
+
 
 
 def _lips(args) -> int:

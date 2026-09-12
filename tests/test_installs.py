@@ -41,12 +41,25 @@ def only(monkeypatch, *, registry=False, epic=False, steam=False, other=False,
 
 
 def make_game(root, key, *, exe=None, chitin=True):
-    """A folder that looks like an install, or deliberately does not."""
+    """A folder that looks like an install, or deliberately does not.
+
+    Whatever the game's own record says it needs, rather than a hardcoded
+    `chitin.key`: Neverwinter Nights keeps its key file in `data` and its
+    executable in `bin/win32`, so both are paths and both need the folders
+    making first.
+    """
     game = next(g for g in installs.GAMES if g.key == key)
     root.mkdir(parents=True, exist_ok=True)
+
+    def put(rel: str, body: bytes) -> None:
+        at = root / rel
+        at.parent.mkdir(parents=True, exist_ok=True)
+        at.write_bytes(body)
+
     if chitin:
-        (root / "chitin.key").write_bytes(b"KEY V1  ")
-    (root / (exe or game.exe[0])).write_bytes(b"MZ")
+        for needed in game.needs:
+            put(needed, b"KEY V1  ")
+    put(exe or game.exe[0], b"MZ")
     return root
 
 
@@ -57,6 +70,9 @@ def test_a_folder_is_identified_by_its_executable(tmp_path):
     assert installs.identify(make_game(tmp_path / "swkotor", installs.K1)) == installs.K1
     assert installs.identify(make_game(tmp_path / "k2", installs.K2)) == installs.K2
     assert installs.identify(make_game(tmp_path / "je", installs.JADE)) == installs.JADE
+    # Neverwinter Nights keeps both its markers a folder down, so this is also
+    # the test that the check can look inside rather than only at the top.
+    assert installs.identify(make_game(tmp_path / "nwn", installs.NWN)) == installs.NWN
 
 
 def test_the_folder_name_is_never_what_decides(tmp_path):
@@ -364,7 +380,7 @@ def test_the_records_are_consulted_before_anything_is_walked(tmp_path,
     """A registry read is milliseconds; a drive walk is not. Once every game
     is accounted for there is nothing left to look for."""
     games = {key: make_game(tmp_path / key, key)
-             for key in (installs.K1, installs.K2, installs.JADE)}
+             for key in (installs.K1, installs.K2, installs.JADE, installs.NWN)}
     walked = []
     only(monkeypatch, registry=True)
     monkeypatch.setattr(installs, "registry_paths",
