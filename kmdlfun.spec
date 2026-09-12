@@ -7,11 +7,14 @@
 #
 # What this has to carry, and why it is the size it is:
 #
-#   numpy    the geometry and every render
-#   pykotor  2DA, GFF, LIP and TPC - the four formats this project does not
-#            read itself, and the one dependency out of proportion to its use
-#   Pillow   textures in and PNG out
-#   tkinter  the window
+#   numpy      the geometry and every render
+#   pykotor    2DA, GFF, LIP and TPC - the four formats this project does not
+#              read itself, and the one dependency out of proportion to its use
+#   Pillow     textures in and PNG out
+#   tkinter    the window
+#   zstandard  The Old Republic's archives, which are Zstandard where they used
+#              to be zlib. Imported inside the function that needs it, so it is
+#              named below rather than left to the analysis to notice.
 #
 # `kmdlfun.vendor.jade` is pure Python and comes along as ordinary source.
 
@@ -20,7 +23,7 @@ from PyInstaller.utils.hooks import collect_submodules
 # pykotor resolves formats by resource type at runtime rather than importing
 # them by name, so the analysis cannot see them and they have to be named.
 hidden = collect_submodules("pykotor") + collect_submodules("kmdlfun") + \
-         collect_submodules("kmdlswap")
+         collect_submodules("kmdlswap") + ["zstandard"]
 
 analysis = Analysis(
     ["tools/app.py"],

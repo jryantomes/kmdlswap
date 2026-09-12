@@ -35,28 +35,82 @@ class BuildReport:
         return sum(len(m.changes) for m in self.models)
 
 
+# Reading chitin.key costs about half a second and lists 25,000-odd resources,
+# and this tool never writes into an install - so the answer is the same every
+# time it is asked. It was being asked forty-one times: once per
+# `ModelLibrary`, and several of those were on the Tk thread, where half a
+# second each is a window that stutters.
+#
+# **What is cached is three numbers per model, not PyKotor's own objects.**
+# The obvious version of this kept the `FileResource`s, on the reasoning that
+# `data()` only reads from them. `data()` does - but it reads through a
+# `CaseAwarePath`, and a `pathlib.Path` builds pieces of itself lazily on
+# first use and memoises them. One of those per thread is fine. One *shared*
+# between threads is two threads writing the same half-built cache, and what
+# came of that was not an exception: it was the interpreter going down with
+# an access violation inside pathlib, several minutes into a run, in whatever
+# test happened to have two galleries drawing at once.
+#
+# A path, an offset and a length have no lazy anything, and opening the file
+# with them needs no PyKotor at all.
+_INDEXES: dict[str, dict[str, dict[str, tuple[str, int, int]]]] = {}
+
+MDL, MDX = "mdl", "mdx"
+
+
+def forget_indexes() -> None:
+    """Drop the cached indexes, so the next read sees the folder as it is now.
+
+    Only needed if somebody adds files to an install while the app is open.
+    """
+    _INDEXES.clear()
+
+
 class ModelLibrary:
     """Lazy index of MDL/MDX pairs in an install."""
 
     def __init__(self, install: str | Path):
-        from pykotor.extract.installation import Installation
-        from pykotor.resource.type import ResourceType
-
-        self._mdl_type = ResourceType.MDL
-        self._mdx_type = ResourceType.MDX
-        inst = Installation(str(install))
-        self.index: dict[str, dict] = {}
-        for r in inst.chitin_resources():
-            if r.restype() in (ResourceType.MDL, ResourceType.MDX):
-                self.index.setdefault(r.resname().lower(), {})[r.restype()] = r
+        self.index = _index(str(install))
 
     def has(self, name: str) -> bool:
         e = self.index.get(name.lower())
-        return bool(e and self._mdl_type in e and self._mdx_type in e)
+        return bool(e and MDL in e and MDX in e)
 
     def read(self, name: str) -> tuple[bytes, bytes]:
         e = self.index[name.lower()]
-        return e[self._mdl_type].data(), e[self._mdx_type].data()
+        return _slice(*e[MDL]), _slice(*e[MDX])
+
+
+def _slice(path: str, offset: int, size: int) -> bytes:
+    """One resource out of the pack it is stored in.
+
+    A plain `open` on a plain string: nothing here is shared with another
+    reader, which is the whole point - see `_INDEXES`.
+    """
+    with open(path, "rb") as f:  # noqa: PTH123 - a str, deliberately
+        f.seek(offset)
+        return f.read(size)
+
+
+def _index(install: str) -> dict[str, dict[str, tuple[str, int, int]]]:
+    """Where every MDL and MDX in one install lives, read once per folder."""
+    found = _INDEXES.get(install)
+    if found is None:
+        from pykotor.extract.installation import Installation
+        from pykotor.resource.type import ResourceType
+
+        wanted = {ResourceType.MDL: MDL, ResourceType.MDX: MDX}
+        found = {}
+        for r in Installation(install).chitin_resources():
+            kind = wanted.get(r.restype())
+            if kind is None:
+                continue
+            found.setdefault(r.resname().lower(), {})[kind] = (
+                str(r.filepath()), r.offset(), r.size())
+        # Last writer wins if two threads raced here. They built the same
+        # thing, so it does not matter which one is kept.
+        _INDEXES[install] = found
+    return found
 
 
 def build(
