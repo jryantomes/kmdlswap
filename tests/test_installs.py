@@ -379,8 +379,11 @@ def test_the_records_are_consulted_before_anything_is_walked(tmp_path,
                                                              monkeypatch):
     """A registry read is milliseconds; a drive walk is not. Once every game
     is accounted for there is nothing left to look for."""
-    games = {key: make_game(tmp_path / key, key)
-             for key in (installs.K1, installs.K2, installs.JADE, installs.NWN)}
+    # Every game there is, read off the table rather than listed here: the
+    # claim is "once every game is accounted for", and a fifth game added to
+    # `GAMES` used to make this test assert something weaker without saying so.
+    games = {game.key: make_game(tmp_path / game.key, game.key)
+             for game in installs.GAMES}
     walked = []
     only(monkeypatch, registry=True)
     monkeypatch.setattr(installs, "registry_paths",

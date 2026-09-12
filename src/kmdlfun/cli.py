@@ -207,6 +207,13 @@ def main(argv: list[str] | None = None) -> int:
                          "are shaped for the face being replaced")
     hd.add_argument("--template", action="store_true",
                     help="write a head.json template into the folder and stop")
+    hd.add_argument("--force", action="store_true",
+                    help="build even if a check fails. The app has had this "
+                         "checkbox all along and the command line had not. It "
+                         "is for putting a thing the spec has no opinion about "
+                         "in front of the game, which is where some of these "
+                         "questions actually get answered - not for ignoring "
+                         "checks in general")
 
     im = sub.add_parser("import", help="turn a .glb into a head pack folder")
     im.add_argument("file", help="the .glb to read")
@@ -322,6 +329,30 @@ def main(argv: list[str] | None = None) -> int:
     nw.add_argument("--hair", type=int, default=0, metavar="N",
                     help="which hair colour to bake in (default: 0)")
 
+    sw = sub.add_parser("swtor",
+                        help="turn a Star Wars: The Old Republic head into a "
+                             "head pack")
+    sw.add_argument("name", nargs="?",
+                    help="the model to convert; omit to list what is there")
+    sw.add_argument("--install", help="the Old Republic folder (found "
+                                      "automatically if left out)")
+    sw.add_argument("--out", help="pack folder to create")
+    sw.add_argument("--body-type", metavar="CODE",
+                    help="list only heads modelled for one body: bfa, bfb, "
+                         "bfn, bfs, bma, bmf, bmn or bms")
+    sw.add_argument("--fits", nargs="?", type=float, const=1.25, default=None,
+                    metavar="RATIO",
+                    help="list only heads that fit a head node (default 1.25, "
+                         "headspec's own ceiling: 562 of the 993). Without it "
+                         "the listing includes lekku, montrals and a "
+                         "two-metre Trandoshan")
+    sw.add_argument("--rescan", action="store_true",
+                    help="ignore the cached index and read the archive again; "
+                         "it takes about four seconds")
+    sw.add_argument("--scale", type=float,
+                    help="size correction, on top of the exact ten-metre unit "
+                         "conversion. The default of 0.85 is the point where "
+                         "every human head fits - see swtor.py")
 
     sub.add_parser("gui", help="launch the desktop app")
 
@@ -355,6 +386,8 @@ def main(argv: list[str] | None = None) -> int:
             return _jade(args)
         if args.cmd == "nwn":
             return _nwn(args)
+        if args.cmd == "swtor":
+            return _swtor(args)
         if args.cmd == "gui":
             from .gui import run
 
@@ -1058,6 +1091,7 @@ def _head(args) -> int:
         reshape=args.reshape,
         hide=args.hide,
         build=bool(args.out),
+        force=args.force,
     )
     for line in result.lines:
         print("  " + line)
@@ -1287,6 +1321,80 @@ def _nwn(args) -> int:
           + " --install \"<K1 root>\" --host p_carthh --node Head")
     return 0
 
+
+def _swtor(args) -> int:
+    """The Old Republic's geometry, out as a head pack.
+
+    Nothing about that game's files resembles KOTOR's, so there is no question
+    of editing one in place - this reads, and the geometry leaves by the same
+    door a sculpt or a Jade Empire head comes through.
+
+    The first listing costs about four seconds: names in the archive are
+    hashed, so every file in it has to be decompressed and identified by what
+    is inside it. The result is cached against the archive, and a game patch
+    invalidates that by changing its size and date.
+    """
+    from pathlib import Path as _Path
+
+    from . import installs, swtor
+
+    install = args.install or installs.detect().get(installs.SWTOR)
+    if not install:
+        print("kmdlfun: no Old Republic install found; pass --install",
+              file=sys.stderr)
+        return 1
+
+    try:
+        index = swtor.index_of(install, use_cache=not args.rescan)
+        catalogue = swtor.catalogue(install, index=index,
+                                    body_type=args.body_type,
+                                    max_oversize=args.fits)
+    except swtor.SwtorError as exc:
+        print(f"kmdlfun: {exc}", file=sys.stderr)
+        return 1
+
+    if not args.name:
+        print(f"{len(catalogue)} head(s) in {install}")
+        for entry in catalogue:
+            body = swtor.body_type_of(entry.name) or "-"
+            print(f"  {body:<4} {entry.triangles:>6} tris  "
+                  f"{entry.oversize:>4.1f}x  {entry.name}")
+        print("\nPass one of these and --out to convert it.")
+        return 0
+
+    wanted = args.name.lower()
+    entry = next((e for e in catalogue if e.name.lower() == wanted), None)
+    if entry is None:
+        print(f"kmdlfun: no head named {args.name!r} in {install}",
+              file=sys.stderr)
+        return 1
+    if not args.out:
+        print("kmdlfun: --out is required to convert", file=sys.stderr)
+        return 1
+
+    scale = args.scale if args.scale is not None else swtor.HEAD_SCALE
+    try:
+        result = swtor.to_pack(entry, _Path(args.out), scale=scale)
+    except swtor.SwtorError as exc:
+        print(f"kmdlfun: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"{entry.name}  ({entry.kind})")
+    print(f"  vertices  {result['vertices']}")
+    print(f"  triangles {result['triangles']}")
+    print(f"  uvs       {result['uvs'] or 'NONE - it will render untextured'}")
+    print(f"  texture   none - it will wear the host's")
+    print(f"  scale     x{swtor.SCALE:g} for units, x{scale} for fit")
+    for note in result["notes"]:
+        print(f"  note: {note}")
+    print(f"\nwrote a head pack to {result['pack']}")
+    # Three times vanilla's triangle count, and carrying a neck, so unlike the
+    # other importers this one always wants both. 1300 rather than vanilla's
+    # 690 because the nose does not survive the smaller budget - see swtor.py.
+    print("Build it with:  kmdlfun head " + str(result["pack"])
+          + " --install \"<K1 root>\" --host p_carthh --node Head"
+          + " --decimate 1300 --crop 0.2")
+    return 0
 
 
 def _lips(args) -> int:

@@ -12,6 +12,11 @@ requires-python = ">=3.11"
 dependencies = [
     "pykotor>=2.3.12",
     "numpy>=1.24",
+    # Only for reading The Old Republic's archives, which are Zstandard now
+    # where they used to be zlib - see swtor.py. Imported where it is used, so
+    # nothing else here pays for it, but it is not optional: without it that
+    # game is unreadable rather than degraded.
+    "zstandard>=0.22",
 ]
 
 [project.optional-dependencies]

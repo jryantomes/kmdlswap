@@ -47,6 +47,7 @@ K1 = "kotor"
 K2 = "kotor2"
 JADE = "jade"
 NWN = "nwn"
+SWTOR = "swtor"
 
 
 @dataclass(frozen=True)
@@ -87,6 +88,15 @@ GAMES: tuple[Game, ...] = (
          ("bin/win32/nwmain.exe", "nwmain.exe", "nwn.exe"),
          ("Neverwinter Nights", "NWN", "Neverwinter Nights Enhanced Edition"),
          needs=("data/nwn_base.key",)),
+    # A source of heads, and the only game here that is not Aurora at all. It
+    # keeps its executable two folders down and there is a `launcher.exe` at
+    # the top which half the games on a disk also have, so the archive is what
+    # identifies it - the name is specific enough to be proof on its own.
+    Game(SWTOR, "The Old Republic",
+         ("swtor/retailclient/swtor.exe",),
+         ("Star Wars - The Old Republic", "SWTOR",
+          "Star Wars The Old Republic"),
+         needs=("Assets/swtor_main_global_1.tor",)),
 )
 
 # Subkeys to enumerate, and the value under each child holding a path. The
