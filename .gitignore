@@ -56,3 +56,9 @@ dist/
 # Built models. Output of the tool, reproducible in one command, and game
 # geometry besides - the same reason the diagnostic renders are not carried.
 /builds/
+
+# PO-12 GH0-RFK build outputs: models, textures, renders and vanilla GUI
+# portraits, all game-derived. Reproducible from tools/swtor_po12/README.md.
+/tools/swtor_po12/rfk_build*/
+/tools/swtor_po12/rfk_portraits*/
+/tools/swtor_po12/gui/
