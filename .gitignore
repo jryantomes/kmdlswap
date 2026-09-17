@@ -62,3 +62,6 @@ dist/
 /tools/swtor_po12/rfk_build*/
 /tools/swtor_po12/rfk_portraits*/
 /tools/swtor_po12/gui/
+
+# PyKotor writes logs next to the scripts it runs
+tools/*/logs/
