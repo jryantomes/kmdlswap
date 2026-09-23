@@ -193,6 +193,45 @@ def build(text: str, *, seconds: float | None = None):
     return lip
 
 
+# A pause longer than this between two words closes the mouth for it.
+REST_GAP = 0.15
+
+
+def build_timed(words, length: float):
+    """A LIP that follows a recording word by word.
+
+    `words` is [(text, start, end)] in seconds - word timings from a
+    speech-to-text pass over the recording itself. Where `build` can only spread
+    shapes evenly over a line, this puts each word's shapes inside the time that
+    word is actually spoken, at no more than the vanilla density, and lets the
+    mouth rest in the pauses. That is lip sync in the ordinary sense: the mouth
+    opens when the voice does.
+    """
+    from pykotor.resource.formats.lip import LIP, LIPShape
+
+    lip = LIP()
+    lip.length = float(length)
+    lip.add(0.0, LIPShape.NEUTRAL)
+    last_end = 0.0
+    for text, start, end in words:
+        if start - last_end > REST_GAP and last_end > 0.0:
+            lip.add(round(last_end + 0.05, 3), LIPShape.NEUTRAL)
+        shapes = [s for s in shapes_for(text) if s != "NEUTRAL"] or ["AH"]
+        span = max(0.05, end - start)
+        room = max(1, int(round(span * SHAPES_PER_SECOND * 1.5)))
+        if len(shapes) > room:
+            shapes = [shapes[int(i * len(shapes) / room)] for i in range(room)]
+        step = span / len(shapes)
+        for i, shape in enumerate(shapes):
+            lip.add(round(start + i * step, 3), getattr(LIPShape, shape))
+        last_end = end
+    # Ending anywhere else leaves the mouth hanging open when the line stops.
+    lip.add(round(min(length, last_end + 0.05) if words else length, 3), LIPShape.NEUTRAL)
+    if words and last_end + 0.05 < length:
+        lip.add(round(length, 3), LIPShape.NEUTRAL)
+    return lip
+
+
 def write(text: str, path, *, seconds: float | None = None) -> int:
     """Write a lip file for `text`. Returns its length in bytes."""
     from pathlib import Path
