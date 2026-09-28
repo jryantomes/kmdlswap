@@ -62,6 +62,13 @@ dist/
 /tools/swtor_po12/rfk_build*/
 /tools/swtor_po12/rfk_portraits*/
 /tools/swtor_po12/gui/
+# ...and rebuild_chain.py's <prefix>_* chains (rfk_e_ eye halo, rfk_m_ mouth light, rfk_o_ replay)
+/tools/swtor_po12/rfk_[a-z]_*/
 
 # PyKotor writes logs next to the scripts it runs
 tools/*/logs/
+tools/logs/
+tools/*/scripts/logs/
+
+# flow.py writes its scenario on every run (flow_<plan>.nss); the plans in flow.py are the source
+/tools/kotor_autotest/scenarios/flow_*.nss

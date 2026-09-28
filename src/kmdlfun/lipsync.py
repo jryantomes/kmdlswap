@@ -145,9 +145,33 @@ def estimate_length(text: str) -> float:
     return max(MIN_LENGTH, min(MAX_LENGTH, words / WORDS_PER_SECOND))
 
 
+DIGIT_NAMES = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
+LETTER_NAMES = {
+    "a": "ay", "b": "bee", "c": "see", "d": "dee", "e": "ee", "f": "eff", "g": "gee", "h": "aitch",
+    "i": "eye", "j": "jay", "k": "kay", "l": "ell", "m": "em", "n": "en", "o": "oh", "p": "pee",
+    "q": "kyoo", "r": "ar", "s": "ess", "t": "tee", "u": "you", "v": "vee", "w": "double you",
+    "x": "ex", "y": "why", "z": "zed",
+}
+
+
+def spoken(text: str) -> str:
+    """The text as it is said: a designation or acronym letter by letter, digits as words.
+
+    "GH0-67I" is ten syllables spoken ("gee aitch zero six seven eye") but only three
+    letters to the shape reader, so a line opening on it held the mouth nearly still for
+    two seconds (the Czerka contractor's first lines, 2026-09-27). A token with a digit
+    in it, or two to four capitals ("RFK", "GHO"), is spelled out; loose digits read as
+    digit names."""
+    def spell(m):
+        return " ".join(DIGIT_NAMES[int(ch)] if ch.isdigit() else LETTER_NAMES.get(ch.lower(), "")
+                        for ch in m.group(0) if ch.isalnum())
+    text = re.sub(r"\b(?=[A-Za-z0-9-]*\d)[A-Za-z0-9-]+\b|\b[A-Z]{2,4}\b", spell, text)
+    return re.sub(r"\d", lambda m: f" {DIGIT_NAMES[int(m.group(0))]} ", text)
+
+
 def shapes_for(text: str) -> list[str]:
     """The mouth positions the text implies, in order."""
-    lowered = re.sub(r"[^a-z ]+", " ", text.lower())
+    lowered = re.sub(r"[^a-z ]+", " ", spoken(text).lower())
     out: list[str] = []
     i = 0
     while i < len(lowered):
