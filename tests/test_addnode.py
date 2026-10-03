@@ -10,7 +10,7 @@ import pytest
 from kmdlswap import edit as ke
 from kmdlswap import layout as kl
 from kmdlswap import validate as kv
-from kmdlswap.addnode import add_mesh_node, set_selfillum
+from kmdlswap.addnode import add_anim_node, add_mesh_node, set_selfillum
 from kmdlswap.rewrite import Rewriter
 
 
@@ -85,3 +85,51 @@ def test_an_insert_right_after_a_pointer_is_not_a_straddle(hk47_bytes):
     rw = Rewriter(L)
     rw.replace_mdl(names.end, names.end, b"\0\0\0\0")
     rw.apply()
+
+
+# --- an animation node for it (GH0-RFK's blink, 2026-10-01) ---------------------------------
+
+BLINK = [(100, [0.0, 1.0, 1.1, 3.0], [[0.9] * 3, [0.0] * 3, [0.9] * 3, [0.9] * 3])]
+
+
+@pytest.fixture(scope="module")
+def blinking(added):
+    mdl, mdx = added
+    for anim in ("pause1", "pause2"):
+        mdl = add_anim_node(mdl, mdx, anim, "eyes2", "talkdummy", BLINK)
+    return mdl, mdx
+
+
+def test_anim_node_result_is_a_clean_model(blinking):
+    rep = kv.check(kl.parse(*blinking))
+    assert rep.identity_mdl and rep.identity_mdx
+    assert not rep.gaps and not rep.overlaps and not rep.dangling
+
+
+def test_anim_node_carries_the_geometry_number_and_its_keys(blinking):
+    import struct
+    from kmdlswap._io import MDL_BASE
+    L = kl.parse(*blinking)
+    geo = next(n for n in L.nodes if n.in_animation is None and n.name == "eyes2")
+    for anim in ("pause1", "pause2"):
+        node = next(n for n in L.nodes if n.in_animation == anim and n.name == "eyes2")
+        assert node.node_id == geo.node_id
+        pos = MDL_BASE + node.offset
+        co, cc = struct.unpack_from("<2I", blinking[0], pos + 56)
+        do, dl = struct.unpack_from("<2I", blinking[0], pos + 68)
+        ctype, _f, rows, tk, dk, cols = struct.unpack_from("<IHHHHB", blinking[0], MDL_BASE + co)
+        data = struct.unpack_from(f"<{dl}f", blinking[0], MDL_BASE + do)
+        assert (cc, ctype, rows, cols & 15) == (1, 100, 4, 3)
+        assert data[tk:tk + rows] == pytest.approx([0.0, 1.0, 1.1, 3.0])
+        assert data[dk + 3:dk + 6] == pytest.approx([0.0] * 3)
+
+
+def test_anim_node_leaves_other_nodes_alone(added, blinking):
+    a, b = kl.parse(*added), kl.parse(*blinking)
+    assert len(b.nodes) == len(a.nodes) + 2
+    assert blinking[1] == added[1]                      # the MDX is not touched
+
+
+def test_anim_node_refuses_a_second_copy(blinking):
+    with pytest.raises(ValueError):
+        add_anim_node(*blinking, "pause1", "eyes2", "talkdummy", BLINK)

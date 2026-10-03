@@ -72,3 +72,10 @@ tools/*/scripts/logs/
 
 # flow.py writes its scenario on every run (flow_<plan>.nss); the plans in flow.py are the source
 /tools/kotor_autotest/scenarios/flow_*.nss
+
+# gh0_units.py's working chain for the GH0 units (models, textures, check renders): game-derived,
+# rebuilt by tools/swtor_po12/gh0_units.py
+/tools/swtor_po12/gh0s_work/
+# crashwatch.py's run logs
+/tools/kotor_autotest/crashwatch.log
+/tools/kotor_autotest/crashwatch_run.txt
