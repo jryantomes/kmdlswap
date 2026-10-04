@@ -1,0 +1,60 @@
+--- "Alt Tab Patch/alt_tab_patch.cpp"	2026-09-28 19:35:05.000000000 -0400
++++ AltTabPatchMovieFix/alt_tab_patch.cpp	2026-10-04 01:44:57.465005500 -0400
+@@ -24,6 +24,20 @@
+     return (style & WS_POPUP) != 0 && (style & WS_CAPTION) == 0;
+ }
+ 
++// KotOR plays a movie in its own window, "SW Movie Player Window", and switches the display to
++// the movie's mode (640x480) for it. While that window is up the display mode is the movie's:
++// restoring the game's resolution under it leaves the movie drawn in the top-left corner of a
++// full-resolution screen.
++bool moviePlaying() {
++    const HWND movieWindow = FindWindowA(nullptr, "SW Movie Player Window");
++    if (movieWindow == nullptr || !IsWindowVisible(movieWindow)) {
++        return false;
++    }
++    DWORD movieProcessId = 0;
++    GetWindowThreadProcessId(movieWindow, &movieProcessId);
++    return movieProcessId == GetCurrentProcessId();
++}
++
+ void restoreCursor() {
+     void* inputManager =
+         *reinterpret_cast<void* const volatile*>(InputManagerAddress);
+@@ -136,7 +150,8 @@
+         const bool timerStarted = SetTimer(
+             window, RestoreTimerId, RestoreTimerIntervalMs, nullptr) != 0;
+ 
+-        if (!displayMatchesGameResolution() &&
++        // during a movie the timer waits for it to end, then restores
++        if (!moviePlaying() && !displayMatchesGameResolution() &&
+             !restoreExclusiveDisplayMode()) {
+             restoreInProgress = false;
+             KillTimer(window, RestoreTimerId);
+@@ -147,11 +162,11 @@
+         if (mainWindow == nullptr) {
+             mainWindow = window;
+         }
+-        if (restoreInProgress && IsIconic(mainWindow)) {
++        if (restoreInProgress && !moviePlaying() && IsIconic(mainWindow)) {
+             ShowWindow(mainWindow, SW_RESTORE);
+             lastRestoreActivity = GetTickCount();
+         }
+-        if (restoreInProgress && alignGameWindow(mainWindow)) {
++        if (restoreInProgress && !moviePlaying() && alignGameWindow(mainWindow)) {
+             lastRestoreActivity = GetTickCount();
+         }
+         if (!timerStarted) {
+@@ -179,6 +194,12 @@
+             return 0;
+         }
+ 
++        // a movie is playing in the display mode it chose: wait for it to end
++        if (moviePlaying()) {
++            lastRestoreActivity = now;
++            return 0;
++        }
++
+         if (!displayMatchesGameResolution()) {
+             if (!restoreExclusiveDisplayMode()) {
+                 restoreInProgress = false;
