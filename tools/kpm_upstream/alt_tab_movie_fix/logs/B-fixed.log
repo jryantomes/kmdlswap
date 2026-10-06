@@ -1,0 +1,15 @@
+02:37:05 display 2560x1440  movie window None  game window None
+02:37:11 display 2560x1440  movie window None  game window (78,78)-(1998,1101) hidden
+02:37:11 display 2560x1440  movie window None  game window (104,104)-(2024,1127) hidden
+02:37:12 display 640x480  movie window None  game window (0,0)-(640,480) hidden
+02:37:12 display 640x480  movie window None  game window (0,0)-(640,480)
+02:37:13 display 1600x1200  movie window None  game window (0,0)-(640,480)
+02:37:13 display 1600x1200  movie window None  game window (0,0)-(1600,1200)
+02:37:55 display 640x480  movie window None  game window (0,0)-(1600,1200)
+02:37:55 display 640x480  movie window None  game window (0,0)-(640,480)
+02:37:56 display 640x480  movie window (0,0)-(640,480) hidden  game window (0,0)-(640,480)
+02:37:56 display 640x480  movie window (0,0)-(640,480)  game window (0,0)-(640,480)
+02:38:00 display 2560x1440  movie window None  game window (-32000,-32000)-(-31840,-31972)
+02:38:04 display 1600x1200  movie window None  game window (0,0)-(2560,1440)
+02:38:05 display 1600x1200  movie window None  game window (0,0)-(1600,1200)
+02:38:26 display 2560x1440  movie window None  game window None
