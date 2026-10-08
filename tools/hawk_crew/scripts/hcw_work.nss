@@ -32,7 +32,23 @@ int CW_MEDITATE = 3;
 int CW_GET_LOW = 10;
 int CW_GET_MID = 11;
 int CW_TIRED = 12;
-int CW_ON_BED = 16;     // ANIMATION_LOOPING_DANCE: Jolee's body models carry 'prone' on the bed under it (jolee_bed.py)
+// Jolee lying back on the medical bed: an animation of his own, "hcw_bedlie" in his body models
+// (jolee_bed.py), and a row the installer adds to animations.2da. The Animation Rows patch for Kotor
+// Patch Manager plays it as 20000 + row. The installer writes the row into CW_BEDLIE_RAW's constant
+// (HoloPatcher HACKList; install.py the same) - 0x12340000 is only the placeholder it looks for. An
+// installer that writes 32 bits there leaves the row; one that writes 16 (TSLPatcher's way) leaves
+// row * 65536 over the placeholder's zero low half - so both are read back the same. Unwritten, it is
+// row 4660, which no table has: nothing plays. Until 2026-10-08 the pose was "dance" (16) on the
+// shared male bodies, which the Star Forge easter egg plays on the player.
+// (A function, not a global initialised by calling one: a global set from a function call kept
+// hcw_work from running at all - harness crewpad, 2026-10-08.)
+int CW_BEDLIE_RAW = 305397760;
+int CW_OnBed()
+{
+    int v = CW_BEDLIE_RAW;
+    if (v >= 65536) v = v / 65536;
+    return 20000 + v;
+}
 int CW_COMPUTER = 15;
 int CW_WELD = 25;
 int CW_TREAT = 29;
@@ -127,7 +143,7 @@ int CW_Anim(int i, int k)
         case 1:  return CW_PAUSE;
         case 10: return CW_MEDITATE;
         case 11: return CW_COMPUTER;
-        case 20: return CW_ON_BED;
+        case 20: return CW_OnBed();
         case 21: return CW_TIRED;
         case 30: return CW_COMPUTER;
         case 31: return CW_PAUSE;
@@ -281,7 +297,7 @@ void CW_GivePad(object oJ)
 void CW_LieBack(object oJ)
 {
     AssignCommand(oJ, ActionDoCommand(SetFacing(CW_Face(2, 0))));
-    AssignCommand(oJ, ActionPlayAnimation(CW_ON_BED, 1.0, CW_Stay(2, 0)));
+    AssignCommand(oJ, ActionPlayAnimation(CW_OnBed(), 1.0, CW_Stay(2, 0)));
 }
 
 // every second: the datapad in or out of his hand; and after a conversation he lies straight back

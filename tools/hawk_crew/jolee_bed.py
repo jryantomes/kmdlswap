@@ -4,14 +4,17 @@ bed"), for hcw_work (Ebon Hawk Crew at Work - tools/hawk_crew).
 The bed is not walkable, so no creature can stand on it. Instead he stands at its foot, facing away,
 and lies back onto it: the game's own "prone" (on the back, face up, the head behind where the
 creature stands - S_Male02), raised to the mattress and carried back along the bed. That is a
-new animation, so it goes into his body models under a script-reachable name nothing plays on
-those bodies: "dance" (ANIMATION_LOOPING_DANCE, 16 - the Twi'lek dancers' loop; the male bodies
-inherit it from S_Male02 and no vanilla script dances them).
+new animation, so it goes into his body models under a name of its own, "hcw_bedlie", with a row in
+animations.2da; scripts play it through the Animation Rows patch for Kotor Patch Manager
+(tools/kpm_patches/AnimationRows: ActionPlayAnimation(20000 + row)). Until 2026-10-08 it was
+"dance" (ANIMATION_LOOPING_DANCE) - but the shared male bodies are the player's too, and the Star
+Forge easter egg (k_psta_egg) dances the player: he lay down in mid-air instead. A name nothing
+else plays changes nothing vanilla.
 
 His body models: P_JoleeBB in his own clothes (P_JoleeBA, underclothes, inherits from it) and the
 shared male medium bodies when he wears armour or a robe (PMBCM..PMBJM; his starting Jedi robe is
-PMBIM). The player and the other male companions share those, but only hcw_work plays
-"dance" on anyone, and only on Jolee.
+PMBIM). The player and the other male companions share those; only hcw_work plays "hcw_bedlie",
+and only on Jolee.
 
 And a datapad in his hand (user: "Can we give him a tablet to hang out with?", then "For fun, make a
 datapad equipable for Jolee and equip it to that hand"): Jolee's Datapad, hcw_jolee_pad - a stun
@@ -21,7 +24,7 @@ origin, the handle up +z). hcw_work puts it in his right hand while he lies ther
 player nearby and gives him his own weapon back before he could leave the ship.
 
 Writes (backed up first): Override P_JoleeBB, PMBCM..PMBJM, w_stunbaton_050 (.mdl/.mdx),
-hcw_jolee_pad.uti.
+hcw_jolee_pad.uti (install.py adds the animations.2da row).
 With --overlay <dir>: into that folder's Override only (the test harness's mirror overlay).
 
 usage: jolee_bed.py <backup dir> | --overlay <dir> [--dy D] [--dz D]
@@ -44,7 +47,9 @@ from kmdlswap.layout import parse                                        # noqa:
 from kmdlswap.transplant import add_animation                            # noqa: E402
 from install_commentary import GAME, OVERRIDE, refuse_if_running         # noqa: E402
 
-SLOT = "dance"                       # ANIMATION_LOOPING_DANCE = 16
+SLOT = "hcw_bedlie"                  # its own name: an animations.2da row (animations_table)
+LEGACY_SLOT = "dance"                # the name it had until 2026-10-08: a model carrying it is rebuilt
+ROW_LIKE = "dance"                   # the vanilla row whose flags the new row copies: stationary, looping
 TARGETS = ["P_JoleeBB"] + [f"PMB{c}M" for c in "CDEFGHIJ"]
 # the bed (ebo_m12aa room 01g, medbay_bed01): x 43.5-44.6, y 36.8-39.3, head to the north, mattress
 # ~0.6 m above the floor. He stands at its foot, (44.03, 36.0) facing south (hcw_work); "prone"
@@ -211,17 +216,36 @@ def pad_uti():
     r.set_list("PropertiesList", props)
     return bytes_gff(gff)
 
+def animations_table(current: bytes | None) -> tuple[bytes, int]:
+    """(animations.2da with the SLOT row, its row number): the row added once - the flags of the vanilla
+    ROW_LIKE row - or the one already there. current: the install's table, or None for the game's own."""
+    from pykotor.resource.formats.twoda import bytes_2da, read_2da
+    if current is None:
+        current = Installation(str(GAME)).resource("animations", ResourceType.TwoDA, [SearchLocation.CHITIN]).data
+    t = read_2da(current)
+    names = [t.get_row(i).get_string("name").lower() for i in range(t.get_height())]
+    if SLOT in names:
+        return current, names.index(SLOT)
+    like = t.get_row(names.index(ROW_LIKE))
+    t.add_row(str(t.get_height()), {**{h: like.get_string(h) for h in t.get_headers()}, "name": SLOT})
+    row = t.get_height() - 1
+    if row >= 1000:
+        raise SystemExit(f"animations.2da row {row}: the Animation Rows patch reaches rows below 1000")
+    return bytes(bytes_2da(t)), row
+
+
 def build(dy=DY, dz=DZ, slot=SLOT):
-    """slot: the animation's name in the models - "dance" (ANIMATION_LOOPING_DANCE), or a name of its own
-    for the Animation Rows patch (tools/kpm_patches/AnimationRows: an animations.2da row, played as
-    20000 + row), which leaves every vanilla animation alone."""
+    """{model: (mdl, mdx, bones left out)}: each body with the bed pose as the animation `slot` - SLOT, a
+    name of its own (an animations.2da row, played through the Animation Rows patch as 20000 + row),
+    which leaves every vanilla animation alone. A body that carries this pose already (or the old
+    "dance" one) is rebuilt from the game's own archives."""
     inst = Installation(str(GAME))
     source = lying_source(dy, dz)
     out = {}
     for name in TARGETS:
         mdl = inst.resource(name, ResourceType.MDL).data          # as the game finds it (Override first)
         mdx = inst.resource(name, ResourceType.MDX).data
-        if {SLOT, slot} & set(parse(mdl, mdx).animation_names):
+        if {LEGACY_SLOT, SLOT, slot} & set(parse(mdl, mdx).animation_names):
             # an earlier install of this one: rebuilt from the game's own (none of these bodies was in
             # the dev copy's Override before it, 2026-10-07)
             mdl = inst.resource(name, ResourceType.MDL, [SearchLocation.CHITIN]).data
