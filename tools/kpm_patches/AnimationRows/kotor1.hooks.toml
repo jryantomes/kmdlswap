@@ -1,0 +1,31 @@
+[metadata]
+target_versions = [
+	"9C10E0450A6EECA417E036E3CDE7474FED1F0A92AAB018446D156944DEA91435",
+	"761F9466F456A83909036BAEBB5C43167D722387BE66E54617BA20A8C49E9886",
+	"34E6D971C034222A417995D8E1E8FDD9F8781795C9C289BD86C499A439F34C88"
+]
+
+# CSWVirtualMachineCommands::ExecuteCommandPlayAnimation (PlayAnimation and ActionPlayAnimation),
+# the creature case, just before its jump table turns a script ANIMATION_* constant into a server
+# animation id (10000 + n; an unknown constant becomes 10000). A value 20000..20999 skips the table:
+# its server id is value - 20000, which the client's CSWCAnimBase::ServerToClientAnimation passes
+# through unchanged (its switch's default) as the animations.2da row. So 20000 + row plays any row,
+# a vanilla one no constant reaches ("prone", 79) or one a mod adds. Rows stay below 1000: the client
+# gives server ids 1000-1527 meanings of their own.
+[[hooks]]
+address = 0x005406F6
+type = "replace"
+original_bytes = [0x8B, 0x44, 0x24, 0x10, 0x83, 0xF8, 0x78]   # mov eax, [esp+0x10] / cmp eax, 0x78
+replacement_bytes = [
+    0x8B, 0x44, 0x24, 0x10,              # mov  eax, [esp+0x10]   ; the script's nAnimation
+    0x3D, 0x20, 0x4E, 0x00, 0x00,        # cmp  eax, 20000
+    0x7C, 0x16,                          # jl   vanilla
+    0x3D, 0x07, 0x52, 0x00, 0x00,        # cmp  eax, 20999
+    0x7F, 0x0F,                          # jg   vanilla
+    0x2D, 0x20, 0x4E, 0x00, 0x00,        # sub  eax, 20000        ; the animations.2da row
+    0x89, 0x44, 0x24, 0x10,              # mov  [esp+0x10], eax   ; as the server animation id
+    0x68, 0xE5, 0x0A, 0x54, 0x00,        # push 0x00540AE5        ; past the table's store
+    0xC3,                                # ret
+    0x83, 0xF8, 0x78                     # cmp  eax, 0x78         ; vanilla - then on at 0x005406FD (ja)
+]
+exclude_from_restore = []

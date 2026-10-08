@@ -211,21 +211,24 @@ def pad_uti():
     r.set_list("PropertiesList", props)
     return bytes_gff(gff)
 
-def build(dy=DY, dz=DZ):
+def build(dy=DY, dz=DZ, slot=SLOT):
+    """slot: the animation's name in the models - "dance" (ANIMATION_LOOPING_DANCE), or a name of its own
+    for the Animation Rows patch (tools/kpm_patches/AnimationRows: an animations.2da row, played as
+    20000 + row), which leaves every vanilla animation alone."""
     inst = Installation(str(GAME))
     source = lying_source(dy, dz)
     out = {}
     for name in TARGETS:
         mdl = inst.resource(name, ResourceType.MDL).data          # as the game finds it (Override first)
         mdx = inst.resource(name, ResourceType.MDX).data
-        if SLOT in parse(mdl, mdx).animation_names:
+        if {SLOT, slot} & set(parse(mdl, mdx).animation_names):
             # an earlier install of this one: rebuilt from the game's own (none of these bodies was in
             # the dev copy's Override before it, 2026-10-07)
             mdl = inst.resource(name, ResourceType.MDL, [SearchLocation.CHITIN]).data
             mdx = inst.resource(name, ResourceType.MDX, [SearchLocation.CHITIN]).data
-            if SLOT in parse(mdl, mdx).animation_names:
-                raise SystemExit(f"{name} already has an animation {SLOT!r} in the game's own archives")
-        new_mdl, new_mdx, dropped = add_animation((mdl, mdx), source, "prone", SLOT)
+            if slot in parse(mdl, mdx).animation_names:
+                raise SystemExit(f"{name} already has an animation {slot!r} in the game's own archives")
+        new_mdl, new_mdx, dropped = add_animation((mdl, mdx), source, "prone", slot)
         out[name] = (new_mdl, new_mdx, dropped)
     return out
 
