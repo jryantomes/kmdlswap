@@ -1,0 +1,21 @@
+[metadata]
+target_versions = [
+	"9C10E0450A6EECA417E036E3CDE7474FED1F0A92AAB018446D156944DEA91435",
+	"761F9466F456A83909036BAEBB5C43167D722387BE66E54617BA20A8C49E9886",
+	"34E6D971C034222A417995D8E1E8FDD9F8781795C9C289BD86C499A439F34C88"
+]
+
+# CSWSModule::EventHandler, the module load case (event 0x11): mov ecx, [esi+0x20] / add esi, 0xc0 -
+# whole instructions, nothing relative. RunModuleLoadScripts runs the module's own load script and the
+# modloadscripts.2da rows for it, returns 1, and the game goes on at 0x004c5417 (after its RunScript).
+[[hooks]]
+address = 0x004C5215
+type = "detour"
+original_bytes = [0x8B, 0x4E, 0x20, 0x81, 0xC6, 0xC0, 0x00, 0x00, 0x00]
+function = "RunModuleLoadScripts"
+exclude_from_restore = ["eax"]
+consumed_exit_address = 0x004C5417
+
+[[hooks.parameters]]
+source = "esi"
+type = "pointer" # the CSWSModule
