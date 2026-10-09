@@ -17,7 +17,7 @@ reference); otherwise the dialogue is left alone and listed.
 
 Run on the harness mirror, audit, then the dev copy; backups and a manifest (--remove puts them back).
 
-usage: merge.py <game folder> <backup dir> [--dry-run]
+usage: merge.py <game folder> <backup dir> [--file <dest> <name>] [--dry-run]
        merge.py <game folder> <backup dir> --remove
 """
 import json
@@ -77,6 +77,17 @@ def merge(vanilla, fixed, live):
             fv, ff, fl = fields(v[i]), fields(f[i]), fields(lst.at(i))
             node = lst.at(i)
             for label, (ftype, fval) in ff.items():
+                if label != lf and ftype == GFFFieldType.List:      # AnimList and its kin: whole lists
+                    vlst = fv.get(label, (None, None))[1]
+                    if _canon(fval) == _canon(vlst):
+                        continue
+                    llst = fl.get(label, (None, None))[1]
+                    if _canon(llst) == _canon(vlst):
+                        node.set_list(label, fval)
+                        notes["applied"] += 1
+                    elif _canon(llst) != _canon(fval):
+                        notes["conflicts"].append(f"{kind}[{i}].{label}: both changed it")
+                    continue
                 if label == lf or ftype not in SIMPLE:
                     continue
                 vval = fv.get(label, (None, None))[1]
@@ -105,6 +116,15 @@ def merge(vanilla, fixed, live):
     return (bytes(bytes_gff(L)) if notes["applied"] else None), notes
 
 
+def _canon(lst):
+    """A GFF list's content, comparable (None for no list)."""
+    if lst is None:
+        return None
+    sys.path.insert(0, str(HERE.parent / "ghorfk_package"))
+    from dlg_patch import canonical
+    return tuple(canonical(x) for x in lst)
+
+
 def clobbered(report):
     """{(dest, file)}: the K1CP findings CLOBBERED by a later mod's whole file."""
     out = set()
@@ -128,7 +148,11 @@ def main(argv):
     report = json.loads(audit.report_path(game, ".json").read_text(encoding="utf-8"))
     g = audit.Game(game)
     plan = []
-    for dest, name in sorted(clobbered(report)):
+    targets = clobbered(report)
+    if "--file" in argv:                                   # named files instead: --file <dest> <name>
+        i = argv.index("--file")
+        targets = {(argv[i + 1].lower(), argv[i + 2].lower())}
+    for dest, name in sorted(targets):
         live, shadowed = g.effective(dest, name)
         vanilla = bases._vanilla(dest, name)
         try:

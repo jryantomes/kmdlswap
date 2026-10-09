@@ -110,3 +110,9 @@ mod = ""
 area = "files"
 item = 'override\unk41_mission.dlg'
 reason = "merged with K1CP's fixes (55 applied, 0 conflicts kept this mod's) - merge.py 2026-10-09"
+
+[[accept]]
+mod = "GH0-RFK"
+area = "files"
+item = 'override\hkrfkjr.dlg'
+reason = "the package's copy is re-saved by the build (read_dlg/write_dlg, private recording links cleared) - never byte-identical to the dev copy; its banter gates c_rfk_cand/c_rfk_zaal checked present in the live one 2026-10-09"
