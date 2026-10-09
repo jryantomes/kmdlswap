@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-PATCHES = Path(r"D:\Downloads\kpm\src\LaneDibello-Kotor-Patch-Manager-5cafa6a\Patches")
+PATCHES = Path(r"D:\Downloads\kpm\0.7.3\src\unpacked\LaneDibello-Kotor-Patch-Manager-5f9b898\Patches")   # 0.7.3
 OUT = HERE.parents[1] / "builds" / "kpm"
 
 
