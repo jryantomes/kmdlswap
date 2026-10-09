@@ -51,6 +51,32 @@ def _vanilla(dest, filename):
     return None
 
 
+_TLK = {}
+
+
+def tlk_memory(cfg):
+    """A PatcherMemory whose StrRef tokens are this mod's appended strings, found by their text in the
+    installed dialog.tlk (where its installer put them) - so a patch that names a StrRef# replays."""
+    if "texts" not in _TLK:
+        from pykotor.resource.formats.tlk import read_tlk
+        index = {}
+        for i, entry in read_tlk((GAME / "dialog.tlk").read_bytes()):
+            index.setdefault(entry.text, i)
+        _TLK["texts"] = index
+    memory = PatcherMemory()
+    for m in getattr(cfg.patches_tlk, "modifiers", []):
+        if m.is_replacement:
+            continue
+        if not m.text and hasattr(m, "load"):
+            try:
+                m.load()
+            except Exception:                                # noqa: BLE001
+                continue
+        if m.text in _TLK["texts"]:
+            memory.memory_str[m.token_id] = _TLK["texts"][m.text]
+    return memory
+
+
 def others_copy(dest, filename, mods_toml=HERE / "mods.toml", only=None):
     """only: replay just the mods whose names contain one of these (default: every mod not ours)."""
     dest, filename = dest.lower(), filename.lower()
@@ -71,7 +97,7 @@ def others_copy(dest, filename, mods_toml=HERE / "mods.toml", only=None):
                 if data is None:
                     raise SystemExit(f"{m['name']} patches {dest}\\{filename}, which has no base copy")
                 try:
-                    data = g.patch_resource(data, PatcherMemory(), PatchLogger(), Game.K1)
+                    data = g.patch_resource(data, tlk_memory(cfg), PatchLogger(), Game.K1)
                 except Exception as e:                       # noqa: BLE001
                     raise SystemExit(f"{m['name']}'s patch of {filename} cannot be replayed alone: {e}") from e
                 from_mod = True
