@@ -1,0 +1,29 @@
+# The mods installed in the dev copy, in install order (later ones may supersede earlier ones on
+# purpose). Each entry is one TSLPatcher / HoloPatcher option: its changes.ini; its source files are
+# read from the folder the ini is in, as the installer reads them.
+#
+# Add a mod here when it goes into the dev copy - the audit can only check what it knows about.
+
+[[mod]]
+name = "K1 Community Patch 1.10"
+ini = 'D:\Downloads\K1_Community_Patch_v1.10.0\tslpatchdata\changes.ini'
+
+[[mod]]
+name = "RC-K1CP 0.11 (Main)"
+ini = 'D:\Downloads\RC-K1CP0.11.0\RC-K1CP0.11.0\tslpatchdata\Main\changes.ini'
+
+[[mod]]
+name = "Sleheyron 2.0.3 (Main)"
+ini = 'D:\Downloads\Sleheyron 2.0.3\Sleheyron 2.0.3\Sleheyron 2.0.3\tslpatchdata\Main\changes.ini'
+
+[[mod]]
+name = "Sleheyron 2.0.3 (K1CP compatibility)"
+ini = 'D:\Downloads\Sleheyron 2.0.3\Sleheyron 2.0.3\Sleheyron 2.0.3\tslpatchdata\K1CP-Compatibility Files\changes.ini'
+
+[[mod]]
+name = "GH0-RFK (test build)"
+ini = 'C:\Users\jryan\mdl swap\builds\ghorfk-holopatcher\tslpatchdata\changes.ini'
+
+[[mod]]
+name = "Ebon Hawk Crew at Work"
+ini = 'C:\Users\jryan\mdl swap\builds\hawk-crew-holopatcher\tslpatchdata\changes.ini'

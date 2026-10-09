@@ -1,0 +1,18 @@
+# Findings accepted on purpose - each with why. A finding matches when `mod` is part of the mod's name
+# and `item` is part of the checked item. Keep this short: everything here is a place the install
+# differs from what a mod's installer would leave, by decision.
+
+[[accept]]
+mod = "GH0-RFK"
+item = "tar_m02af.mod\\module.ifo"
+reason = "dev copy hooks the Taris hideout by script name (install_hub_hooks.py --by-name tar_m02af): the playthrough had visited it before the module.ifo hook, and a save keeps the old module.ifo"
+
+[[accept]]
+mod = "Sleheyron 2.0.3 (Main)"
+item = "override\\unk41_guide_dlg.dlg"
+reason = "merged by hand 2026-10-02 (install_sleheyron_repair.py): Sleheyron's Vima lines + GH0-RFK's 2"
+
+[[accept]]
+mod = "Sleheyron 2.0.3 (Main)"
+item = "override\\k_p"
+reason = "Sleheyron's own K1CP compatibility option replaces these scripts on purpose (installed after Main)"
