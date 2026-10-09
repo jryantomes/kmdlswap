@@ -394,9 +394,9 @@ def check_mod(mod, mods, game, known):
             if not m.text:
                 continue
             if m.is_replacement:
-                got = tlk.get(m.mod_index)
-                if got is None or got.text != m.text:
-                    wrong.append(m.mod_index)
+                got = tlk.get(m.token_id)                # a replacement's target: token_id (mod_index is
+                if got is None or got.text != m.text:    # the line in the mod's own string file)
+                    wrong.append(m.token_id)
             else:
                 if texts is None:
                     texts = {e.text for _, e in tlk}
