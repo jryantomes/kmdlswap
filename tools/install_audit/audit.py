@@ -478,6 +478,15 @@ def check_gff(m, root, dest, name, add, later):
 INDEX = {}
 
 
+def report_tag(game_root):
+    return "dev" if Path(game_root).resolve() == GAME.resolve() else Path(game_root).name
+
+
+def report_path(game_root, ext):
+    """The latest report for that game: reports/install-audit/latest-<dev|folder name><ext>."""
+    return OUT / f"latest-{report_tag(game_root)}{ext}"
+
+
 def main(argv):
     only = [argv[i + 1] for i, a in enumerate(argv) if a == "--mod"]
     game_root = Path(argv[argv.index("--game") + 1]) if "--game" in argv else GAME
@@ -521,11 +530,15 @@ def main(argv):
                     md.write(f"- {area}: `{item}`" + (f" - {detail}" if detail else "") + "\n")
                 if len(rows) > 400:
                     md.write(f"- ... and {len(rows) - 400} more (see the .json)\n")
-    (OUT / f"{stamp}.md").write_text(md.getvalue(), encoding="utf-8")
-    (OUT / f"{stamp}.json").write_text(json.dumps(
-        {n: [dict(zip(("area", "item", "status", "detail"), r)) for r in res] for n, res in results.items()},
-        indent=1), encoding="utf-8")
-    print(f"report: {OUT / f'{stamp}.md'}")
+    tag = report_tag(game_root)
+    name = stamp if tag == "dev" else f"{stamp}-{tag}"
+    data = json.dumps({n: [dict(zip(("area", "item", "status", "detail"), r)) for r in res]
+                       for n, res in results.items()}, indent=1)
+    (OUT / f"{name}.md").write_text(md.getvalue(), encoding="utf-8")
+    (OUT / f"{name}.json").write_text(data, encoding="utf-8")
+    report_path(game_root, ".md").write_text(md.getvalue(), encoding="utf-8")
+    report_path(game_root, ".json").write_text(data, encoding="utf-8")
+    print(f"report: {OUT / f'{name}.md'}")
     return 1 if any(r[2] in (FAIL, CLOBBERED) for res in results.values() for r in res) else 0
 
 
