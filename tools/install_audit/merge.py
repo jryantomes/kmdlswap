@@ -12,8 +12,8 @@ A three-way merge per dialogue, field by field:
   a field both changed (to different values)               -> the later mod's stays: a conflict, listed;
   a link list K1CP changed and the later mod did not       -> K1CP's list (when every node it points to exists);
   nodes K1CP added (past vanilla's end)                    -> not merged: listed.
-Only when the live copy keeps vanilla's nodes in vanilla's order (each node's text the same string
-reference); otherwise the dialogue is left alone and listed.
+Nodes are paired by their text's string reference (pairing()), so a later mod that inserted, moved or
+dropped nodes is merged too; vanilla nodes not found in the live copy are left out and listed.
 
 Run on the harness mirror, audit, then the dev copy; backups and a manifest (--remove puts them back).
 
@@ -55,27 +55,68 @@ def strref(s):
     return getattr(t, "stringref", None)
 
 
+def pairing(v, l):
+    """{vanilla node: live node}. A node with text pairs with the one live node with the same string
+    reference (that reference unique on both sides); a node without (blank, -1) pairs only inside a run
+    where the text nodes before and after it are shifted by the same amount, at that shift. The later
+    mod may insert, move or drop nodes; what cannot be paired is left out (listed)."""
+    def refs(nodes):
+        out = {}
+        for k, n in enumerate(nodes):
+            s = strref(n)
+            if s not in (None, -1):
+                out.setdefault(s, []).append(k)
+        return out
+    vr, lr = refs(v), refs(l)
+    out = {}
+    for s, vi in vr.items():
+        if len(vi) == 1 and len(lr.get(s, [])) == 1:
+            out[vi[0]] = lr[s][0]
+    known = sorted(out)
+    for i in range(len(v)):
+        if i in out:
+            continue
+        before = [k for k in known if k < i]
+        after = [k for k in known if k > i]
+        shifts = {out[before[-1]] - before[-1]} if before else set()
+        shifts |= {out[after[0]] - after[0]} if after else set()
+        if len(shifts) == 1:
+            j = i + shifts.pop()
+            if 0 <= j < len(l) and strref(l[j]) == strref(v[i]) and j not in out.values():
+                out[i] = j
+    return out
+
+
 def merge(vanilla, fixed, live):
     """(merged bytes or None, notes) - see the module's docstring."""
     V, F, L = read_gff(vanilla).root, read_gff(fixed).root, read_gff(live)
-    notes = {"applied": 0, "conflicts": [], "skipped": []}
-    for kind, lf in LISTS.items():
-        v, f, l = V.acquire(kind, []), F.acquire(kind, []), L.root.acquire(kind, [])
-        if len(l) < len(v):
-            return None, {"why": f"{kind}: the live copy has fewer nodes than vanilla"}
-        for i in range(len(v)):
-            if strref(v[i]) != strref(l[i]):
-                return None, {"why": f"{kind}[{i}]: the live copy's nodes are not in vanilla's order"}
-        if len(f) > len(v):
-            notes["skipped"].append(f"{kind}: {len(f) - len(v)} node(s) K1CP added - not merged")
+    notes = {"applied": 0, "conflicts": [], "skipped": [], "did": []}
+    pair = {k: pairing(V.acquire(k, []), L.root.acquire(k, [])) for k in LISTS}
+    for kind in LISTS:
+        n_v, n_f = len(V.acquire(kind, [])), len(F.acquire(kind, []))
+        if n_f > n_v:
+            notes["skipped"].append(f"{kind}: {n_f - n_v} node(s) K1CP added - not merged")
+        unpaired = n_v - len(pair[kind])
+        if unpaired:
+            notes["skipped"].append(f"{kind}: {unpaired} vanilla node(s) not found in the live copy")
     for kind, lf in LISTS.items():
         v, f = V.acquire(kind, []), F.acquire(kind, [])
         lst = L.root.get_list(kind)
-        n_vanilla = {k: len(V.acquire(k, [])) for k in LISTS}    # links may only reach vanilla's nodes:
-                                                                   # past its end the live copy's are another mod's
-        for i in range(len(v)):
-            fv, ff, fl = fields(v[i]), fields(f[i]), fields(lst.at(i))
-            node = lst.at(i)
+        target = "ReplyList" if kind == "EntryList" else "EntryList"
+        tmap = pair[target]
+
+        def moved(lnk):
+            """a vanilla-numbered link list in the live copy's numbers, or None if a target is unpaired"""
+            out = []
+            for t, a, c in lnk:
+                if t not in tmap:
+                    return None
+                out.append((tmap[t], a, c))
+            return out
+
+        for i, j in sorted(pair[kind].items()):
+            fv, ff, node = fields(v[i]), fields(f[i]), lst.at(j)
+            fl = fields(node)
             for label, (ftype, fval) in ff.items():
                 if label != lf and ftype == GFFFieldType.List:      # AnimList and its kin: whole lists
                     vlst = fv.get(label, (None, None))[1]
@@ -85,6 +126,7 @@ def merge(vanilla, fixed, live):
                     if _canon(llst) == _canon(vlst):
                         node.set_list(label, fval)
                         notes["applied"] += 1
+                        notes["did"].append(f"{kind}[{i}->{j}].{label}")
                     elif _canon(llst) != _canon(fval):
                         notes["conflicts"].append(f"{kind}[{i}].{label}: both changed it")
                     continue
@@ -100,18 +142,24 @@ def merge(vanilla, fixed, live):
                     continue
                 getattr(node, f"set_{ftype.name.lower()}")(label, fval)     # set_uint32, set_resref, ...
                 notes["applied"] += 1
-            # link list
+                notes["did"].append(f"{kind}[{i}->{j}].{label}={fval}")
+            # link list, in the live copy's numbers
             vl, fl_, ll = links(v[i], lf), links(f[i], lf), links(node, lf)
-            if fl_ != vl:
-                target = "ReplyList" if kind == "EntryList" else "EntryList"
-                if ll != vl:
-                    if ll != fl_:
-                        notes["conflicts"].append(f"{kind}[{i}].{lf}: both changed its links")
-                elif all(t < n_vanilla[target] for t, _a, _c in fl_):
-                    node.set_list(lf, f[i].acquire(lf, None))
-                    notes["applied"] += 1
-                else:
-                    notes["skipped"].append(f"{kind}[{i}].{lf}: K1CP links to a node it added - not merged")
+            if fl_ == vl:
+                continue
+            want = moved(fl_) if all(t < len(V.acquire(target, [])) for t, _a, _c in fl_) else None
+            if want is None:
+                notes["skipped"].append(f"{kind}[{i}].{lf}: K1CP links to a node it added or one not in the live copy")
+                continue
+            if ll == moved(vl):
+                src = f[i].acquire(lf, [])
+                for n in range(len(src)):
+                    src.at(n).set_uint32("Index", want[n][0])
+                node.set_list(lf, src)
+                notes["applied"] += 1
+                notes["did"].append(f"{kind}[{i}->{j}].{lf}: {ll} -> {want}")
+            elif ll != want:
+                notes["conflicts"].append(f"{kind}[{i}].{lf}: both changed its links")
         L.root.set_list(kind, lst)
     return (bytes(bytes_gff(L)) if notes["applied"] else None), notes
 
@@ -173,6 +221,9 @@ def main(argv):
               f"kept the later mod's" + (f"; {'; '.join(notes['skipped'])}" if notes["skipped"] else ""))
         for c in notes["conflicts"][:6]:
             print(f"      conflict {c}")
+        if "--verbose" in argv:
+            for d_ in notes["did"]:
+                print(f"      {d_}")
         plan.append((where, name, merged, notes))
     if "--dry-run" in argv or not plan:
         print(f"{len(plan)} dialogue(s) to merge" + (" (dry run)" if "--dry-run" in argv else ""))

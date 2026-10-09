@@ -116,3 +116,33 @@ mod = "GH0-RFK"
 area = "files"
 item = 'override\hkrfkjr.dlg'
 reason = "the package's copy is re-saved by the build (read_dlg/write_dlg, private recording links cleared) - never byte-identical to the dev copy; its banter gates c_rfk_cand/c_rfk_zaal checked present in the live one 2026-10-09"
+
+[[accept]]
+mod = ""
+area = "files"
+item = 'override\kas22_dasol_01.dlg'
+reason = "merged with K1CP's fixes, nodes paired by string reference (14 applied, 0 conflicts kept this mod's) - merge.py 2026-10-09"
+
+[[accept]]
+mod = ""
+area = "files"
+item = 'override\lev40_bast400.dlg'
+reason = "merged with K1CP's fixes, nodes paired by string reference (13 applied, 0 conflicts kept this mod's) - merge.py 2026-10-09"
+
+[[accept]]
+mod = ""
+area = "files"
+item = 'override\man26_repdip.dlg'
+reason = "merged with K1CP's fixes, nodes paired by string reference (2 applied, 0 conflicts kept this mod's) - merge.py 2026-10-09"
+
+[[accept]]
+mod = ""
+area = "files"
+item = 'override\man26_selambush.dlg'
+reason = "merged with K1CP's fixes, nodes paired by string reference (7 applied, 1 conflicts kept this mod's) - merge.py 2026-10-09"
+
+[[accept]]
+mod = ""
+area = "files"
+item = 'modules\tar_m03ae.mod\tar03_cand031.dlg'
+reason = "merged with K1CP's fixes, nodes paired by string reference (2 applied, 0 conflicts kept this mod's) - merge.py 2026-10-09"
