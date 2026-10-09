@@ -122,6 +122,7 @@ def reset(dest: Path, dry: bool) -> None:
     bin_ = dest / REMOVED / time.strftime("%Y%m%d-%H%M%S")
     extra = [(rel, p) for rel, p in tracked(dest) if rel.lower() not in lower]
     changed = 0
+    missing = []
     for rel, (size, digest) in files.items():
         out = dest / rel
         if same(out, size, digest):
@@ -139,7 +140,7 @@ def reset(dest: Path, dry: bool) -> None:
                 shutil.copy2(src, out)
                 break
         else:
-            sys.exit(f"no source matches the baseline for {rel}")
+            missing.append(rel)      # finish the reset first: a half reset leaves earlier runs' files
     for rel, p in extra:
         if dry:
             print("EXTRA:", rel)
@@ -149,6 +150,9 @@ def reset(dest: Path, dry: bool) -> None:
     verb = "differ" if dry else "restored"
     print(f"{len(files)} baseline files: {changed} {verb}; {len(extra)} extra files"
           + ("" if dry or not (changed or extra) else f" moved to {bin_.relative_to(dest)}"))
+    if missing:
+        sys.exit("no source matches the baseline for " + ", ".join(missing)
+                 + f" - put a vanilla copy in {STASH}\\")
 
 
 def main() -> int:
