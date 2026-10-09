@@ -231,7 +231,7 @@ def check_mod(mod, mods, game, known):
 
     def add(area, item, status, detail=""):
         for k in known:
-            if k["mod"].lower() in mod["name"].lower() and k["item"].lower() in item.lower():
+            if k["mod"].lower() in mod["name"].lower() and k["item"].lower() in item.lower()                     and k.get("area", area) == area:
                 if status in (FAIL, CLOBBERED, SUPERSEDED):
                     status, detail = ACCEPTED, f"{detail} - accepted: {k['reason']}"
                 break

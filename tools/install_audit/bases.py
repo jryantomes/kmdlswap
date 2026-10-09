@@ -51,11 +51,14 @@ def _vanilla(dest, filename):
     return None
 
 
-def others_copy(dest, filename, mods_toml=HERE / "mods.toml"):
+def others_copy(dest, filename, mods_toml=HERE / "mods.toml", only=None):
+    """only: replay just the mods whose names contain one of these (default: every mod not ours)."""
     dest, filename = dest.lower(), filename.lower()
     data, from_mod = _vanilla(dest, filename), False
     for m in tomllib.loads(Path(mods_toml).read_text(encoding="utf-8"))["mod"]:
         if any(o.lower() in m["name"].lower() for o in OURS):
+            continue
+        if only and not any(o.lower() in m["name"].lower() for o in only):
             continue
         ini = Path(m["ini"])
         with contextlib.redirect_stdout(io.StringIO()):
