@@ -136,3 +136,109 @@ extern "C" void __cdecl WidenPartyClears(unsigned char* code, int size)
     if (widened)
         Log("[PartyClearsAllSlots] %d party-clearing loop(s) widened to slot 31 (%d bytes of code)\n", widened, size);
 }
+
+// ---------------------------------------------------------------------------------------------
+// Clears that name each slot instead of looping (0.2.0). Three Star Forge scripts remove slots
+// 0-8 one by one - k_psta_door (the door scenes), k_psta_mlkparty (Malak's duel),
+// k_psta_pc_j (Bastila's light side scene) - so there is no loop bound to widen. A script that
+// calls RemovePartyMember with five or more different constant slots is clearing the party; the
+// first time such a script removes anyone, the members in slots 9-31 are removed too. Scripts that
+// take out one or two named companions (the Leviathan's split party) never reach five.
+//
+// The hook is the RemovePartyMember command (CSWVirtualMachineCommands::
+// ExecuteCommandRemovePartyMember, 0x00541C00). The extra slots go through the game's own command
+// handlers, IsNPCPartyMember and RemovePartyMember: push the slot, run the handler, pop its answer -
+// each pops one integer and pushes one, so the script's stack is left as it was.
+
+namespace {
+
+void** const VIRTUAL_MACHINE_PTR = reinterpret_cast<void**>(0x007A3A00);
+const int VM_INTERNAL_SCRIPT_COUNT = 0x28;      // CVirtualMachineInternal.script_count: the running level
+const int VM_INTERNAL_SCRIPTS = 0x2C;           // .scripts, CVirtualMachineScript[8] inline
+const int VM_SCRIPT_SIZE = 0x28;
+const int VM_SCRIPT_CODE = 0x10;
+const int VM_SCRIPT_CODE_SIZE = 0x14;
+const int ACTION_REMOVE_PARTY_MEMBER = 575;
+const int ACTION_IS_NPC_PARTY_MEMBER = 699;
+
+typedef int(__thiscall* CommandFn)(void* commands, int command, int argCount);
+typedef int(__thiscall* PushIntFn)(void* vm, int value);
+typedef int(__thiscall* PopIntFn)(void* vm, int* value);
+const CommandFn IsNpcPartyMemberCommand = reinterpret_cast<CommandFn>(0x0053F100);
+const CommandFn RemovePartyMemberCommand = reinterpret_cast<CommandFn>(0x00541C00);
+const PushIntFn StackPushInteger = reinterpret_cast<PushIntFn>(0x005D1010);
+const PopIntFn StackPopInteger = reinterpret_cast<PopIntFn>(0x005D1000);
+
+bool gExtending = false;
+
+// how many different slots 0-9 the code removes by a constant: CONSTI n; ACTION 575
+int NamedRemovals(const unsigned char* code, int size)
+{
+    bool seen[10] = {};
+    int count = 0;
+    for (int i = 0; i + 11 <= size; ++i)
+    {
+        if (code[i] != 0x04 || code[i + 1] != 0x03 || code[i + 2] || code[i + 3] || code[i + 4]) continue;
+        const int slot = code[i + 5];
+        if (slot > 9) continue;
+        static const unsigned char REMOVE[] = {0x05, 0x00, 0x02, 0x3F, 0x01};
+        if (memcmp(code + i + 6, REMOVE, sizeof(REMOVE)) != 0) continue;
+        if (!seen[slot]) { seen[slot] = true; ++count; }
+    }
+    return count;
+}
+
+// the script running now: the innermost one (ExecuteScript nests them)
+bool RunningScriptClearsByName()
+{
+    void* vm = *VIRTUAL_MACHINE_PTR;
+    if (!vm) return false;
+    unsigned char* internal = *reinterpret_cast<unsigned char**>(vm);
+    if (!internal) return false;
+    // script_count is the running script's own index (0 at the top; ExecuteScript nests one level
+    // deeper - seen in game, harness namedclear 2026-10-10), not a count
+    const int level = *reinterpret_cast<int*>(internal + VM_INTERNAL_SCRIPT_COUNT);
+    if (level < 0 || level > 7) return false;
+    const unsigned char* script = internal + VM_INTERNAL_SCRIPTS + level * VM_SCRIPT_SIZE;
+    const unsigned char* code = *reinterpret_cast<unsigned char* const*>(script + VM_SCRIPT_CODE);
+    const int size = *reinterpret_cast<const int*>(script + VM_SCRIPT_CODE_SIZE);
+    if (!code || size <= 0 || size > MAX_CODE) return false;
+    return NamedRemovals(code, size) >= 5;
+}
+
+int CallIntCommand(void* commands, CommandFn handler, int command, int slot, void* vm)
+{
+    int answer = 0;
+    if (!StackPushInteger(vm, slot)) return 0;
+    handler(commands, command, 1);
+    StackPopInteger(vm, &answer);
+    return answer;
+}
+
+}
+
+extern "C" void __cdecl ExtendNamedPartyClear(void* commands)
+{
+    if (gExtending || !commands) return;
+    __try
+    {
+        if (!RunningScriptClearsByName()) return;
+        void* vm = *VIRTUAL_MACHINE_PTR;
+        gExtending = true;
+        int removed = 0;
+        for (int slot = 9; slot <= 31; ++slot)
+        {
+            if (!CallIntCommand(commands, IsNpcPartyMemberCommand, ACTION_IS_NPC_PARTY_MEMBER, slot, vm)) continue;
+            CallIntCommand(commands, RemovePartyMemberCommand, ACTION_REMOVE_PARTY_MEMBER, slot, vm);
+            ++removed;
+        }
+        gExtending = false;
+        if (removed)
+            Log("[PartyClearsAllSlots] a clear by name: %d member(s) in slots 9-31 removed too\n", removed);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        gExtending = false;
+        Log("[PartyClearsAllSlots] could not check the running script\n");
+    }
+}

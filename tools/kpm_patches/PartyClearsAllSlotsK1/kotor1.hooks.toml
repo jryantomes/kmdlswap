@@ -23,3 +23,18 @@ type = "pointer" # the script's bytecode
 [[hooks.parameters]]
 source = "[esp+12]"
 type = "int" # its length
+
+# CSWVirtualMachineCommands::ExecuteCommandRemovePartyMember(command, argCount), entry: push ecx /
+# mov ecx, [0x007A3A00] (the virtual machine) - whole instructions, an absolute address, nothing
+# relative. A script that removes five or more named slots (the Star Forge's k_psta_door,
+# k_psta_mlkparty, k_psta_pc_j) also has slots 9-31 removed (ExtendNamedPartyClear).
+[[hooks]]
+address = 0x00541C00
+type = "detour"
+original_bytes = [0x51, 0x8B, 0x0D, 0x00, 0x3A, 0x7A, 0x00]
+function = "ExtendNamedPartyClear"
+exclude_from_restore = []
+
+[[hooks.parameters]]
+source = "ecx"
+type = "pointer" # the command implementer

@@ -17,8 +17,13 @@ No game or mod file is changed; it works for every script, in saves already unde
 The matching was checked offline against all 9,981 scripts of one install: every party-clearing loop
 matched, and nothing else.
 
-Not covered: scripts that name slots 0-8 one by one instead of looping (on one install, three Star
-Forge scripts: `k_psta_door`, `k_psta_mlkparty`, `k_psta_pc_j`). A companion mod handles those itself.
+**Clears by name (0.2.0).** Some scripts remove slots 0 to 8 one by one instead of looping. On one
+install that's three Star Forge scripts: `k_psta_door` (the door scenes), `k_psta_mlkparty` (Malak's
+duel) and `k_psta_pc_j` (Bastila's light side scene). A second hook on the `RemovePartyMember` command
+(0x00541C00) checks the running script: if it removes five or more different slots by constant, it's a
+clear, and the members in slots 9 to 31 are removed too, through the game's own command handlers.
+Scripts that take out one or two named companions (the Leviathan's split party) never reach five.
+Tested in game: two named removals left a slot 10 companion in the party; nine removed him.
 
 The debug output (DebugView) says how many loops each script had widened.
 

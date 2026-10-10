@@ -1,3 +1,4 @@
 LIBRARY PartyClearsAllSlotsK1
 EXPORTS
     WidenPartyClears
+    ExtendNamedPartyClear
