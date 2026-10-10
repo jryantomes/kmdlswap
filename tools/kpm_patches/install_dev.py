@@ -25,7 +25,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
-sys.path.insert(0, str(ROOT / "tools" / "kotor_autotest"))
+sys.path.insert(0, str(Path(r"D:\KOTOR Companion Mod + Questline") / "tools" / "kotor_autotest"))   # the harness (moved 2026-10-09)
 from patchset import blocks, kpatch_block                                        # noqa: E402
 
 GAME = Path(r"E:\SteamLibrary\steamapps\common\swkotor")

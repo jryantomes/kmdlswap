@@ -36,7 +36,8 @@ from pathlib import Path, PureWindowsPath
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 GAME = Path(r"E:\SteamLibrary\steamapps\common\swkotor")
-OUT = ROOT / "reports" / "install-audit"
+# the reports name every file of the user's mods: they go to the mod's private repo (2026-10-09)
+OUT = Path(r"D:\KOTOR Companion Mod + Questline") / "reports" / "install-audit"
 
 from pykotor.extract.installation import Installation, SearchLocation           # noqa: E402
 from pykotor.resource.formats.erf import read_erf                               # noqa: E402
