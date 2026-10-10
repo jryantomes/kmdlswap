@@ -1,3 +1,5 @@
+> **Posted 2026-10-10:** https://github.com/LaneDibello/Kotor-Patch-Manager/issues/329
+
 **Title:** Party Roster Limit 32 (K1): party selection portraits are blank - calls CSWSObject::GetPortrait instead of the creature's
 
 **Version:** 0.7.3 release; also current master (aa65324). KotOR 1.03 (GOG-identical exe), Windows.
