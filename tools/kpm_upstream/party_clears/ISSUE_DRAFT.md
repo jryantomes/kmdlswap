@@ -1,3 +1,5 @@
+> **Posted 2026-10-10:** https://github.com/LaneDibello/Kotor-Patch-Manager/issues/330
+
 **Title:** Party Roster Limit 32 (K1): companions in slots 9 to 31 stay in the party when a script clears it
 
 **Version:** 0.7.3 release and current master. KotOR 1.03 (GOG identical exe), Windows.
