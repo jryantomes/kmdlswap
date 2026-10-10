@@ -37,7 +37,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-sys.path.insert(0, str(HERE.parent / "ghorfk_scene"))      # the dev tools' paths and compiler
+sys.path.insert(0, str(Path(r"D:\KOTOR Companion Mod + Questline\tools") / "ghorfk_scene"))      # the dev tools' paths and compiler
 
 from install_commentary import GAME, OVERRIDE, compile_nss, refuse_if_running   # noqa: E402
 import jolee_bed                                                                 # noqa: E402

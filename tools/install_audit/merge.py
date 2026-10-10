@@ -168,7 +168,7 @@ def _canon(lst):
     """A GFF list's content, comparable (None for no list)."""
     if lst is None:
         return None
-    sys.path.insert(0, str(HERE.parent / "ghorfk_package"))
+    sys.path.insert(0, str(Path(r"D:\KOTOR Companion Mod + Questline\tools") / "ghorfk_package"))
     from dlg_patch import canonical
     return tuple(canonical(x) for x in lst)
 

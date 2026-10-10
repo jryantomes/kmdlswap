@@ -37,7 +37,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1] / "src"))
-sys.path.insert(0, str(HERE.parent / "ghorfk_scene"))   # the dev tools' paths and compiler only
+sys.path.insert(0, str(Path(r"D:\KOTOR Companion Mod + Questline\tools") / "ghorfk_scene"))   # the dev tools' paths and compiler only
 
 from pykotor.extract.installation import Installation, SearchLocation   # noqa: E402
 from pykotor.resource.type import ResourceType                           # noqa: E402
