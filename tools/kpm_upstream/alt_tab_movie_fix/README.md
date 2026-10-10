@@ -29,3 +29,21 @@ every 0.1 s; logs/):
 
 Not known: what activates the main window during a movie in the user's game. Ask before
 proposing this upstream (LaneDibello/Kotor-Patch-Manager, patch author J0-o).
+
+## Root cause (2026-10-10) - and the fix is J's Movie Patch, not 1.8.2
+
+1.8.2 was installed locally on 2026-10-09 and did not help: in a real launch through Steam the movies
+still came out at different sizes. `focuswatch.py` (passive: foreground changes, minimise/restore,
+other processes' windows, the display mode, KotOR's movie and main windows, every 0.1 s) showed why:
+
+- The game taking the foreground at launch is a WM_ACTIVATEAPP, which arms the patch's restore timer.
+- The patch always restores the GAME resolution, but KotOR keeps 640x480 across chained movies (the
+  intro logos, cutscene chains). 1.8.1 restores 1 s into the first movie; 1.8.2 waits for it to end
+  and restores in the gap - so the next movie opens a 640x480 window on a 1600x1200 screen (the
+  corner), and the one after gets a 1600x1200 window.
+- No other process took the foreground. The harness missed it: it skips the intro movies.
+
+Fix: J's own Movie Patch (better-movie-playback-v1, 1.5.3, in the 0.7.3 release) with the unmodified
+Alt Tab Patch 1.8.1. Movies play in the game window at the game resolution, so there is no mode
+switch to fight. Checked the same way: the display stayed 1600x1200 and every movie window was
+1600x1200. 1.8.2 stays here as a record; it is not installed. Not reported upstream.
