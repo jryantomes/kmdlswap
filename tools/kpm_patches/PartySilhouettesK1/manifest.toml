@@ -1,0 +1,14 @@
+[patch]
+id = "party-silhouettes-k1"
+name = "Party Silhouettes (KotOR I)"
+version = "0.1.0"
+author = "Ryan Tomes"
+description = "With Party Roster Limit 32, a companion in slots 9 to 31 gets a silhouette on the party screen while it isn't available, as every vanilla companion has. Companion mods register theirs in partysilhouettes.2da (columns: slot, or slotglobal for a slot kept in a global number as Party Slots does, and silhouette, a texture). Slots without a row stay empty. A stopgap until Party Roster Limit 32 has this itself."
+
+requires = ["party-roster-limit-32-k1"]
+conflicts = []
+
+[patch.supported_versions]
+kotor1_gog_103 = "9C10E0450A6EECA417E036E3CDE7474FED1F0A92AAB018446D156944DEA91435"
+kotor1_cdcrack_103 = "761F9466F456A83909036BAEBB5C43167D722387BE66E54617BA20A8C49E9886"
+kotor1_steam_103 = "34E6D971C034222A417995D8E1E8FDD9F8781795C9C289BD86C499A439F34C88"
