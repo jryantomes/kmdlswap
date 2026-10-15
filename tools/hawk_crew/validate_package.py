@@ -5,13 +5,14 @@ from the package's vanilla copies). PyKotor's ModInstaller (HoloPatcher is built
 package, and:
   fresh       every Override file lands byte-identical; globalcat.2da gains HCW_GEN (Number) once;
               modloadscripts.2da appears with exactly the row ebo_m12aa -> hcw_work; animations.2da
-              gains hcw_bedlie once (dance's flags), and hcw_work.ncs - otherwise the package's copy
-              byte for byte - carries that row in CW_BEDLIE_ROW's constant
-  reinstall   the same install again: still one of each row, the same row in hcw_work.ncs
+              gains hcw_bedlie (dance's flags) and hcw_bedsit (sitdown's) once each, and hcw_work.ncs -
+              otherwise the package's copy byte for byte - carries those rows in CW_BEDLIE_RAW's and
+              CW_BEDSIT_RAW's constants
+  reinstall   the same install again: still one of each row, the same rows in hcw_work.ncs
   shared      another mod's rows already there - modloadscripts.2da kept, ours added once;
-              animations.2da with two rows more: hcw_bedlie lands after them and hcw_work.ncs says so
+              animations.2da with two rows more: ours land after them and hcw_work.ncs says so
 and the package itself: both .kpatch files beside it (their hooks and ids), Module Load Scripts'
-empty table, Jolee's models with "hcw_bedlie" and no "dance" of their own (the vanilla dance stays the
+empty table, Jolee's models with "hcw_bedlie" and "hcw_bedsit" and no "dance" of their own (the vanilla dance stays the
 supermodel's), no module files, nothing private.
 
 usage: validate_package.py [scratch folder]
@@ -87,19 +88,27 @@ def listed_files():
     return out
 
 
-def check_script(fake, want_row, label):
-    """hcw_work.ncs in place: the package's copy with want_row in CW_BEDLIE_ROW, nothing else changed."""
+def check_script(fake, want_rows, label):
+    """hcw_work.ncs in place: the package's copy with want_rows ({animation: row}) in their constants,
+    nothing else changed."""
     src = (pkg.DATA / pkg.SCRIPT).read_bytes()
     got = (fake / "Override" / pkg.SCRIPT).read_bytes()
-    at = inst_mod.row_offset(src)
-    value = int.from_bytes(got[at:at + 4], "big")
-    row = value // 65536 if value >= 65536 else value       # hcw_work's CW_BedlieRow: either installer's write
-    check(len(got) == len(src) and got[:at] == src[:at] and got[at + 4:] == src[at + 4:] and row == want_row,
-          f"{label}: hcw_work.ncs carries row {row} (want {want_row}; constant {value:#x}), the rest as packaged")
+    same = len(got) == len(src)
+    marks = sorted((inst_mod.row_offset(src, name), name) for name in want_rows)
+    last = 0
+    for at, name in marks:
+        same = same and got[last:at] == src[last:at]
+        last = at + 4
+        value = int.from_bytes(got[at:at + 4], "big")
+        row = value // 65536 if value >= 65536 else value   # hcw_work's CW_AnimRow: either installer's write
+        check(row == want_rows[name], f"{label}: hcw_work.ncs carries {name} row {row} (want {want_rows[name]}; constant {value:#x})")
+    check(same and got[last:] == src[last:], f"{label}: hcw_work.ncs otherwise as packaged")
 
 
-def bedlie_rows(fake):
-    return [i for i, r in enumerate(rows(fake / "Override" / "animations.2da")[1]) if r["name"] == jolee_bed.SLOT]
+def our_rows(fake):
+    """{our animation: [its rows]} in the fake game's animations.2da."""
+    r = rows(fake / "Override" / "animations.2da")[1]
+    return {name: [i for i, x in enumerate(r) if x["name"] == name] for name, _ in jolee_bed.ROWS}
 
 
 def main():
@@ -116,10 +125,12 @@ def main():
     check(staged == expect, f"tslpatchdata holds the {len(names)} listed files, hcw_work.ncs, the tables, changes.ini, info.rtf")
     check(not any(n.lower().startswith("rfkp_") for n in staged), "nothing private (rfkp_*)")
     check(not any(n.lower().endswith((".mod", ".rim", ".erf")) for n in staged), "no module files")
-    check((pkg.DATA / pkg.SCRIPT).read_bytes().count(inst_mod.ROW_PLACEHOLDER) == 1, "hcw_work.ncs: the row placeholder, once")
+    for name, mark in inst_mod.PLACEHOLDERS.items():
+        check((pkg.DATA / pkg.SCRIPT).read_bytes().count(mark) == 1, f"hcw_work.ncs: {name}'s row placeholder, once")
     for model in jolee_bed.TARGETS:
         anims = parse((pkg.DATA / f"{model.lower()}.mdl").read_bytes(), (pkg.DATA / f"{model.lower()}.mdx").read_bytes()).animation_names
-        check(jolee_bed.SLOT in anims and "dance" not in anims, f"{model}: '{jolee_bed.SLOT}', no 'dance' of its own")
+        check(jolee_bed.SLOT in anims and jolee_bed.SIT_SLOT in anims and "dance" not in anims,
+              f"{model}: '{jolee_bed.SLOT}' and '{jolee_bed.SIT_SLOT}', no 'dance' of its own")
     want = {"ModuleLoadScripts": ("module-load-scripts", ["0x004C5215", "consumed_exit_address = 0x004C5417"], True),
             "AnimationRows": ("animation-rows", ["0x005406F6", 'type = "replace"'], False)}
     for patch, (pid, marks, dll) in want.items():
@@ -152,10 +163,12 @@ def main():
           f"modloadscripts.2da: {r}")
     arows = rows(fake / "Override" / "animations.2da")[1]
     dance = next(x for x in base_anim_rows if x["name"] == "dance")
-    check(arows[:len(base_anim_rows)] == base_anim_rows and len(arows) == len(base_anim_rows) + 1
-          and arows[-1] == {**dance, "name": jolee_bed.SLOT},
-          f"animations.2da +1: row {len(arows) - 1} {jolee_bed.SLOT} with dance's flags")
-    check_script(fake, len(base_anim_rows), "fresh")
+    like = [{**next(x for x in base_anim_rows if x["name"] == like_name), "name": name} for name, like_name in jolee_bed.ROWS]
+    n = len(base_anim_rows)
+    check(arows[:n] == base_anim_rows and arows[n:] == like,
+          f"animations.2da +{len(arows) - n}: rows {n}, {n + 1} = {', '.join(x['name'] for x in arows[n:])} with their vanilla rows' flags")
+    fresh = {name: n + i for i, (name, _) in enumerate(jolee_bed.ROWS)}
+    check_script(fake, fresh, "fresh")
 
     print("\nreinstall:")
     install(fake)
@@ -163,8 +176,8 @@ def main():
     check(sum(x["name"] == "HCW_GEN" for x in after2) == 1, "globalcat.2da: still one HCW_GEN")
     h, r = rows(fake / "Override" / "modloadscripts.2da")
     check(r == [{"module": "ebo_m12aa", "script": "hcw_work"}], f"modloadscripts.2da: still one row ({len(r)})")
-    check(bedlie_rows(fake) == [len(base_anim_rows)], f"animations.2da: still one {jolee_bed.SLOT} ({bedlie_rows(fake)})")
-    check_script(fake, len(base_anim_rows), "reinstall")
+    check(our_rows(fake) == {k: [v] for k, v in fresh.items()}, f"animations.2da: still one of each ({our_rows(fake)})")
+    check_script(fake, fresh, "reinstall")
 
     print("\nshared tables:")
     t = TwoDA(["module", "script"])
@@ -178,9 +191,9 @@ def main():
     h, r = rows(fake / "Override" / "modloadscripts.2da")
     check(r == OTHER_ROWS + [{"module": "ebo_m12aa", "script": "hcw_work"}],
           f"modloadscripts.2da: the other mod's {len(OTHER_ROWS)} rows kept, ours added ({len(r)} rows)")
-    want_row = len(base_anim_rows) + 2
-    check(bedlie_rows(fake) == [want_row], f"animations.2da: {jolee_bed.SLOT} after the other mod's two, row {bedlie_rows(fake)}")
-    check_script(fake, want_row, "shared")
+    shared = {k: v + 2 for k, v in fresh.items()}
+    check(our_rows(fake) == {k: [v] for k, v in shared.items()}, f"animations.2da: ours after the other mod's two, {our_rows(fake)}")
+    check_script(fake, shared, "shared")
 
     failed = [w for ok, w in results if not ok]
     print(f"\n{len(results) - len(failed)}/{len(results)} checks passed")

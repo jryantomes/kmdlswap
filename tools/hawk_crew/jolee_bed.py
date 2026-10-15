@@ -55,7 +55,7 @@ TARGETS = ["P_JoleeBB"] + [f"PMB{c}M" for c in "CDEFGHIJ"]
 # ~0.6 m above the floor. He stands at its foot, (44.03, 36.0) facing south (hcw_work); "prone"
 # puts his pelvis 0.65 m behind him and 0.09 m off the floor - these carry it to the bed's middle and
 # onto the mattress
-DY = -1.35                           # further back (north, along the bed)
+DY = -1.60                           # further back (north, along the bed)
 DZ = 0.60                            # up onto the mattress
 # the bed's foot is a leg rest sloping down ~18 degrees (0.58 m to 0.31 m over its last 0.8 m - user,
 # 2026-10-07: "there's definitely a slope at the end"); "prone"'s legs ran out level over it, the
@@ -66,6 +66,21 @@ DZ = 0.60                            # up onto the mattress
 # edge. The torso keeps "prone"'s half-recline (user: "half inclined would work").
 LEG_PITCH = {"lthigh_g": -15.2, "lshin_g": -10.3, "rshin_g": -25.7}
 LEG_IN = {"lthigh_g": -8.0}           # about the parent's y axis: towards the body's middle
+
+# Sitting first (user, 2026-10-15: "he needs a sitting animation before laying so it doesn't look so
+# jarring"): S_Male02's own "sitdown" (1.03 s, script-unreachable in vanilla) as "hcw_bedsit", its own
+# animations.2da row (sitdown's flags). The pelvis ends 0.46 m behind his spot and 0.42 m down, chair
+# height - in the air before the bed. SIT_BACK carries it further back as he sits, growing with the
+# keys from nothing at the first (so no jump from standing) to the full amount at the last: onto the
+# leg rest at y ~37.2, about 0.45 m up there. Then, in the same animation, he leans back and slides up
+# the bed into the lying pose over LIE_BLEND seconds (lean_back), and "hcw_bedlie" carries on from
+# there. (A longer transition time on the lying pose did nothing: the engine blended in a quarter
+# second - harness joleesit, 2026-10-15.)
+SIT_SLOT = "hcw_bedsit"
+SIT_ROW_LIKE = "sitdown"             # the vanilla row whose flags it copies: stationary, played once
+SIT_BACK = -0.74                     # metres, along the bed (north)
+LIE_BLEND = 1.4                      # seconds
+SIT_END = 1.03333                    # "sitdown"'s own length, seconds: its last keys
 
 
 def _turn(q, degrees, axis):
@@ -78,8 +93,94 @@ def _turn(q, degrees, axis):
     return (c * x + ax * w + ay * z, c * y + ay * w - ax * z, c * z + ax * y - ay * x, c * w - ax * x - ay * y)
 
 
-def lying_source(dy, dz):
-    """S_Male02 (the game's own) with its "prone" root carried dy back and dz up."""
+def _keys(mdl, node, ctype_want, cols_want, label):
+    """(time offset, data offset, rows) of one controller of an animation node, by its type."""
+    pos = MDL_BASE + node.offset
+    co, cn = struct.unpack_from("<2I", mdl, pos + 56)
+    do = struct.unpack_from("<I", mdl, pos + 68)[0]
+    for i in range(cn):
+        ctype, _, rows, toff, doff, cols = struct.unpack_from("<IHHHHB", mdl, MDL_BASE + co + 16 * i)
+        if ctype != ctype_want:
+            continue
+        if cols != cols_want:
+            raise SystemExit(f"S_Male02 {label} has {cols} columns, expected {cols_want}")
+        return MDL_BASE + do + 4 * toff, MDL_BASE + do + 4 * doff, rows
+    raise SystemExit(f"S_Male02 {label}: no such keys")
+
+
+def _width(ctype, cols):
+    """32-bit words per key of a controller: a compressed orientation is one, bezier keys carry two
+    tangents after the value."""
+    if ctype == 20 and cols == 2:
+        return 1
+    return (cols & 15) * (3 if cols & 16 else 1)
+
+
+def _unpack_quat(v):
+    import math
+    x = (v & 0x7FF) / 1023 - 1
+    y = ((v >> 11) & 0x7FF) / 1023 - 1
+    z = (v >> 22) / 511 - 1
+    return (x, y, z, math.sqrt(max(0.0, 1 - x * x - y * y - z * z)))
+
+
+def _first_values(mdl, mdx, anim):
+    """{bone: {controller type: its first key}} of an animation - an orientation as (x, y, z, w)."""
+    out = {}
+    for n in parse(mdl, mdx).nodes:
+        if n.in_animation != anim:
+            continue
+        pos = MDL_BASE + n.offset
+        co, cn = struct.unpack_from("<2I", mdl, pos + 56)
+        do = struct.unpack_from("<I", mdl, pos + 68)[0]
+        for i in range(cn):
+            ctype, _, rows, _toff, doff, cols = struct.unpack_from("<IHHHHB", mdl, MDL_BASE + co + 16 * i)
+            at = MDL_BASE + do + 4 * doff
+            if ctype == 20:
+                q = _unpack_quat(struct.unpack_from("<I", mdl, at)[0]) if cols == 2 else struct.unpack_from("<4f", mdl, at)
+                out.setdefault(n.name.lower(), {})[20] = q
+            elif ctype == 8:
+                out.setdefault(n.name.lower(), {})[8] = struct.unpack_from("<3f", mdl, at)
+    return out
+
+
+def lean_back(source, sit_end, lean=LIE_BLEND):
+    """The keys hook for add_animation: each of the sit's position and orientation keys gains one more,
+    `lean` seconds after its end, at the lying pose's first - so the sit ends as he lies and the lying
+    pose follows without a jump (the engine's own blend between them is a quarter second whatever the
+    animation asks: harness joleesit, 2026-10-15). Other controllers hold their last key."""
+    target = _first_values(*source, "prone")
+    t_end = sit_end + lean
+
+    def keys(name, ctrls, data):
+        words = struct.unpack(f"<{len(data) // 4}I", data)
+        new_ctrls, new_data = bytearray(), []
+        for i in range(len(ctrls) // 16):
+            rec = bytearray(ctrls[16 * i:16 * i + 16])
+            ctype, _, rows, toff, doff, cols = struct.unpack_from("<IHHHHB", rec)
+            w = _width(ctype, cols)
+            times = list(words[toff:toff + rows])
+            values = [list(words[doff + w * r:doff + w * (r + 1)]) for r in range(rows)]
+            last = list(values[-1])
+            want = target.get(name.lower(), {}).get(ctype)
+            if want is not None and ctype == 20:
+                last = [_pack_quat(want)] if w == 1 else list(struct.unpack("<4I", struct.pack("<4f", *want)))
+            elif want is not None and ctype == 8:
+                last = list(struct.unpack("<3I", struct.pack("<3f", *want))) + [0] * (w - 3)
+            times.append(struct.unpack("<I", struct.pack("<f", t_end))[0])
+            values.append(last)
+            struct.pack_into("<HHH", rec, 6, rows + 1, len(new_data), len(new_data) + rows + 1)
+            new_data += times
+            for v in values:
+                new_data += v
+            new_ctrls += rec
+        return bytes(new_ctrls), struct.pack(f"<{len(new_data)}I", *new_data)
+    return keys
+
+
+def lying_source(dy, dz, sit_back=SIT_BACK, blend=LIE_BLEND):
+    """S_Male02 (the game's own) with its "prone" root carried dy back and dz up, and its "sitdown"
+    root carried back by up to sit_back as he sits and `blend` seconds longer (lean_back fills them)."""
     inst = Installation(str(GAME))
     mdl = bytearray(inst.resource("S_Male02", ResourceType.MDL, [SearchLocation.CHITIN]).data)
     mdx = inst.resource("S_Male02", ResourceType.MDX, [SearchLocation.CHITIN]).data
@@ -98,6 +199,16 @@ def lying_source(dy, dz):
             for r in range(rows):
                 at = MDL_BASE + do + 4 * (doff + 4 * r)
                 struct.pack_into("<4f", mdl, at, *_turn(struct.unpack_from("<4f", mdl, at), degrees, axis))
+    sit = next(n for n in L.nodes if n.in_animation == "sitdown" and n.name.lower() == "rootdummy")
+    times, data, rows = _keys(mdl, sit, 8, 3, "sitdown rootdummy position")
+    end = struct.unpack_from("<f", mdl, times + 4 * (rows - 1))[0]
+    for r in range(rows):
+        t = struct.unpack_from("<f", mdl, times + 4 * r)[0]
+        x, y, z = struct.unpack_from("<3f", mdl, data + 12 * r)
+        struct.pack_into("<3f", mdl, data + 12 * r, x, y + sit_back * t / end, z)
+    header = next(sp.start for sp in L.spans if sp.kind == "anim_header"
+                  and mdl[sp.start + 8:sp.start + 40].split(b"\0")[0] == b"sitdown")
+    struct.pack_into("<f", mdl, header + 80, end + blend)  # the length: the lean back after (lean_back)
     node = next(n for n in L.nodes if n.in_animation == "prone" and n.name.lower() == "rootdummy")
     pos = MDL_BASE + node.offset
     co, cn = struct.unpack_from("<2I", mdl, pos + 56)
@@ -216,22 +327,29 @@ def pad_uti():
     r.set_list("PropertiesList", props)
     return bytes_gff(gff)
 
-def animations_table(current: bytes | None) -> tuple[bytes, int]:
-    """(animations.2da with the SLOT row, its row number): the row added once - the flags of the vanilla
-    ROW_LIKE row - or the one already there. current: the install's table, or None for the game's own."""
+ROWS = [(SLOT, ROW_LIKE), (SIT_SLOT, SIT_ROW_LIKE)]     # the animations.2da rows: name, vanilla row it copies
+
+
+def animations_table(current: bytes | None) -> tuple[bytes, dict]:
+    """(animations.2da with the ROWS, {name: row number}): each row added once - the flags of its vanilla
+    row - or the one already there. current: the install's table, or None for the game's own."""
     from pykotor.resource.formats.twoda import bytes_2da, read_2da
     if current is None:
         current = Installation(str(GAME)).resource("animations", ResourceType.TwoDA, [SearchLocation.CHITIN]).data
     t = read_2da(current)
     names = [t.get_row(i).get_string("name").lower() for i in range(t.get_height())]
-    if SLOT in names:
-        return current, names.index(SLOT)
-    like = t.get_row(names.index(ROW_LIKE))
-    t.add_row(str(t.get_height()), {**{h: like.get_string(h) for h in t.get_headers()}, "name": SLOT})
-    row = t.get_height() - 1
-    if row >= 1000:
-        raise SystemExit(f"animations.2da row {row}: the Animation Rows patch reaches rows below 1000")
-    return bytes(bytes_2da(t)), row
+    rows, added = {}, False
+    for name, like_name in ROWS:
+        if name in names:
+            rows[name] = names.index(name)
+            continue
+        like = t.get_row(names.index(like_name))
+        t.add_row(str(t.get_height()), {**{h: like.get_string(h) for h in t.get_headers()}, "name": name})
+        names.append(name)
+        rows[name], added = t.get_height() - 1, True
+        if rows[name] >= 1000:
+            raise SystemExit(f"animations.2da row {rows[name]}: the Animation Rows patch reaches rows below 1000")
+    return (bytes(bytes_2da(t)) if added else current), rows
 
 
 def build(dy=DY, dz=DZ, slot=SLOT):
@@ -245,15 +363,17 @@ def build(dy=DY, dz=DZ, slot=SLOT):
     for name in TARGETS:
         mdl = inst.resource(name, ResourceType.MDL).data          # as the game finds it (Override first)
         mdx = inst.resource(name, ResourceType.MDX).data
-        if {LEGACY_SLOT, SLOT, slot} & set(parse(mdl, mdx).animation_names):
+        if {LEGACY_SLOT, SLOT, SIT_SLOT, slot} & set(parse(mdl, mdx).animation_names):
             # an earlier install of this one: rebuilt from the game's own (none of these bodies was in
             # the dev copy's Override before it, 2026-10-07)
             mdl = inst.resource(name, ResourceType.MDL, [SearchLocation.CHITIN]).data
             mdx = inst.resource(name, ResourceType.MDX, [SearchLocation.CHITIN]).data
-            if slot in parse(mdl, mdx).animation_names:
-                raise SystemExit(f"{name} already has an animation {slot!r} in the game's own archives")
+            if {slot, SIT_SLOT} & set(parse(mdl, mdx).animation_names):
+                raise SystemExit(f"{name} already has {slot!r} or {SIT_SLOT!r} in the game's own archives")
         new_mdl, new_mdx, dropped = add_animation((mdl, mdx), source, "prone", slot)
-        out[name] = (new_mdl, new_mdx, dropped)
+        new_mdl, new_mdx, dropped_sit = add_animation((new_mdl, new_mdx), source, "sitdown", SIT_SLOT,
+                                                      keys=lean_back(source, SIT_END))
+        out[name] = (new_mdl, new_mdx, sorted(set(dropped) | set(dropped_sit)))
     return out
 
 
@@ -281,7 +401,7 @@ def main(argv):
             if backup is not None and target.exists():
                 shutil.copy2(target, backup / f"{target.name}.before-jolee-bed-{stamp}")
             target.write_bytes(data)
-        print(f"{name}: '{SLOT}' = prone on the bed (dy {dy}, dz {dz})"
+        print(f"{name}: '{SLOT}' = prone on the bed (dy {dy}, dz {dz}), '{SIT_SLOT}' = sitting onto its foot"
               + (f"; left out (not in this body): {', '.join(dropped)}" if dropped else ""))
 
     # Jolee's Datapad: its model and its template

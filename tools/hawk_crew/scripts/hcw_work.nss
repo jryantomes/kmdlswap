@@ -43,11 +43,22 @@ int CW_TIRED = 12;
 // (A function, not a global initialised by calling one: a global set from a function call kept
 // hcw_work from running at all - harness crewpad, 2026-10-08.)
 int CW_BEDLIE_RAW = 305397760;
-int CW_OnBed()
+// And sitting down onto the bed's foot first, "hcw_bedsit" (user, 2026-10-15: "he needs a sitting
+// animation before laying so it doesn't look so jarring"): played once, then the lying pose blends in
+// as he leans back. Its row the same way, placeholder 0x12350000.
+int CW_BEDSIT_RAW = 305463296;
+int CW_AnimRow(int v)
 {
-    int v = CW_BEDLIE_RAW;
     if (v >= 65536) v = v / 65536;
     return 20000 + v;
+}
+int CW_OnBed()
+{
+    return CW_AnimRow(CW_BEDLIE_RAW);
+}
+int CW_SitBed()
+{
+    return CW_AnimRow(CW_BEDSIT_RAW);
 }
 int CW_COMPUTER = 15;
 int CW_WELD = 25;
@@ -111,7 +122,9 @@ vector CW_Spot(int i, int k)
         case 50: return Vector(50.05, 43.95, 1.80);   // T3-M4: the holotable's base
         case 51: return Vector(47.50, 47.20, 1.80);   // T3-M4: the holotable's west panel
         case 80: return Vector(77.60, 47.80, 1.80);   // Mission: the lit panel on the starboard quarters' inner wall
-        case 60: return Vector(52.40, 46.80, 1.80);   // Zaalbar: the holotable's east panel
+        // Zaalbar: the wall console on the main hold's starboard curve (the holotable's east panel had
+        // no console at his height: "zaalbar looks like he's typing in air" - user, 2026-10-15; harness zaalconsole)
+        case 60: return Vector(56.80, 48.20, 1.80);
     }
     return GetPosition(GetWaypointByTag(CW_Home(i)));
 }
@@ -130,7 +143,7 @@ float CW_Face(int i, int k)
         case 50: return 88.0;
         case 51: return 350.0;
         case 80: return 180.0;
-        case 60: return 180.0;
+        case 60: return 50.0;
     }
     return GetFacing(GetWaypointByTag(CW_Home(i)));
 }
@@ -231,6 +244,8 @@ void CW_Tick(int i, int k, int bBoarding, int bLead, int nGen)
     else if (fWalk > 0.6)
         AssignCommand(o, ActionMoveToLocation(lAt, FALSE));
     AssignCommand(o, ActionDoCommand(SetFacing(fFace)));
+    // Jolee sits on the bed before lying back - not when put there unseen, nor between loops (already lying)
+    if (i == 2 && !bBoarding && !bLead) AssignCommand(o, ActionPlayAnimation(CW_SitBed(), 1.0, 0.0));
     AssignCommand(o, ActionPlayAnimation(CW_Anim(i, k), 1.0, fStay));
     int kNext = (k + 1) % CW_Steps(i);
     if (bBoarding || fWalk <= 0.6)
@@ -297,6 +312,7 @@ void CW_GivePad(object oJ)
 void CW_LieBack(object oJ)
 {
     AssignCommand(oJ, ActionDoCommand(SetFacing(CW_Face(2, 0))));
+    AssignCommand(oJ, ActionPlayAnimation(CW_SitBed(), 1.0, 0.0));
     AssignCommand(oJ, ActionPlayAnimation(CW_OnBed(), 1.0, CW_Stay(2, 0)));
 }
 

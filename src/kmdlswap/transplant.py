@@ -43,8 +43,10 @@ def _u32(b, at):
     return struct.unpack_from("<I", b, at)[0]
 
 
-def add_animation(target: tuple[bytes, bytes], source: tuple[bytes, bytes], anim: str, new_name: str
-                  ) -> tuple[bytes, bytes]:
+def add_animation(target: tuple[bytes, bytes], source: tuple[bytes, bytes], anim: str, new_name: str,
+                  keys=None) -> tuple[bytes, bytes]:
+    """keys: optional (node name, controller rows, data block) -> (controller rows, data block), to
+    rewrite a node's keys on the way (the rows' offsets index into the returned data block)."""
     tmdl, tmdx = target
     smdl, smdx = source
     Lt, Ls = parse(tmdl, tmdx), parse(smdl, smdx)
@@ -105,12 +107,17 @@ def add_animation(target: tuple[bytes, bytes], source: tuple[bytes, bytes], anim
         data_off, data_n = _u32(smdl, spos + 68), _u32(smdl, spos + 72)
         kids = [c for c in n.children if Ls.nodes[c] in kept]
         ca = here(); out += bytes(4 * len(kids))
+        ctrls = smdl[MDL_BASE + ctrl_off:MDL_BASE + ctrl_off + ctrl_n * CONTROLLER] \
+            if ctrl_n and ctrl_off not in NULL_OFFSETS else b""
+        data = smdl[MDL_BASE + data_off:MDL_BASE + data_off + data_n * 4] \
+            if data_n and data_off not in NULL_OFFSETS else b""
+        if keys is not None:
+            ctrls, data = keys(n.name, bytes(ctrls), bytes(data))
+            ctrl_n, data_n = len(ctrls) // CONTROLLER, len(data) // 4
         cc = here()
-        if ctrl_n and ctrl_off not in NULL_OFFSETS:
-            out += smdl[MDL_BASE + ctrl_off:MDL_BASE + ctrl_off + ctrl_n * CONTROLLER]
+        out += ctrls
         cd = here()
-        if data_n and data_off not in NULL_OFFSETS:
-            out += smdl[MDL_BASE + data_off:MDL_BASE + data_off + data_n * 4]
+        out += data
         plan.append((n, spos, kids, ca, cc, cd, ctrl_n, data_n))
 
     # events

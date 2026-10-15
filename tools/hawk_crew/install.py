@@ -20,9 +20,9 @@ Without that patch he stands at the bed's foot instead.
 
 Writes (backed up first):
   Override   hcw_work (.ncs/.nss); hcw_jolee_pad.uti; w_stunbaton_050 and Jolee's body models
-             (P_JoleeBB, PMBCM..PMBJM .mdl/.mdx, the bed pose as "hcw_bedlie"); globalcat.2da (+ HCW_GEN,
+             (P_JoleeBB, PMBCM..PMBJM .mdl/.mdx, the bed pose as "hcw_bedlie", sitting onto it as "hcw_bedsit"); globalcat.2da (+ HCW_GEN,
              a number); modloadscripts.2da (+ ebo_m12aa -> hcw_work; made if missing); animations.2da
-             (+ hcw_bedlie, its row written into hcw_work.ncs; played through the Animation Rows patch)
+             (+ hcw_bedlie and hcw_bedsit, their rows written into hcw_work.ncs; played through the Animation Rows patch)
 and takes away what earlier builds left: GH0-RFK's (rfk_crew_work, rfk_jdpad_i.uti in Override) and
 this package's first trigger (hcw_enter in Override, ebo_m12aa.mod's Mod_OnClientEntr = hcw_enter).
 With --overlay <dir>: the same into that folder's Override and nothing of the dev copy.
@@ -55,24 +55,28 @@ OLD_HOOK_FIELD, OLD_HOOK = "Mod_OnClientEntr", "hcw_enter"
 # of Jolee's "hcw_bedlie". HoloPatcher's HACKList writes a 2DAMEMORY token there as 32 bits (PyKotor);
 # TSLPatcher writes 16, leaving row * 65536 over the placeholder's zero low half - hcw_work reads both.
 ROW_PLACEHOLDER = b"\x04\x03\x12\x34\x00\x00"
+# and CW_BEDSIT_RAW = 0x12350000 the same way, for "hcw_bedsit" (sitting onto the bed first)
+PLACEHOLDERS = {jolee_bed.SLOT: ROW_PLACEHOLDER, jolee_bed.SIT_SLOT: b"\x04\x03\x12\x35\x00\x00"}
 
 
-def row_offset(ncs: bytes) -> int:
-    """Where in hcw_work.ncs the bed animation's row goes (the placeholder constant's first byte)."""
-    if ncs.count(ROW_PLACEHOLDER) != 1:
-        raise SystemExit(f"hcw_work.ncs: expected CW_BEDLIE_RAW's placeholder (CONSTI 0x12340000) once, "
-                         f"found {ncs.count(ROW_PLACEHOLDER)}")
-    return ncs.index(ROW_PLACEHOLDER) + 2
+def row_offset(ncs: bytes, slot=jolee_bed.SLOT) -> int:
+    """Where in hcw_work.ncs the animation's row goes (its placeholder constant's first byte)."""
+    mark = PLACEHOLDERS[slot]
+    if ncs.count(mark) != 1:
+        raise SystemExit(f"hcw_work.ncs: expected {slot}'s placeholder (CONSTI 0x{mark[2:].hex()}) once, "
+                         f"found {ncs.count(mark)}")
+    return ncs.index(mark) + 2
 
 
-def with_row(ncs: bytes, row: int) -> bytes:
-    at = row_offset(ncs)
+def with_row(ncs: bytes, row: int, slot=jolee_bed.SLOT) -> bytes:
+    at = row_offset(ncs, slot)
     return ncs[:at] + row.to_bytes(4, "big") + ncs[at + 4:]
 
 
-def override_files(row=None):
-    """{file name: bytes} for Override (the 2DAs aside). row: the animations.2da row of "hcw_bedlie",
-    written into hcw_work.ncs - None leaves the placeholder (the package's HACKList writes it)."""
+def override_files(rows=None):
+    """{file name: bytes} for Override (the 2DAs aside). rows: {animation name: animations.2da row}
+    ("hcw_bedlie", "hcw_bedsit"), written into hcw_work.ncs - None leaves the placeholders (the
+    package's HACKList writes them)."""
     out = {}
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
@@ -81,9 +85,10 @@ def override_files(row=None):
             src = (HERE / "scripts" / f"{name}.nss").read_text(encoding="ascii")
             out[f"{name}.ncs"] = compile_nss(name, src, tmp)
             out[f"{name}.nss"] = src.encode("ascii")
-    row_offset(out["hcw_work.ncs"])
-    if row is not None:
-        out["hcw_work.ncs"] = with_row(out["hcw_work.ncs"], row)
+    for slot in PLACEHOLDERS:
+        row_offset(out["hcw_work.ncs"], slot)
+    for slot, row in (rows or {}).items():
+        out["hcw_work.ncs"] = with_row(out["hcw_work.ncs"], row, slot)
     for name, (mdl, mdx, _dropped) in jolee_bed.build().items():
         out[f"{name.lower()}.mdl"], out[f"{name.lower()}.mdx"] = mdl, mdx
     mdl, mdx = jolee_bed.pad_model()
@@ -159,9 +164,9 @@ def main(argv):
     anims = over / "animations.2da"
     table_now = anims.read_bytes() if anims.exists() else (
         (OVERRIDE / "animations.2da").read_bytes() if (OVERRIDE / "animations.2da").exists() else None)
-    anim_table, row = jolee_bed.animations_table(table_now)
+    anim_table, rows = jolee_bed.animations_table(table_now)
     put(anims, anim_table)
-    for name, data in override_files(row).items():
+    for name, data in override_files(rows).items():
         put(over / name, data)
     put(over / "globalcat.2da", globalcat((OVERRIDE / "globalcat.2da").read_bytes()))
     table = over / TABLE
@@ -181,7 +186,7 @@ def main(argv):
             put(mod, unhooked)
             removed.append(f"{MODULE}.mod {OLD_HOOK_FIELD}")
     print(f"Ebon Hawk Crew at Work -> {root}: {', '.join(SCRIPTS)}, Jolee's bed and datapad, "
-          f"{GLOBAL[0]}, {TABLE} {MODULE} -> {ROW['script']}, animations.2da {jolee_bed.SLOT} = row {row}"
+          f"{GLOBAL[0]}, {TABLE} {MODULE} -> {ROW['script']}, animations.2da " + ", ".join(f"{n} = row {r}" for n, r in rows.items())
           + (f"; taken out: {', '.join(removed)}" if removed else ""))
 
 

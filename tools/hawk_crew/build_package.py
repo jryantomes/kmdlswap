@@ -14,8 +14,10 @@ The installer:
              only where none exists, so other mods' rows stay - and hcw_work.ncs, which HACKList installs
   globalcat.2da      + HCW_GEN (a number; once - ExclusiveColumn)
   modloadscripts.2da + ebo_m12aa -> hcw_work (once - ExclusiveColumn script: no other mod names hcw_work)
-  animations.2da     + hcw_bedlie (dance's flags; once - ExclusiveColumn name), its row kept as 2DAMEMORY1
-  hcw_work.ncs       HACKList: that row into CW_BEDLIE_RAW's constant (placeholder 0x12340000). HoloPatcher
+  animations.2da     + hcw_bedlie (dance's flags) and hcw_bedsit (sitdown's; each once - ExclusiveColumn
+                     name), their rows kept as 2DAMEMORY1 and 2DAMEMORY2
+  hcw_work.ncs       HACKList: those rows into CW_BEDLIE_RAW's and CW_BEDSIT_RAW's constants (placeholders
+                     0x12340000, 0x12350000). HoloPatcher
                      (PyKotor) writes 2DAMEMORY tokens as 32 bits there, TSLPatcher as 16 - row, or
                      row * 65536 over the placeholder's zero low half; hcw_work reads both
 No module is touched: a module.ifo hook would not reach a save that has been aboard, and this
@@ -38,7 +40,7 @@ DATA = OUT / "tslpatchdata"
 KPM = ROOT / "builds" / "kpm"
 PATCHES = {"ModuleLoadScripts": "Module Load Scripts (KotOR I)", "AnimationRows": "Animation Rows (KotOR I)"}
 SCRIPT = "hcw_work.ncs"
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 
 README = f"""Ebon Hawk Crew at Work {VERSION} - KotOR I
 
@@ -68,8 +70,8 @@ Notes
   * Jolee's Datapad is a real item (Jedi Consulars only). He holds it while he is on the bed and
     you are near; otherwise it is gone and his own weapon is back in his hand, so it never leaves
     the ship with him.
-  * His pose is a new animation ("hcw_bedlie") added to his body models - no animation the game
-    already has is changed, so nobody else who shares those bodies (the player included) is
+  * He sits on the foot of the bed and leans back onto it. Both are new animations ("hcw_bedsit",
+    "hcw_bedlie") added to his body models - no animation the game already has is changed, so nobody else who shares those bodies (the player included) is
     affected.
   * Works alongside the K1 Community Patch and GH0-RFK. Another mod that replaces Jolee's body models
     (P_JoleeBB, PMBCM..PMBJM) loses his lying-back pose, or this mod replaces theirs - whichever is
@@ -86,13 +88,13 @@ Module Load Scripts links the Patch Manager's GameAPI library - see LICENSE-Koto
 """
 
 
-def anim_row_values():
-    """The hcw_bedlie row: the vanilla ROW_LIKE row's flags under the new name."""
+def anim_row_values(name, like_name):
+    """An animations.2da row of ours (jolee_bed.ROWS): the vanilla like_name row's flags under the new name."""
     from pykotor.resource.formats.twoda import read_2da
     t = read_2da(base_animations())
     names = [t.get_row(i).get_string("name").lower() for i in range(t.get_height())]
-    like = t.get_row(names.index(jolee_bed.ROW_LIKE))
-    return {**{h: like.get_string(h) for h in t.get_headers()}, "name": jolee_bed.SLOT}
+    like = t.get_row(names.index(like_name))
+    return {**{h: like.get_string(h) for h in t.get_headers()}, "name": name}
 
 
 def base_animations():
@@ -147,19 +149,24 @@ def changes_ini(names, row_offset):
     add(f"script={install.ROW['script']}")
     add("")
     add("[animations.2da]")
-    add("AddRow0=hcw_anim_bedlie")
+    sections = [f"hcw_anim_{name[len('hcw_'):]}" for name, _ in jolee_bed.ROWS]
+    for i, section in enumerate(sections):
+        add(f"AddRow{i}={section}")
     add("")
-    add("[hcw_anim_bedlie]")
-    add("ExclusiveColumn=name")
-    for k, v in anim_row_values().items():
-        add(f"{k}={v}")
-    add("2DAMEMORY1=RowIndex")
-    add("")
+    for i, ((name, like_name), section) in enumerate(zip(jolee_bed.ROWS, sections)):
+        add(f"[{section}]")
+        add("ExclusiveColumn=name")
+        for k, v in anim_row_values(name, like_name).items():
+            add(f"{k}={v}")
+        add(f"2DAMEMORY{i + 1}=RowIndex")
+        add("")
     add("[HACKList]")
     add(f"Replace0={SCRIPT}")
     add("")
     add(f"[{SCRIPT}]")
-    add(f"{row_offset}=2DAMEMORY1")          # CW_BEDLIE_RAW: Jolee's bed pose's animations.2da row
+    # CW_BEDLIE_RAW and CW_BEDSIT_RAW: the rows of Jolee's bed pose and of his sitting onto the bed
+    for i, (name, _) in enumerate(jolee_bed.ROWS):
+        add(f"{row_offset[name]}=2DAMEMORY{i + 1}")
     add("")
     return "\r\n".join(L)
 
@@ -183,7 +190,7 @@ def main():
     files = install.override_files()          # hcw_work.ncs with the placeholder: HACKList writes the row
     for name, data in files.items():
         (DATA / name).write_bytes(data)
-    row_offset = install.row_offset(files[SCRIPT])
+    row_offset = {name: install.row_offset(files[SCRIPT], name) for name, _ in jolee_bed.ROWS}
     (DATA / install.TABLE).write_bytes(install.base_table())
     # the vanilla tables: HoloPatcher patches Override's copy, else this one - never the BIFs
     # (build_holopatcher.py stage_base_files; an Override without one skipped the HCW_GEN row)
@@ -206,7 +213,7 @@ def main():
     shutil.copy2(KPM / "LICENSE-KotorPatchManager.txt", OUT / "LICENSE-KotorPatchManager.txt")
     (OUT / "README.txt").write_text(README, encoding="utf-8", newline="\r\n")
     staged = sorted(p for p in OUT.rglob("*") if p.is_file())
-    print(f"staged {len(staged)} files in {OUT}; hcw_work.ncs row at offset {row_offset}")
+    print(f"staged {len(staged)} files in {OUT}; hcw_work.ncs rows at offsets {row_offset}")
 
 
 if __name__ == "__main__":
