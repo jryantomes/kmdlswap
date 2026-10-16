@@ -52,11 +52,12 @@ LEGACY_SLOT = "dance"                # the name it had until 2026-10-08: a model
 ROW_LIKE = "dance"                   # the vanilla row whose flags the new row copies: stationary, looping
 TARGETS = ["P_JoleeBB"] + [f"PMB{c}M" for c in "CDEFGHIJ"]
 # the bed (ebo_m12aa room 01g, medbay_bed01): x 43.5-44.6, y 36.8-39.3, head to the north, mattress
-# ~0.6 m above the floor. He stands at its foot, (44.03, 36.0) facing south (hcw_work); "prone"
+# ~0.6 m above the floor; the pillow its last 0.3 m (y 38.98-39.28), a block up to 0.86 m (room
+# 01g medbay_bed01). He stands at its foot, (44.03, 36.0) facing south (hcw_work); "prone"
 # puts his pelvis 0.65 m behind him and 0.09 m off the floor - these carry it to the bed's middle and
 # onto the mattress
-DY = -1.60                           # further back (north, along the bed)
-DZ = 0.60                            # up onto the mattress
+DY = -1.85                           # further back (north, along the bed): head on the pillow (2026-10-16)
+DZ = 0.66                            # up onto the mattress, the head onto the pillow block (2026-10-16)
 # the bed's foot is a leg rest sloping down ~18 degrees (0.58 m to 0.31 m over its last 0.8 m - user,
 # 2026-10-07: "there's definitely a slope at the end"); "prone"'s legs ran out level over it, the
 # feet in the air. Each leg bone's keys turned about its parent's x axis (degrees; negative = down

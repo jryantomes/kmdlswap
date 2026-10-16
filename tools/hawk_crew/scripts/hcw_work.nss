@@ -114,7 +114,10 @@ vector CW_Spot(int i, int k)
 {
     switch (10 * i + k)
     {
-        case 0:  return Vector(50.80, 79.50, 1.80);   // Carth: the console on the pilot's side (the seats block the front)
+        // Carth: the wall of four screens on the port side, just aft of the cockpit (room 01p Mesh73,
+        // x 50.27; staged render eye_cockpit_left). Behind the pilot's seat he tapped the air: the
+        // cockpit's consoles are past the seats (user, 2026-10-16)
+        case 0:  return Vector(51.00, 74.00, 1.80);
         case 11: return Vector(54.80, 79.50, 1.80);   // Bastila: the console on the co-pilot's side
         case 20: return Vector(44.03, 36.00, 1.80);   // Jolee: at the medical bed's foot, lying back onto it
         case 30: return Vector(58.90, 36.60, 1.80);   // Canderous: the workbench
@@ -122,9 +125,11 @@ vector CW_Spot(int i, int k)
         case 50: return Vector(50.05, 43.95, 1.80);   // T3-M4: the holotable's base
         case 51: return Vector(47.50, 47.20, 1.80);   // T3-M4: the holotable's west panel
         case 80: return Vector(77.60, 47.80, 1.80);   // Mission: the lit panel on the starboard quarters' inner wall
-        // Zaalbar: the wall console on the main hold's starboard curve (the holotable's east panel had
-        // no console at his height: "zaalbar looks like he's typing in air" - user, 2026-10-15; harness zaalconsole)
-        case 60: return Vector(56.80, 48.20, 1.80);
+        // Zaalbar: the desk console in the main hold's northwest corner, monitor and control panel
+        // (room 01f mrconspan + Plane11; staged render eye_hold_desk). Not the holotable's east panel
+        // (no console at his height, 2026-10-15), the seat backs by the starboard curve, nor the arch
+        // alcove's screens (off the walkable floor) - user, 2026-10-16
+        case 60: return Vector(45.04, 49.98, 1.80);   // 1.0 m off the panel: the walkable edge (harness deskprobe)
     }
     return GetPosition(GetWaypointByTag(CW_Home(i)));
 }
@@ -133,7 +138,7 @@ float CW_Face(int i, int k)
 {
     switch (10 * i + k)
     {
-        case 0:  return 100.0;
+        case 0:  return 180.0;
         case 1:  return 90.0;      // Carth: out of the viewport
         case 10: return 90.0;
         case 11: return 80.0;
@@ -143,7 +148,7 @@ float CW_Face(int i, int k)
         case 50: return 88.0;
         case 51: return 350.0;
         case 80: return 180.0;
-        case 60: return 50.0;
+        case 60: return 123.0;
     }
     return GetFacing(GetWaypointByTag(CW_Home(i)));
 }
