@@ -107,6 +107,13 @@ def build(vanilla, roster, kmrp):
             raise SystemExit(f"no KMRP control to give {tag} its look")
         c = copy.deepcopy(by_tag[base])
         c.set_string("TAG", tag)
+        # the roster's own control ID and pad/keyboard links, not the template's: copied, every added
+        # slot shared BTN_NPC0's IDs and the page buttons BTN_DONE's 36 - the "<" did not show and
+        # Done lost its text (KMRP 1.5.1, 2026-10-16)
+        if rc.exists("ID"):
+            c.set_int32("ID", rc.get_int32("ID"))
+        if rc.exists("MOVETO"):
+            c.set_struct("MOVETO", copy.deepcopy(rc.get_struct("MOVETO")))
         if rc.exists("TEXT") and c.exists("TEXT"):
             # the roster's words (its text or string reference), in KMRP's font for this size
             t = copy.deepcopy(rc.get_struct("TEXT"))
