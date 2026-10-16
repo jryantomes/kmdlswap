@@ -145,9 +145,33 @@ def estimate_length(text: str) -> float:
     return max(MIN_LENGTH, min(MAX_LENGTH, words / WORDS_PER_SECOND))
 
 
+DIGIT_NAMES = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
+LETTER_NAMES = {
+    "a": "ay", "b": "bee", "c": "see", "d": "dee", "e": "ee", "f": "eff", "g": "gee", "h": "aitch",
+    "i": "eye", "j": "jay", "k": "kay", "l": "ell", "m": "em", "n": "en", "o": "oh", "p": "pee",
+    "q": "kyoo", "r": "ar", "s": "ess", "t": "tee", "u": "you", "v": "vee", "w": "double you",
+    "x": "ex", "y": "why", "z": "zed",
+}
+
+
+def spoken(text: str) -> str:
+    """The text as it is said: a designation or acronym letter by letter, digits as words.
+
+    "GH0-67I" is ten syllables spoken ("gee aitch zero six seven eye") but only three
+    letters to the shape reader, so a line opening on it held the mouth nearly still for
+    two seconds (the Czerka contractor's first lines, 2026-09-27). A token with a digit
+    in it, or two to four capitals ("RFK", "GHO"), is spelled out; loose digits read as
+    digit names."""
+    def spell(m):
+        return " ".join(DIGIT_NAMES[int(ch)] if ch.isdigit() else LETTER_NAMES.get(ch.lower(), "")
+                        for ch in m.group(0) if ch.isalnum())
+    text = re.sub(r"\b(?=[A-Za-z0-9-]*\d)[A-Za-z0-9-]+\b|\b[A-Z]{2,4}\b", spell, text)
+    return re.sub(r"\d", lambda m: f" {DIGIT_NAMES[int(m.group(0))]} ", text)
+
+
 def shapes_for(text: str) -> list[str]:
     """The mouth positions the text implies, in order."""
-    lowered = re.sub(r"[^a-z ]+", " ", text.lower())
+    lowered = re.sub(r"[^a-z ]+", " ", spoken(text).lower())
     out: list[str] = []
     i = 0
     while i < len(lowered):
@@ -190,6 +214,45 @@ def build(text: str, *, seconds: float | None = None):
         lip.add(round(i * step, 3), getattr(LIPShape, shape))
     # Ending anywhere else leaves the mouth hanging open when the line stops.
     lip.add(round(length, 3), LIPShape.NEUTRAL)
+    return lip
+
+
+# A pause longer than this between two words closes the mouth for it.
+REST_GAP = 0.15
+
+
+def build_timed(words, length: float):
+    """A LIP that follows a recording word by word.
+
+    `words` is [(text, start, end)] in seconds - word timings from a
+    speech-to-text pass over the recording itself. Where `build` can only spread
+    shapes evenly over a line, this puts each word's shapes inside the time that
+    word is actually spoken, at no more than the vanilla density, and lets the
+    mouth rest in the pauses. That is lip sync in the ordinary sense: the mouth
+    opens when the voice does.
+    """
+    from pykotor.resource.formats.lip import LIP, LIPShape
+
+    lip = LIP()
+    lip.length = float(length)
+    lip.add(0.0, LIPShape.NEUTRAL)
+    last_end = 0.0
+    for text, start, end in words:
+        if start - last_end > REST_GAP and last_end > 0.0:
+            lip.add(round(last_end + 0.05, 3), LIPShape.NEUTRAL)
+        shapes = [s for s in shapes_for(text) if s != "NEUTRAL"] or ["AH"]
+        span = max(0.05, end - start)
+        room = max(1, int(round(span * SHAPES_PER_SECOND * 1.5)))
+        if len(shapes) > room:
+            shapes = [shapes[int(i * len(shapes) / room)] for i in range(room)]
+        step = span / len(shapes)
+        for i, shape in enumerate(shapes):
+            lip.add(round(start + i * step, 3), getattr(LIPShape, shape))
+        last_end = end
+    # Ending anywhere else leaves the mouth hanging open when the line stops.
+    lip.add(round(min(length, last_end + 0.05) if words else length, 3), LIPShape.NEUTRAL)
+    if words and last_end + 0.05 < length:
+        lip.add(round(length, 3), LIPShape.NEUTRAL)
     return lip
 
 

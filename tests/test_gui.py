@@ -17,6 +17,7 @@ import time
 import pytest
 
 tk = pytest.importorskip("tkinter", reason="the app needs Tk")
+ttk = pytest.importorskip("tkinter.ttk", reason="the app needs Tk")
 
 
 
@@ -80,6 +81,42 @@ def root():
     r.destroy()
 
 
+def quiesce(a):
+    """Stop the drawing workers and let go of every Tk image, on this thread.
+
+    A `PhotoImage` deletes itself out of the Tcl interpreter when Python
+    collects it, and the cyclic collector runs on whichever thread happens
+    to trigger it. These tests build about 140 apps against one shared
+    interpreter and leave background readers churning through archives, so
+    that thread is very often a worker - and calling into Tcl from a thread
+    that does not own it is how the whole process goes down with an access
+    violation inside `create_image`, minutes later, in an unrelated test.
+
+    Dropping them here means they are freed by reference count, on the Tk
+    thread, before the app goes.
+    """
+    import gc
+
+    for counter in ("_thumb_job", "_jade_thumb_job", "_nwn_thumb_job"):
+        setattr(a, counter, getattr(a, counter, 0) + 1)
+    for key in getattr(a, "part_jobs", {}):
+        a.part_jobs[key] += 1
+
+    for name in ("_donor_photos", "_jade_photos", "_nwn_photos"):
+        if hasattr(a, name):
+            setattr(a, name, {})
+    for key in getattr(a, "part_photos", {}):
+        a.part_photos[key] = {}
+
+    galleries = [getattr(a, n, None)
+                 for n in ("donor_tree", "jade_gallery", "nwn_gallery")]
+    galleries.extend(getattr(a, "part_gallery", {}).values())
+    for gallery in galleries:
+        if gallery is not None:
+            gallery._images = {}
+    gc.collect()
+
+
 @pytest.fixture
 def app(root, install_path):
     from kmdlfun.gui import App
@@ -87,6 +124,7 @@ def app(root, install_path):
     a = App(root)
     a.install.set(str(install_path))
     yield a
+    quiesce(a)
     a.destroy()
 
 
@@ -130,6 +168,41 @@ def apply_scan(a, scanned, install_path):
     a.preview_box.config(values=a.models)
     a.head_host_box.config(values=a.models)
     a._kind_cache = {str(install_path): kinds}
+
+
+def settle(a, seconds=300.0):
+    """Wait for whatever the app is reading, the way sitting there would.
+
+    Reading which models are heads, who they look like or which are droids
+    happens off the Tk thread now, so a test that calls a refresh straight
+    after pointing the app at a folder gets an empty list unless it waits.
+
+    The install scan counts too. Opening a page starts it, and every button
+    on the page refuses to do anything while it runs - which in a test looks
+    like a build that silently produced nothing.
+    """
+    # Pump first, then look. Bringing a page to the front only queues the
+    # tab-changed event that starts the scan, so a check made before the
+    # first `update` sees an app that has not begun yet and calls it settled.
+    # Three quiet passes rather than one, for the same reason.
+    deadline = time.time() + seconds
+    quiet = 0
+    while time.time() < deadline and quiet < 3:
+        a.master.update()
+        busy = a._reading or (a.worker is not None and a.worker.is_alive())
+        quiet = 0 if busy else quiet + 1
+        time.sleep(0.02)
+    a.master.update()
+
+
+def refresh_donors(a):
+    """Redraw the donor list, then wait for whatever it had to read.
+
+    The whole-install surveys behind the list run off the Tk thread now, so
+    without this a test reads the list as it was before the reading finished.
+    """
+    a._refresh_donors()
+    settle(a)
 
 
 def pump(a, seconds=3.0):
@@ -226,6 +299,187 @@ def test_one_preview_run(app, tmp_path):
     assert not list(tmp_path.iterdir()), "preview must not write files"
 
 
+def _droid_cat():
+    """A stand-in droid catalogue: what `droidbuild.catalogue` returns for
+    these four, without the full-install scan that finds them."""
+    return {
+        "p_hk47": {"head", "neck", "hand", "foot", "torso", "limb"},
+        "c_drdwar": {"head", "neck", "hand", "foot", "torso", "limb"},
+        "p_t3m3": {"head", "neck", "foot", "torso", "limb"},
+        "c_drdspyder": {"head"},
+    }
+
+
+def test_the_droid_tab_only_offers_droids_that_have_the_part(app, install_path):
+    """Two filters, so a pick cannot silently do nothing: a base needs a head
+    and a torso, and a slot only lists donors that carry that part. The spider
+    droid is head-only - it may donate a head and nothing else, and it can
+    never be a base."""
+    app._show_page("Droid")
+    app._droid_catalogue_cache = {str(install_path): _droid_cat()}
+    app._refresh_droid_bases()
+
+    bases = list(app.droid_base_box.cget("values"))
+    assert "c_drdspyder" not in bases, "no torso, so nothing to build on"
+    assert {"p_hk47", "c_drdwar", "p_t3m3"} <= set(bases)
+    assert "left out" in app.droid_base_note.cget("text")
+
+    app.droid_base.set("p_hk47")
+    app._refresh_droid_slots()
+
+    from kmdlfun.gui import KEEP_BASE
+
+    heads = _donors_of(app, "head")
+    necks = _donors_of(app, "Neck")
+    assert heads and necks
+    assert heads[0] == KEEP_BASE and necks[0] == KEEP_BASE
+    assert "p_hk47" not in heads, "the base is not its own donor"
+    assert "c_drdspyder" in heads, "it does have a head"
+    assert "c_drdspyder" not in necks, "and it has no neck, so it is not offered"
+
+
+def _donors_of(app, node_name):
+    """The donor list the Parts box offers for one of the base's nodes.
+
+    Found by grid row: the node's label and its combobox share one.
+    """
+    rows = {int(c.grid_info()["row"]): c for c in app.droid_slots_box.winfo_children()
+            if isinstance(c, ttk.Combobox)}
+    for child in app.droid_slots_box.winfo_children():
+        if (isinstance(child, ttk.Label)
+                and child.cget("text").strip() == node_name):
+            box = rows.get(int(child.grid_info()["row"]))
+            if box is not None:
+                return list(box.cget("values"))
+    raise AssertionError(f"no donor list for {node_name!r}")
+
+
+def test_the_droid_parts_list_scrolls(app, install_path):
+    """HK-47 offers twenty-odd parts - more than fits a fixed panel - so the
+    list scrolls inside its frame instead of pushing the options and the log
+    off the bottom of the window."""
+    app._show_page("Droid")
+    app._droid_catalogue_cache = {str(install_path): _droid_cat()}
+    app.droid_base.set("p_hk47")
+    app._refresh_droid_slots()
+    app.master.update_idletasks()
+
+    box = app._droid_slots_canvas
+    content = box.bbox("all")
+    assert content is not None, "the canvas should hold the part list"
+    assert len(app.droid_slot_pick) > 12, "HK-47 has plenty of parts"
+    assert content[3] > int(box.cget("height")), (
+        "the content is taller than the window, which is why it must scroll"
+    )
+    # And the scrollbar has something to scroll: yview is a fraction pair.
+    first, last = box.yview()
+    assert (last - first) < 1.0, "part of the list is off-screen"
+
+
+def test_the_droid_tab_offers_both_games_at_once(app, install_path, tmp_path):
+    """Each slot lists K1 and K2 droids together, K2 marked, so one build can
+    take a head from one game and an arm from the other. The base is excluded
+    only from its own game - KOTOR II's `p_hk47` is a fine donor for KOTOR's."""
+    app._show_page("Droid")
+    other = str(tmp_path / "k2")
+    app.install2.set(other)
+    app._droid_catalogue_cache = {
+        str(install_path): _droid_cat(),
+        other: {"c_condrdl": {"head", "torso", "limb"}, "p_hk47": {"head", "torso"}},
+    }
+    app.droid_base.set("p_hk47")
+    app._refresh_droid_slots()
+
+    heads = _donors_of(app, "head")
+    assert "c_condrdl  [K2]" in heads, "a K2-only droid is reachable"
+    assert "p_hk47  [K2]" in heads, "the other game's same-named model is a donor"
+    assert "p_hk47" not in heads, "but the base itself still is not"
+    # And a label resolves back to the file it names.
+    assert app.droid_donor_of["c_condrdl  [K2]"] == ("c_condrdl", "K2")
+    assert app.droid_donor_of["c_drdwar"] == ("c_drdwar", "")
+
+
+def test_opening_the_droid_tab_does_not_block_the_window(app, install_path):
+    """The scan behind the droid list reads every model in the install - about
+    eighteen seconds - and it used to happen on the Tk thread, which is what
+    "the app locks up when I open that tab" was. Opening the tab must return
+    at once and put the reading on a worker, with the shade up to say so.
+    """
+    start = time.time()
+    app._show_page("Droid")
+    app._on_page_shown()
+    spent = time.time() - start
+
+    shade = f"survey:{app.DROIDS}"
+    assert spent < 2.0, f"opening the tab held the Tk thread for {spent:.1f}s"
+    assert app._reading, "and it should actually be reading, off the thread"
+    # Other loads raise their own shade, so look for this one's.
+    assert shade in app._busy_reasons, "the window is shaded while it reads"
+
+    settle(app, seconds=300)
+    assert shade not in app._busy_reasons, "and unshaded when it lands"
+    bases = list(app.droid_base_box.cget("values"))
+    assert "p_hk47" in bases and "p_t3m3" in bases, bases
+
+
+def test_the_droid_scan_is_kept_between_launches(app, install_path):
+    """Eighteen seconds is worth paying once, not once per launch. A second
+    app pointed at the same folder reads the answer off disk."""
+    app._show_page("Droid")
+    app._on_page_shown()
+    settle(app, seconds=300)
+    first = dict(app._droid_catalogue_cache[str(install_path)])
+    assert first, "the first read has to have found something"
+
+    from kmdlfun import droidbuild
+
+    def refuse(*_a, **_k):
+        raise AssertionError("the scan should have come off disk")
+
+    from kmdlfun.gui import App
+
+    again = App(app.master)
+    try:
+        again.install.set(str(install_path))
+        old, droidbuild.catalogue = droidbuild.catalogue, refuse
+        try:
+            again._show_page("Droid")
+            again._on_page_shown()
+            settle(again, seconds=60)
+        finally:
+            droidbuild.catalogue = old
+        assert again._droid_catalogue_cache[str(install_path)] == first
+    finally:
+        again.destroy()
+
+
+def test_the_droid_tab_previews_the_result(app, tmp_path, install_path):
+    """The Droid tab draws the mixed droid beside the base and writes nothing -
+    the same contract every other tab's Preview button has. A droid is a
+    self-contained model, so it is drawn as itself, no body to sit it on."""
+    app._show_page("Droid")
+    app.out_dir.set(str(tmp_path))
+    # Skip the full-install droid scan: the tab only needs the catalogue to
+    # fill its comboboxes, and this test is about Preview, not the scan.
+    app._droid_catalogue_cache = {str(install_path): _droid_cat()}
+    app.droid_base.set("p_hk47")
+    app._refresh_droid_slots()
+    assert "head" in app.droid_slot_pick, "HK-47's head node should be offered"
+    app.droid_slot_pick["head"].set("c_drdwar")
+
+    app._droid_start(preview=True)
+    pump(app, seconds=15.0)
+
+    log = app.log.get("1.0", "end")
+    assert "main thread is not in main loop" not in log
+    assert "could not draw" not in log, log[-300:]
+    assert "preview only: 1/1 part(s) would transfer" in log
+    assert len(app.viewport.scenes) == 2, "base before and after"
+    assert app.viewport.labels == ["p_hk47 (now)", "p_hk47 <- c_drdwar"]
+    assert app.viewport.bounds is not None, "one shared ruler for both"
+    assert not list(tmp_path.iterdir()), "preview must not write files"
+
+
 @pytest.mark.slow
 def test_the_app_builds_what_the_library_builds(app, tmp_path):
     """Same settings through the app and through `transplant_node` must give the
@@ -245,10 +499,17 @@ def test_the_app_builds_what_the_library_builds(app, tmp_path):
     app.opt_texture.set(True)
     app.opt_hide.set(True)
     app.opt_reshape.set(False)
+    # Bringing the page to the front starts the install scan, and every
+    # button refuses to do anything while it runs.
+    settle(app)
     app._start(preview=False)
     pump(app, seconds=5.0)
 
-    built = tmp_path / "p_carthh.mdl"
+    # A build is kept in a folder of its own and adopted into the Builds tab,
+    # rather than dropped loose in the output folder. This test still looked
+    # for the loose file and had been failing since that changed - quietly,
+    # because it is marked slow and the default run skips it.
+    built = tmp_path / "p_carthh-n_bith" / "p_carthh.mdl"
     assert built.is_file(), app.log.get("1.0", "end")[-400:]
 
     lib = ModelLibrary(str(app.install.get()))
@@ -319,7 +580,7 @@ def test_the_app_can_take_a_donor_from_the_second_game(app, tmp_path):
     transplant_tab(app)
     app.install2.set(k2)
     app.donor_game.set("K2")
-    app._refresh_donors()
+    refresh_donors(app)
     # Entries carry what they are, so a body is not offered as a head donor.
     values = app.donor_choices()
     quarren = [v for v in values if v.startswith("n_quarren")]
@@ -450,7 +711,7 @@ def test_a_cross_game_preview_finds_the_donors_texture(app):
     transplant_tab(app)
     app.install2.set(k2)
     app.donor_game.set("K2")
-    app._refresh_donors()
+    refresh_donors(app)
     quarren = [v for v in app.donor_choices() if v.startswith("n_quarren")][0]
 
     app.host.set("p_carthh")
@@ -508,7 +769,7 @@ def test_the_donor_list_can_be_sorted_by_measured_fit(app, k2_path):
     app.install2.set(str(k2_path))
     app.donor_game.set("K2")
     app.host.set("p_carthh")
-    app._refresh_donors()
+    refresh_donors(app)
 
     before = list(app.donor_labels.values())
     assert before, "nothing offered to rank"
@@ -557,10 +818,10 @@ def test_ranking_without_a_base_says_so_rather_than_failing(app):
 
 def pick_head_node(a):
     """Aim at the host's own head node, which needs no install scan."""
-    a._refresh_donors()
+    refresh_donors(a)
     head = next(n for n in a.target_box.cget("values") if n.lower() == "head")
     a.target_node.set(head)
-    a._refresh_donors()
+    refresh_donors(a)
 
 def head_tab(a):
     a._show_page("Custom head")
@@ -579,7 +840,7 @@ def test_a_unified_body_can_be_given_a_head_by_naming_the_node(app, tmp_path):
     transplant_tab(app)
     app.out_dir.set(str(tmp_path))
     app.host.set("p_hk47")
-    app._refresh_donors()
+    refresh_donors(app)
 
     assert app.target_node.get() == WHOLE_MODEL
     assert not app.donor_choices(), (
@@ -588,7 +849,7 @@ def test_a_unified_body_can_be_given_a_head_by_naming_the_node(app, tmp_path):
     assert "head" in list(app.target_box.cget("values"))
 
     app.target_node.set("head")
-    app._refresh_donors()
+    refresh_donors(app)
     offered = app.donor_choices()
     assert len(offered) > 20, "naming the node should offer every head donor"
     assert "one part of" in app.target_note.cget("text")
@@ -662,12 +923,12 @@ def test_the_donor_list_can_be_filtered_by_who(app, scanned, install_path):
     app.host.set("p_carthh")
 
     app.donor_look.set(ANYONE)
-    app._refresh_donors()
+    refresh_donors(app)
     everyone = list(app.donor_labels.values())
     assert everyone, "no donors offered at all"
 
     app.donor_look.set("female")
-    app._refresh_donors()
+    refresh_donors(app)
     female = list(app.donor_labels.values())
 
     assert female, "no female donors offered"
@@ -677,7 +938,7 @@ def test_the_donor_list_can_be_filtered_by_who(app, scanned, install_path):
     assert "p_carthh" not in female and "p_hk47" not in female
 
     app.donor_look.set("droid")
-    app._refresh_donors()
+    refresh_donors(app)
     assert not list(app.donor_labels.values()), (
         "no droid pairs with Carth whole-model, and the filter should not "
         "pretend otherwise"
@@ -687,7 +948,7 @@ def test_the_donor_list_can_be_filtered_by_who(app, scanned, install_path):
     # Carth's node is `Head`, capitalised - the selector offers the real names.
     head = next(n for n in app.target_box.cget("values") if n.lower() == "head")
     app.target_node.set(head)
-    app._refresh_donors()
+    refresh_donors(app)
     droids = list(app.donor_labels.values())
     assert "p_hk47" in droids, droids[:6]
     assert not set(droids) & set(female), "nothing is both"
@@ -696,7 +957,7 @@ def test_the_donor_list_can_be_filtered_by_who(app, scanned, install_path):
     # Back to everyone, and nothing was lost on the way.
     app.target_node.set(WHOLE_MODEL)
     app.donor_look.set(ANYONE)
-    app._refresh_donors()
+    refresh_donors(app)
     assert set(app.donor_labels.values()) == set(everyone)
 
 
@@ -760,7 +1021,7 @@ def test_refiltering_does_not_leave_faces_behind(app):
     assert app._donor_photos
 
     app.donor_look.set(ANYONE)
-    app._refresh_donors()
+    refresh_donors(app)
     stale = set(app._donor_photos) - set(app.donor_choices())
     assert not stale, f"{len(stale)} images kept for rows that are gone"
 
@@ -771,10 +1032,10 @@ def test_a_self_contained_host_is_previewed_on_its_own(app, tmp_path):
     transplant_tab(app)
     app.out_dir.set(str(tmp_path))
     app.host.set("p_hk47")
-    app._refresh_donors()
+    refresh_donors(app)
     head = next(n for n in app.target_box.cget("values") if n.lower() == "head")
     app.target_node.set(head)
-    app._refresh_donors()
+    refresh_donors(app)
     app.donor.set(next(v for v in app.donor_choices() if v.startswith("p_carthh")))
 
     app._start(preview=True)
@@ -797,7 +1058,7 @@ def test_a_cross_game_build_ships_only_what_the_host_lacks(app, tmp_path, k2_pat
     transplant_tab(app)
     app.install2.set(str(k2_path))
     app.donor_game.set("K2")
-    app._refresh_donors()
+    refresh_donors(app)
     mira = [v for v in app.donor_choices() if v.startswith("p_mirah")]
     if not mira:
         pytest.skip("p_mirah not offered from this K2 install")
@@ -875,7 +1136,7 @@ def test_the_scan_classifies_on_its_way_past(app):
 
     started = time.time()
     app.host.set("p_carthh")
-    app._refresh_donors()
+    refresh_donors(app)
     assert time.time() - started < 5.0, "the donor list re-read the install"
     assert app.donor_choices()
 
@@ -908,7 +1169,7 @@ def test_the_preview_frames_the_head_it_swapped(app, tmp_path):
     transplant_tab(app)
     app.out_dir.set(str(tmp_path))
     app.host.set("p_carthh")
-    app._refresh_donors()
+    refresh_donors(app)
     app.donor.set("n_dustilh")
     app.opt_fit.set(False)
     app._start(preview=True)
@@ -954,12 +1215,12 @@ def test_a_headless_creature_can_still_donate_a_part(app, tmp_path):
     transplant_tab(app)
     app.out_dir.set(str(tmp_path))
     app.host.set("c_dewback")
-    app._refresh_donors()
+    refresh_donors(app)
     assert not app.donor_choices(), "nothing should pair with it whole-model"
 
     node = next(n for n in app.target_box.cget("values") if n.lower() == "uprbody")
     app.target_node.set(node)
-    app._refresh_donors()
+    refresh_donors(app)
 
     offered = app.donor_choices()
     assert len(offered) > 100, "naming a node should offer anything with geometry"
@@ -995,10 +1256,10 @@ def test_naming_the_donor_node_overrides_the_automatic_choice(app, tmp_path):
     transplant_tab(app)
     app.out_dir.set(str(tmp_path))
     app.host.set("p_carthh")
-    app._refresh_donors()
+    refresh_donors(app)
     head = next(n for n in app.target_box.cget("values") if n.lower() == "head")
     app.target_node.set(head)
-    app._refresh_donors()
+    refresh_donors(app)
     app.donor.set(next(d for d in app.donor_choices() if d.startswith("n_dustilh")))
     app._refresh_donor_nodes()
 
@@ -1023,7 +1284,7 @@ def test_saving_under_a_new_name_makes_a_new_model(app, tmp_path):
     transplant_tab(app)
     app.out_dir.set(str(tmp_path))
     app.host.set("p_carthh")
-    app._refresh_donors()
+    refresh_donors(app)
     app.donor.set("n_dustilh")
     app.opt_fit.set(False)
     app.save_as.set("p_mycustomhead")
@@ -1050,7 +1311,7 @@ def test_a_name_the_engine_cannot_use_is_refused_before_building(app, tmp_path):
     transplant_tab(app)
     app.out_dir.set(str(tmp_path))
     app.host.set("p_carthh")
-    app._refresh_donors()
+    refresh_donors(app)
     app.donor.set("n_dustilh")
     app.save_as.set("not a resref!")
 
@@ -2694,3 +2955,183 @@ def test_a_preview_draws_even_when_the_checks_reject_it(app, tmp_path):
     source = inspect.getsource(kgui.App._head_start)
     assert "force=self.head_force.get() or preview" in source
     assert "build=build or preview" in source
+
+
+# --- Neverwinter Nights -----------------------------------------------------
+
+
+def nwn_ready(a, seconds=180.0):
+    """Wait for the NWN window to have read the archives and drawn a face."""
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        a.master.update()
+        time.sleep(0.03)
+        if getattr(a, "_nwn_catalogue", None) and a._nwn_photos:
+            return
+    raise AssertionError("the Neverwinter Nights catalogue never arrived")
+
+
+def test_the_head_tab_offers_every_way_geometry_gets_in(app):
+    """Three doors, and they have to fit. Spelled out along the path row they
+    asked for 896px of an 860px window and the last one fell off the edge."""
+    from kmdlfun.gui import WINDOW_W
+
+    page = page_of(app, "Custom head")
+    app._show_page("Custom head")
+    app.master.update_idletasks()
+    labels = buttons_under(page)
+    assert {".glb", "Jade Empire", "Neverwinter Nights"} <= set(labels)
+    assert page.winfo_reqwidth() <= WINDOW_W, (
+        f"the tab wants {page.winfo_reqwidth()}px of a {WINDOW_W}px window"
+    )
+
+
+def test_the_nwn_window_says_so_when_no_folder_is_set(app):
+    app.nwn.set("")
+    app._open_nwn()
+    assert getattr(app, "_nwn_window", None) is None
+    assert "no Neverwinter Nights folder set" in app.log.get("1.0", "end")
+
+
+def test_the_nwn_window_opens_without_blocking(app, nwn_path):
+    """Reading the key file and 60 archives is not instant, and it must not
+    happen on the thread drawing the window."""
+    app.nwn.set(str(nwn_path))
+    start = time.time()
+    app._open_nwn()
+    spent = time.time() - start
+    try:
+        assert spent < 2.0, f"opening it held the Tk thread for {spent:.1f}s"
+        assert app._nwn_window is not None
+        nwn_ready(app)
+        assert len(app._nwn_labels) > 400, "434 heads in the base game"
+        assert "to choose from" in app.nwn_note.cget("text")
+    finally:
+        app._nwn_close()
+
+
+def test_the_nwn_window_offers_placeables_too(app, nwn_path):
+    app.nwn.set(str(nwn_path))
+    app._open_nwn()
+    try:
+        nwn_ready(app)
+        heads = len(app._nwn_labels)
+        app.nwn_kind.set("placeable")
+        app._refresh_nwn()
+        app.master.update()
+        assert len(app._nwn_labels) > 500, "569 placeables in the base game"
+        assert len(app._nwn_labels) != heads
+        # A placeable needs no size correction; a head does, and the box has
+        # to follow the choice rather than keep the other one's number.
+        assert app.nwn_scale.get() == 1.0
+        app.nwn_kind.set("head")
+        app._refresh_nwn()
+        app.master.update()
+        from kmdlfun import nwn as knwn
+
+        assert app.nwn_scale.get() == knwn.HEAD_SCALE
+    finally:
+        app._nwn_close()
+
+
+def test_a_typed_scale_is_not_overwritten_by_the_kind(app, nwn_path):
+    """Following the kind is a convenience. Losing somebody's own figure
+    because they then changed the kind is not."""
+    app.nwn.set(str(nwn_path))
+    app._open_nwn()
+    try:
+        nwn_ready(app)
+        app.nwn_scale.set(0.55)
+        app.nwn_kind.set("placeable")
+        app._refresh_nwn()
+        assert app.nwn_scale.get() == 0.55
+    finally:
+        app._nwn_close()
+
+
+def test_picking_a_face_writes_a_pack_and_loads_it(app, nwn_path, tmp_path):
+    """The whole point of the window: a face goes in, a head pack comes out,
+    and the Custom head tab is pointed at it without anybody typing a path."""
+    app.install.set(str(app.install.get()))
+    app.nwn.set(str(nwn_path))
+    app.out_dir.set(str(tmp_path))
+    app._show_page("Custom head")
+    settle(app)
+    app._open_nwn()
+    try:
+        nwn_ready(app)
+        settle(app)
+        app._convert_nwn("pmh0_head012")
+        pump(app, seconds=20.0)
+    finally:
+        app._nwn_close()
+
+    pack = tmp_path / "packs" / "nwn_pmh0_head012"
+    assert app.pack_dir.get() == str(pack)
+    assert (pack / "head.obj").is_file()
+    assert list(pack.glob("*.tga")), "the face should have come with it"
+    log = app.log.get("1.0", "end")
+    assert "main thread is not in main loop" not in log
+    assert "wrote a head pack" in log
+
+
+def test_the_nwn_worker_never_touches_a_tk_variable(app):
+    """Tk is not thread-safe, and a read from a worker survives only while the
+    main loop happens to be spinning. Every setting is read on the main thread
+    in `_convert_nwn` and handed over as plain values."""
+    import inspect
+
+    source = inspect.getsource(app._nwn_work.__func__)
+    for reached in ("self.nwn_scale", "self.nwn_skin", "self.nwn_hair",
+                    "self.nwn.get", "self.out_dir"):
+        assert reached not in source, f"{reached} is read from the worker"
+
+
+def test_a_gallery_full_of_faces_is_drawn_once_not_once_each(root):
+    """`_relayout` deletes every canvas item and rebuilds the lot, so handing
+    a gallery its images one at a time is quadratic in the number of cells.
+    At 148 Jade heads that is merely wasteful. At 434 Neverwinter Nights
+    heads it asked Tk for 188,000 canvas items and brought the interpreter
+    down with an access violation inside its own drawing code.
+    """
+    from kmdlfun import gallery as kgallery
+
+    drawn = []
+    g = kgallery.Gallery(root, cell=96)
+    labels = [f"face{i:03d}" for i in range(40)]
+    g.show(labels)
+    g._relayout = lambda: drawn.append(1)
+
+    g.set_images({label: None for label in labels})
+    assert len(drawn) == 1, f"one redraw for the lot, not {len(drawn)}"
+
+    # And a label the gallery is not showing must not provoke one at all.
+    drawn.clear()
+    g.set_images({"not here": None})
+    assert not drawn
+    g.destroy()
+
+
+def test_the_drain_gathers_faces_before_putting_them_on_the_canvas():
+    """The batching only helps if the queue is drained into one call. Doing
+    it per event inside the loop is the same quadratic cost with extra steps.
+    """
+    import inspect
+
+    from kmdlfun.gui import App
+
+    source = inspect.getsource(App._drain)
+    # Every gallery, not just the newest one. The Character tab holds 328
+    # heads and was the one that actually went down.
+    for gathered, flush in (
+        ("nwn_thumbs[label] = photo", "self._flush_nwn_thumbs(nwn_thumbs)"),
+        ("part_thumbs.setdefault(key, {})[label] = photo",
+         "self._flush_part_thumbs(part_thumbs)"),
+        ("jade_thumbs[label] = photo", "self._flush_jade_thumbs(jade_thumbs)"),
+        ("donor_thumbs[label] = photo", "self._flush_thumbs(donor_thumbs)"),
+    ):
+        assert gathered in source, f"not gathered: {gathered}"
+        assert flush in source, f"never flushed: {flush}"
+        assert source.index(gathered) < source.index(flush), (
+            f"{flush} belongs after the loop, not inside it"
+        )

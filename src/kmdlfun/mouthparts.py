@@ -148,13 +148,24 @@ def seat(layout, mdl: bytes, mdx: bytes, node, host_layout=None):
     low, high = float(stacked[:, 2].min()), float(stacked[:, 2].max())
     half_width = max(float(np.abs(stacked[:, 0]).max()) * 1.5, 1e-4)
 
-    new_face = _model_space(layout, node, rest)
+    # `node` names the face, but it is the *host's* record of it: the caller
+    # has it from the layout it read before the replacement. Reading the new
+    # model through it worked only while the replacement was at least as
+    # dense as the host - a 166-vertex head from Neverwinter Nights against
+    # Carth's 565 asked for a vertex twelve bytes past the end of the new MDX
+    # and crashed the build. Look it up in each layout by name, the way the
+    # host's own record already is just below.
+    new_node = next(
+        (n for n in kparts.mesh_nodes(layout) if n.name.lower() == node.name.lower()),
+        None,
+    )
     host_node = next(
         (n for n in kparts.mesh_nodes(host_layout) if n.name.lower() == node.name.lower()),
         None,
     )
-    if host_node is None:
+    if new_node is None or host_node is None:
         return mdl, mdx, []
+    new_face = _model_space(layout, new_node, rest)
     old_face = _model_space(host_layout, host_node, host_rest)
 
     new_depth = _face_depth(new_face, low, high, half_width)

@@ -341,3 +341,84 @@ def test_culling_barely_changes_a_correct_closed_mesh(pair):
     plain = coverage(render.render(scene, size=140, supersample=1))
     culled = coverage(render.render(scene, size=140, supersample=1, cull=True))
     assert culled == pytest.approx(plain, abs=0.03)
+
+
+def test_a_thumbnail_is_never_half_written(tmp_path):
+    """Two workers drawing the same model agree on the cache filename and
+    race to write it. The reader is Tk's own image loader, which is C: hand
+    it a truncated PNG and the interpreter goes down with an access
+    violation, not an exception. So the write has to be all or nothing.
+
+    This is what that looked like before it was: the app read every model
+    library in 0.7s, which serialised the thumbnail workers by accident. The
+    moment that read was cached the workers overlapped properly and the
+    galleries started taking the whole process with them.
+    """
+    import concurrent.futures as cf
+    import threading
+
+    import numpy as np
+
+    from kmdlfun import render as krender
+
+    out = tmp_path / "cache" / "face.png"
+    partial: list[int] = []
+    stop = threading.Event()
+
+    def write(seed):
+        rng = np.random.default_rng(seed)
+        for _ in range(20):
+            krender.to_png(
+                rng.integers(0, 255, (64, 64, 3), dtype=np.uint8), out)
+
+    def read():
+        while not stop.is_set():
+            if not out.is_file():
+                continue
+            try:
+                found = out.read_bytes()
+            except OSError:
+                continue
+            if found and not (found.startswith(b"\x89PNG")
+                              and found.endswith(b"IEND\xaeB`\x82")):
+                partial.append(len(found))
+
+    reader = threading.Thread(target=read, daemon=True)
+    reader.start()
+    with cf.ThreadPoolExecutor(6) as pool:
+        list(pool.map(write, range(6)))
+    stop.set()
+    reader.join(5)
+
+    assert not partial, f"{len(partial)} reads saw a half-written file"
+    assert not list(out.parent.glob("*.part")), "no scratch files left behind"
+    assert out.read_bytes().startswith(b"\x89PNG")
+
+
+def test_a_write_that_cannot_land_is_not_silently_lost(tmp_path, monkeypatch):
+    """Tolerating a refused rename is right when the picture is already
+    there - somebody else wrote the same thing. It is not right when there
+    is no file at all, and that has to still be an error."""
+    import os
+
+    import numpy as np
+    import pytest
+
+    from kmdlfun import render as krender
+
+    def refuse(*_a, **_k):
+        raise PermissionError("busy")
+
+    monkeypatch.setattr(os, "replace", refuse)
+    monkeypatch.setattr(krender, "WRITE_PAUSE", 0.0)
+    out = tmp_path / "face.png"
+    with pytest.raises(PermissionError):
+        krender.to_png(np.zeros((8, 8, 3), dtype=np.uint8), out)
+    assert not list(tmp_path.glob("*.part"))
+
+    # But with a complete picture already in place, it is somebody else's
+    # write landing first and nothing to report.
+    out.write_bytes(b"\x89PNG already here")
+    krender.to_png(np.zeros((8, 8, 3), dtype=np.uint8), out)
+    assert out.read_bytes() == b"\x89PNG already here"
+    assert not list(tmp_path.glob("*.part"))

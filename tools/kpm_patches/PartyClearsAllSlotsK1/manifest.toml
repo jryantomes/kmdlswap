@@ -1,0 +1,14 @@
+[patch]
+id = "party-clears-all-slots-k1"
+name = "Party Clears Reach All Slots (KotOR I)"
+version = "0.2.0"
+author = "Ryan Tomes"
+description = "With Party Roster Limit 32, a companion in slots 9-31 stayed in the party where the game clears it (boarding the Ebon Hawk, the Leviathan capture, the dueling ring, the Manaan arrest...): every script that clears the party loops over slots 0-8 only. As each script loads, its party-clearing loops are widened to reach all 32 slots. A loop is changed only if it removes party members; loops that check or count them are left alone. Scripts that remove slots 0-8 one by one (the Star Forge) have slots 9-31 removed with them. No game or mod file is changed."
+
+requires = ["party-roster-limit-32-k1"]
+conflicts = []
+
+[patch.supported_versions]
+kotor1_gog_103 = "9C10E0450A6EECA417E036E3CDE7474FED1F0A92AAB018446D156944DEA91435"
+kotor1_cdcrack_103 = "761F9466F456A83909036BAEBB5C43167D722387BE66E54617BA20A8C49E9886"
+kotor1_steam_103 = "34E6D971C034222A417995D8E1E8FDD9F8781795C9C289BD86C499A439F34C88"

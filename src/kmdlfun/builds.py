@@ -64,6 +64,10 @@ class Build:
         if m.get("kind") == "lips":
             lines = m.get("lines", 0)
             what = f"{m.get('dialogue', 'a dialogue')} - {lines} lip(s)"
+        elif m.get("kind") == "droid":
+            host = (m.get("host") or {}).get("model", "?")
+            donors = m.get("donors") or []
+            what = f"{host} <- {', '.join(donors)}" if donors else host
         else:
             host = (m.get("host") or {}).get("model", "?")
             donor = (m.get("donor") or {}).get("model")

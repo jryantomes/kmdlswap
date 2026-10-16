@@ -1,0 +1,148 @@
+# Findings accepted on purpose - each with why. A finding matches when `mod` is part of the mod's name
+# and `item` is part of the checked item. Keep this short: everything here is a place the install
+# differs from what a mod's installer would leave, by decision.
+
+[[accept]]
+mod = "GH0-RFK"
+item = "tar_m02af.mod\\module.ifo"
+reason = "dev copy hooks the Taris hideout by script name (install_hub_hooks.py --by-name tar_m02af): the playthrough had visited it before the module.ifo hook, and a save keeps the old module.ifo"
+
+[[accept]]
+mod = "Sleheyron 2.0.3 (Main)"
+item = "override\\unk41_guide_dlg.dlg"
+reason = "merged by hand 2026-10-02 (install_sleheyron_repair.py): Sleheyron's Vima lines + GH0-RFK's 2"
+
+[[accept]]
+mod = "Sleheyron 2.0.3 (Main)"
+item = "override\\k_p"
+reason = "Sleheyron's own K1CP compatibility option replaces these scripts on purpose (installed after Main)"
+
+# K1 Community Patch fixes merged into later mods' whole dialogues (tools/install_audit/merge.py,
+# 2026-10-09): the file is the later mod's with K1CP's changes where it had left vanilla's - so it is no
+# longer that mod's copy byte for byte. merge.py only writes fields the later mod left as vanilla.
+
+[[accept]]
+mod = ""
+area = "files"
+item = 'modules\danm14ad.mod\dan14_cutscene.dlg'
+reason = "merged with K1CP's fixes (260 applied, 0 conflicts kept this mod's) - merge.py 2026-10-09"
+
+[[accept]]
+mod = ""
+area = "files"
+item = 'modules\ebo_m40aa.mod\lev40_carth.dlg'
+reason = "merged with K1CP's fixes (10 applied, 0 conflicts kept this mod's) - merge.py 2026-10-09"
+
+[[accept]]
+mod = ""
+area = "files"
+item = 'override\ebo_carth.dlg'
+reason = "merged with K1CP's fixes (37 applied, 9 conflicts kept this mod's) - merge.py 2026-10-09"
+
+[[accept]]
+mod = ""
+area = "files"
+item = 'override\kor33_yuthura.dlg'
+reason = "merged with K1CP's fixes (9 applied, 0 conflicts kept this mod's) - merge.py 2026-10-09"
+
+[[accept]]
+mod = ""
+area = "files"
+item = 'override\kor35_yuthuraban.dlg'
+reason = "merged with K1CP's fixes (5 applied, 0 conflicts kept this mod's) - merge.py 2026-10-09"
+
+[[accept]]
+mod = ""
+area = "files"
+item = 'override\lev40_jolee.dlg'
+reason = "merged with K1CP's fixes (6 applied, 0 conflicts kept this mod's) - merge.py 2026-10-09"
+
+[[accept]]
+mod = ""
+area = "files"
+item = 'override\lev40_saul403.dlg'
+reason = "merged with K1CP's fixes (26 applied, 0 conflicts kept this mod's) - merge.py 2026-10-09"
+
+[[accept]]
+mod = ""
+area = "files"
+item = 'override\man26_sunry.dlg'
+reason = "merged with K1CP's fixes (24 applied, 0 conflicts kept this mod's) - merge.py 2026-10-09"
+
+[[accept]]
+mod = ""
+area = "files"
+item = 'modules\manm27aa.mod\man27_sithlieu.dlg'
+reason = "merged with K1CP's fixes (4 applied, 0 conflicts kept this mod's) - merge.py 2026-10-09"
+
+[[accept]]
+mod = ""
+area = "files"
+item = 'modules\tar_m02ac.mod\tar02_gurney021.dlg'
+reason = "merged with K1CP's fixes (1 applied, 0 conflicts kept this mod's) - merge.py 2026-10-09"
+
+[[accept]]
+mod = ""
+area = "files"
+item = 'override\tat17_03shari_01.dlg'
+reason = "merged with K1CP's fixes (3 applied, 0 conflicts kept this mod's) - merge.py 2026-10-09"
+
+[[accept]]
+mod = ""
+area = "files"
+item = 'override\tat18_bantha.dlg'
+reason = "merged with K1CP's fixes (4 applied, 0 conflicts kept this mod's) - merge.py 2026-10-09"
+
+[[accept]]
+mod = ""
+area = "files"
+item = 'override\unk41_bastexit.dlg'
+reason = "merged with K1CP's fixes (4 applied, 0 conflicts kept this mod's) - merge.py 2026-10-09"
+
+[[accept]]
+mod = ""
+area = "files"
+item = 'modules\unk_m41aa.mod\unk41_carth.dlg'
+reason = "merged with K1CP's fixes (3 applied, 0 conflicts kept this mod's) - merge.py 2026-10-09"
+
+[[accept]]
+mod = ""
+area = "files"
+item = 'override\unk41_mission.dlg'
+reason = "merged with K1CP's fixes (55 applied, 0 conflicts kept this mod's) - merge.py 2026-10-09"
+
+[[accept]]
+mod = "GH0-RFK"
+area = "files"
+item = 'override\hkrfkjr.dlg'
+reason = "the package's copy is re-saved by the build (read_dlg/write_dlg, private recording links cleared) - never byte-identical to the dev copy; its banter gates c_rfk_cand/c_rfk_zaal checked present in the live one 2026-10-09"
+
+[[accept]]
+mod = ""
+area = "files"
+item = 'override\kas22_dasol_01.dlg'
+reason = "merged with K1CP's fixes, nodes paired by string reference (14 applied, 0 conflicts kept this mod's) - merge.py 2026-10-09"
+
+[[accept]]
+mod = ""
+area = "files"
+item = 'override\lev40_bast400.dlg'
+reason = "merged with K1CP's fixes, nodes paired by string reference (13 applied, 0 conflicts kept this mod's) - merge.py 2026-10-09"
+
+[[accept]]
+mod = ""
+area = "files"
+item = 'override\man26_repdip.dlg'
+reason = "merged with K1CP's fixes, nodes paired by string reference (2 applied, 0 conflicts kept this mod's) - merge.py 2026-10-09"
+
+[[accept]]
+mod = ""
+area = "files"
+item = 'override\man26_selambush.dlg'
+reason = "merged with K1CP's fixes, nodes paired by string reference (7 applied, 1 conflicts kept this mod's) - merge.py 2026-10-09"
+
+[[accept]]
+mod = ""
+area = "files"
+item = 'modules\tar_m03ae.mod\tar03_cand031.dlg'
+reason = "merged with K1CP's fixes, nodes paired by string reference (2 applied, 0 conflicts kept this mod's) - merge.py 2026-10-09"

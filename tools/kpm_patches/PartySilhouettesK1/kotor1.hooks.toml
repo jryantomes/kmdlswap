@@ -1,0 +1,25 @@
+[metadata]
+target_versions = [
+	"9C10E0450A6EECA417E036E3CDE7474FED1F0A92AAB018446D156944DEA91435",
+	"761F9466F456A83909036BAEBB5C43167D722387BE66E54617BA20A8C49E9886",
+	"34E6D971C034222A417995D8E1E8FDD9F8781795C9C289BD86C499A439F34C88"
+]
+
+# CSWGuiPanel::AddControl(control), entry: push ebx / mov ebx, [esp+8] / push esi - whole
+# instructions, nothing relative. Party Roster Limit 32 adds each slot's button to the party screen
+# after it has set the slot up and before it decides whether to add the slot's silhouette label:
+# a registered silhouette for an unavailable slot 9-31 is put on that label and the label shown.
+[[hooks]]
+address = 0x0040B9A0
+type = "detour"
+original_bytes = [0x53, 0x8B, 0x5C, 0x24, 0x08, 0x56]
+function = "AddPartySilhouette"
+exclude_from_restore = []
+
+[[hooks.parameters]]
+source = "ecx"
+type = "pointer" # the panel
+
+[[hooks.parameters]]
+source = "[esp+4]"
+type = "pointer" # the control being added

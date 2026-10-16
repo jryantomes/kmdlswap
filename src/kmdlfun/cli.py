@@ -118,6 +118,62 @@ def main(argv: list[str] | None = None) -> int:
                          "host vertex lands (implies --reshape)")
     tp.add_argument("--dry-run", action="store_true", help="report matches and fit, write nothing")
 
+    dr = sub.add_parser("droid",
+                        help="mix heads, arms, legs and torsos between droid models")
+    dr.add_argument("--install", required=True)
+    dr.add_argument("--donor-install",
+                    help="a second game to pull donor parts from, reached by "
+                         "prefixing a --part donor with 'k2/'. Only geometry "
+                         "crosses over, same as --donor-install on transplant")
+    dr.add_argument("--base", help="the droid that keeps its skeleton and "
+                                   "animations; omit with --list to see droids "
+                                   "in the install")
+    dr.add_argument("--list", action="store_true",
+                    help="list every droid model in the install and stop. With "
+                         "--base and no --part, list that droid's own nodes "
+                         "instead, grouped by part")
+    dr.add_argument("--part", action="append", default=[],
+                    metavar="NODE=[k2/]DONOR[:DONOR_NODE]",
+                    help="fill this node of --base from a donor model, taking "
+                         "the donor's same-named node unless DONOR_NODE says "
+                         "otherwise. Repeatable - one entry per head, arm, leg "
+                         "or torso being mixed in, e.g. "
+                         "--part head=p_t3m3 --part rarm=c_drdheavy. Prefix a "
+                         "donor with 'k2/' to take it from --donor-install "
+                         "instead, one part at a time: "
+                         "--part head=k2/c_condrdl:Head")
+    dr.add_argument("--out", help="where builds are kept; required unless --dry-run")
+    dr.add_argument("--name", help="name this build; defaults to base plus its donors")
+    dr.add_argument("--save-as", metavar="RESREF",
+                    help="write the result as a NEW model with this name rather "
+                         "than overwriting the base")
+    dr.add_argument("--no-positional", dest="positional", action="store_false",
+                    help="pair parts by name only. By default a slot whose names "
+                         "do not agree is paired with the donor part whose joint "
+                         "sits in the same place, which is what pairs a calf with "
+                         "a shin; the report says which pairings were made that way")
+    dr.set_defaults(positional=True)
+    dr.add_argument("--align", choices=("joint", "none"), default="joint",
+                    help="'joint' (default) hangs each donor part off the base's "
+                         "matching joint - a short donor's head still lands at "
+                         "the base's neck. 'none' is the raw transplant, donor "
+                         "geometry kept at its own height")
+    dr.add_argument("--fit", action="store_true",
+                    help="scale each donor part down to the base part's size; "
+                         "does its own centring, so it takes over from --align")
+    dr.add_argument("--scale", type=float, default=1.0)
+    dr.add_argument("--max-influences", type=int, default=4)
+    dr.add_argument("--reshape", action="store_true",
+                    help="keep the base's own vertices for each part and move "
+                         "them onto the donor's surface, instead of taking the "
+                         "donor's geometry whole")
+    dr.add_argument("--no-texture", dest="with_texture", action="store_false",
+                    help="keep the base's own texture on swapped parts instead "
+                         "of taking each donor's")
+    dr.set_defaults(with_texture=True)
+    dr.add_argument("--dry-run", action="store_true",
+                    help="report matches and fit, write nothing")
+
     hd = sub.add_parser("head", help="check or install a custom head pack")
     hd.add_argument("pack", help="folder holding head.obj, and optionally head.tga")
     hd.add_argument("--install", help="game install, needed to check against a target")
@@ -151,6 +207,13 @@ def main(argv: list[str] | None = None) -> int:
                          "are shaped for the face being replaced")
     hd.add_argument("--template", action="store_true",
                     help="write a head.json template into the folder and stop")
+    hd.add_argument("--force", action="store_true",
+                    help="build even if a check fails. The app has had this "
+                         "checkbox all along and the command line had not. It "
+                         "is for putting a thing the spec has no opinion about "
+                         "in front of the game, which is where some of these "
+                         "questions actually get answered - not for ignoring "
+                         "checks in general")
 
     im = sub.add_parser("import", help="turn a .glb into a head pack folder")
     im.add_argument("file", help="the .glb to read")
@@ -245,6 +308,52 @@ def main(argv: list[str] | None = None) -> int:
                          "it is a measurement rather than a fact - see "
                          "reports/JADE_FINDINGS.md")
 
+    nw = sub.add_parser("nwn",
+                        help="turn a Neverwinter Nights model into a head pack")
+    nw.add_argument("resref", nargs="?",
+                    help="the model to convert; omit to list what is there")
+    nw.add_argument("--install", help="the Neverwinter Nights folder (found "
+                                      "automatically if left out)")
+    nw.add_argument("--out", help="pack folder to create")
+    nw.add_argument("--kind", choices=["head", "placeable", "all"],
+                    default="head",
+                    help="which models to list (default: heads)")
+    nw.add_argument("--no-texture", action="store_true",
+                    help="skip the texture; the model then wears the host's")
+    nw.add_argument("--scale", type=float,
+                    help="size correction. NWN heads are the right height and "
+                         "a third too wide, so the default of 0.80 is a "
+                         "compromise rather than a conversion - see nwn.py")
+    nw.add_argument("--skin", type=int, default=0, metavar="N",
+                    help="which of the 176 skin tones to bake in (default: 0)")
+    nw.add_argument("--hair", type=int, default=0, metavar="N",
+                    help="which hair colour to bake in (default: 0)")
+
+    sw = sub.add_parser("swtor",
+                        help="turn a Star Wars: The Old Republic head into a "
+                             "head pack")
+    sw.add_argument("name", nargs="?",
+                    help="the model to convert; omit to list what is there")
+    sw.add_argument("--install", help="the Old Republic folder (found "
+                                      "automatically if left out)")
+    sw.add_argument("--out", help="pack folder to create")
+    sw.add_argument("--body-type", metavar="CODE",
+                    help="list only heads modelled for one body: bfa, bfb, "
+                         "bfn, bfs, bma, bmf, bmn or bms")
+    sw.add_argument("--fits", nargs="?", type=float, const=1.25, default=None,
+                    metavar="RATIO",
+                    help="list only heads that fit a head node (default 1.25, "
+                         "headspec's own ceiling: 562 of the 993). Without it "
+                         "the listing includes lekku, montrals and a "
+                         "two-metre Trandoshan")
+    sw.add_argument("--rescan", action="store_true",
+                    help="ignore the cached index and read the archive again; "
+                         "it takes about four seconds")
+    sw.add_argument("--scale", type=float,
+                    help="size correction, on top of the exact ten-metre unit "
+                         "conversion. The default of 0.85 is the point where "
+                         "every human head fits - see swtor.py")
+
     sub.add_parser("gui", help="launch the desktop app")
 
     args = p.parse_args(argv)
@@ -259,6 +368,8 @@ def main(argv: list[str] | None = None) -> int:
             return _build(args)
         if args.cmd == "transplant":
             return _transplant(args)
+        if args.cmd == "droid":
+            return _droid(args)
         if args.cmd == "head":
             return _head(args)
         if args.cmd == "import":
@@ -273,6 +384,10 @@ def main(argv: list[str] | None = None) -> int:
             return _lips(args)
         if args.cmd == "jade":
             return _jade(args)
+        if args.cmd == "nwn":
+            return _nwn(args)
+        if args.cmd == "swtor":
+            return _swtor(args)
         if args.cmd == "gui":
             from .gui import run
 
@@ -767,6 +882,190 @@ def _transplant(args) -> int:
     return 0
 
 
+def _droid(args) -> int:
+    """Head from one droid, arms from a second, legs from a third: one build.
+
+    Each `--part` is a node on `--base` and the donor model that fills it;
+    `droidbuild.build` applies them one at a time, each onto the result of
+    the last, through the same `transplant_node` a single head swap uses.
+    Nothing here does its own geometry work.
+    """
+    from pathlib import Path
+
+    from kmdlswap import layout as kl
+    from kmdlswap import validate as kv
+
+    from . import droidbuild as kdroid
+    from . import parts as kparts
+    from .library import ModelLibrary
+
+    lib = ModelLibrary(args.install)
+    # The base's own game is always reachable by a bare name; a second game is
+    # reached one part at a time by prefixing the donor with `k2/`, so a build
+    # can mix the two rather than being all one or all the other.
+    donor_libs = {}
+    if args.donor_install:
+        donor_libs["K2"] = ModelLibrary(args.donor_install)
+
+    if args.list or not args.base:
+        droids = kdroid.droid_models(args.install, library=lib)
+        print(f"{len(droids)} droid model(s) in {args.install}:")
+        for name in droids:
+            print(f"  {name}")
+        if "K2" in donor_libs:
+            other = kdroid.droid_models(args.donor_install, library=donor_libs["K2"])
+            print(f"\n{len(other)} in {args.donor_install} - "
+                  f"name these as k2/NAME:")
+            for name in other:
+                print(f"  k2/{name}")
+        return 0
+
+    if not lib.has(args.base):
+        print(f"kmdlfun: no model {args.base!r} in the install", file=sys.stderr)
+        return 1
+
+    base_mdl, base_mdx = lib.read(args.base)
+    base_layout = kl.parse(base_mdl, base_mdx)
+    base_nodes = {n.name.lower(): n.name
+                  for n in kparts.mesh_nodes(base_layout, visible_only=False)}
+
+    if not args.part:
+        print(f"{args.base}'s own nodes, by part - name a --part NODE=DONOR to fill one:")
+        for label, nodes in kdroid.slot_groups(base_layout).items():
+            print(f"  {label}: {', '.join(n.name for n in nodes)}")
+        return 0
+
+    choices = []
+    for spec in args.part:
+        if "=" not in spec:
+            print(f"kmdlfun: --part wants NODE=DONOR, got {spec!r}", file=sys.stderr)
+            return 1
+        node_spec, donor_spec = (s.strip() for s in spec.split("=", 1))
+        donor_ref, _, donor_node = donor_spec.partition(":")
+        donor_node = donor_node.strip() or None
+        donor_game, donor_model = kdroid.split_donor(donor_ref)
+        host_node = base_nodes.get(node_spec.lower())
+        if not host_node:
+            print(f"kmdlfun: {args.base} has no node {node_spec!r}", file=sys.stderr)
+            return 1
+        if donor_game and donor_game not in donor_libs:
+            print(f"kmdlfun: {donor_game.lower()}/ needs --donor-install to say "
+                  f"which game that is", file=sys.stderr)
+            return 1
+        donor_lib = donor_libs[donor_game] if donor_game else lib
+        if not donor_lib.has(donor_model):
+            where = args.donor_install if donor_game else args.install
+            print(f"kmdlfun: no model {donor_model!r} in {where}", file=sys.stderr)
+            return 1
+        choices.append(kdroid.SlotChoice(host_node, donor_model, donor_node,
+                                         donor_game=donor_game))
+
+    if not args.out and not args.dry_run:
+        print("kmdlfun: --out is required to write a build (or pass --dry-run)",
+              file=sys.stderr)
+        return 1
+
+    result = kdroid.build(
+        base_mdl, base_mdx, args.base, choices, lib, donor_libraries=donor_libs,
+        positional=args.positional,
+        align=args.align, fit=args.fit, scale=args.scale, reshape=args.reshape,
+        with_texture=args.with_texture, max_influences=args.max_influences,
+    )
+
+    print(f"{args.base}  ({len(choices)} part(s))")
+    print()
+    for s in result.slots:
+        line = f"  {s.host_node:<16} <- {s.donor_label:<19} {s.donor_node or ''}"
+        if s.note:
+            print(f"{line} SKIPPED: {s.note}")
+            continue
+        r = s.transplant
+        if not r.ok:
+            print(f"{line} REFUSED: {r.error}")
+            continue
+        a, sw = r.alignment, r.swap
+        print(f"{line} {sw.old_vertices:>5} -> {sw.new_vertices:<5} verts"
+              f"   fit {a.worst_ratio:.2f}x   drift {a.drift:.3f}")
+        if s.matched_by == "position":
+            # Worth saying: the names did not agree and this pairing is the
+            # tool's own reading of where the part sits.
+            print(f"      ~ paired {s.how} - no name in common")
+        for w in r.warnings:
+            print(f"      ! {w}")
+
+    applied = result.applied
+    if args.dry_run:
+        print(f"\ndry run: {len(applied)}/{len(choices)} part(s) would transfer")
+        return 0
+    if not applied:
+        print("\nnothing transferred", file=sys.stderr)
+        return 1
+
+    final = kv.check(kl.parse(result.mdl, result.mdx))
+    if not final.ok:
+        print("kmdlfun: result failed validation; refusing to write it", file=sys.stderr)
+        return 1
+
+    from . import builds as kbuilds
+
+    mdl, mdx = result.mdl, result.mdx
+    root = Path(args.out)
+    root.mkdir(parents=True, exist_ok=True)
+    written_as = args.base
+    if args.save_as:
+        from kmdlswap import rename as krename
+
+        krename.check_name(args.save_as)
+        mdl, mdx = krename.rename(mdl, mdx, args.save_as)
+        written_as = args.save_as
+        print(f"\n  saved as {written_as}: a new model, not a replacement for {args.base}")
+
+    donors = sorted({s.donor_label for s in result.slots if s.ok})
+    name = args.name or kbuilds.unique_name(
+        root, f"{written_as}-" + "-".join(d.replace("/", "-") for d in donors))
+    out_dir = root / kbuilds.slug(name)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / f"{written_as}.mdl").write_bytes(mdl)
+    (out_dir / f"{written_as}.mdx").write_bytes(mdx)
+
+    cross_game = any(s.donor_game for s in result.slots if s.ok)
+    if cross_game and args.with_texture:
+        # Donor textures live in the donor's game; without them the result
+        # loads untextured grey, which reads as a modelling failure rather
+        # than the missing file it actually is. Only needed when a part
+        # actually came from the second game.
+        from . import textures as ktextures
+
+        for line in ktextures.export_donor_textures(
+            mdl, mdx, args.donor_install, out_dir, host_install=args.install
+        ):
+            print(f"  {line}")
+
+    build = kbuilds.adopt(out_dir, {
+        "name": name,
+        "kind": "droid",
+        "host": {"model": args.base, "game": base_layout.game, "install": args.install},
+        "donors": donors,
+        "donor_installs": ({"": args.install, "K2": args.donor_install}
+                           if cross_game else {"": args.install}),
+        "nodes": [[s.host_node, s.donor_label, s.donor_node]
+                  for s in result.slots if s.ok],
+        "options": {
+            "align": args.align, "fit": args.fit, "scale": args.scale,
+            "reshape": args.reshape, "with_texture": args.with_texture,
+            "positional": args.positional,
+        },
+        "matched_by": {s.host_node: s.matched_by for s in result.slots if s.ok},
+    })
+
+    print()
+    print(f"{len(applied)}/{len(choices)} part(s) transferred")
+    print(f"build '{build.name}' in {out_dir}")
+    print(f"  {', '.join(f['name'] for f in build.manifest['files'])}")
+    print("Install it from the app, or copy the folder's contents into Override.")
+    return 0
+
+
 def _head(args) -> int:
     """Check a custom head pack, and optionally build it into a model.
 
@@ -792,6 +1091,7 @@ def _head(args) -> int:
         reshape=args.reshape,
         hide=args.hide,
         build=bool(args.out),
+        force=args.force,
     )
     for line in result.lines:
         print("  " + line)
@@ -947,6 +1247,153 @@ def _jade(args) -> int:
     print("Build it with:  kmdlfun head " + str(result["pack"])
           + " --install \"<K1 root>\" --host p_carthh --node Head "
             "--decimate --fit")
+    return 0
+
+
+def _nwn(args) -> int:
+    """Neverwinter Nights geometry, out as a head pack.
+
+    NWN is the engine KOTOR's grew out of, and every structure in its model
+    format is a different size, so the splice engine will never edit one in
+    place. What it can do is take the geometry, by the same route a sculpt or
+    a Jade Empire head comes in.
+    """
+    from pathlib import Path as _Path
+
+    from . import installs, nwn
+
+    install = args.install or installs.detect().get(installs.NWN)
+    if not install:
+        print("kmdlfun: no Neverwinter Nights install found; pass --install",
+              file=sys.stderr)
+        return 1
+
+    kinds = ((nwn.HEAD, nwn.PLACEABLE) if args.kind == "all"
+             else (args.kind,))
+    try:
+        index = nwn.index_of(install)
+        catalogue = nwn.catalogue(install, kinds=kinds, index=index)
+    except nwn.NwnError as exc:
+        print(f"kmdlfun: {exc}", file=sys.stderr)
+        return 1
+
+    if not args.resref:
+        print(f"{len(catalogue)} model(s) in {install}")
+        for entry in catalogue:
+            print(f"  {entry.kind:<9} {entry.resref}")
+        print("\nPass one of these and --out to convert it.")
+        return 0
+
+    wanted = args.resref.lower()
+    entry = next((e for e in catalogue if e.resref.lower() == wanted), None)
+    if entry is None:
+        print(f"kmdlfun: no model named {args.resref!r} in {install}",
+              file=sys.stderr)
+        return 1
+    if not args.out:
+        print("kmdlfun: --out is required to convert", file=sys.stderr)
+        return 1
+
+    scale = (args.scale if args.scale is not None
+             else (nwn.HEAD_SCALE if entry.kind == nwn.HEAD else nwn.SCALE))
+    try:
+        result = nwn.to_pack(entry, _Path(args.out), install=install,
+                             index=index, scale=scale,
+                             colours={"skin": args.skin, "hair": args.hair},
+                             with_texture=not args.no_texture)
+    except nwn.NwnError as exc:
+        print(f"kmdlfun: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"{entry.resref}  ({entry.kind})")
+    print(f"  vertices  {result['vertices']}")
+    print(f"  triangles {result['triangles']}")
+    print(f"  uvs       {result['uvs'] or 'NONE - it will render untextured'}")
+    wears = result["texture"] or "none - it will wear the host's"
+    print(f"  texture   {wears}")
+    print(f"  scale     x{scale}")
+    for note in result["notes"]:
+        print(f"  note: {note}")
+    print(f"\nwrote a head pack to {result['pack']}")
+    # No --fit: an NWN head already knows how big it is, and fitting scales by
+    # height, which is the one axis that was never wrong.
+    print("Build it with:  kmdlfun head " + str(result["pack"])
+          + " --install \"<K1 root>\" --host p_carthh --node Head")
+    return 0
+
+
+def _swtor(args) -> int:
+    """The Old Republic's geometry, out as a head pack.
+
+    Nothing about that game's files resembles KOTOR's, so there is no question
+    of editing one in place - this reads, and the geometry leaves by the same
+    door a sculpt or a Jade Empire head comes through.
+
+    The first listing costs about four seconds: names in the archive are
+    hashed, so every file in it has to be decompressed and identified by what
+    is inside it. The result is cached against the archive, and a game patch
+    invalidates that by changing its size and date.
+    """
+    from pathlib import Path as _Path
+
+    from . import installs, swtor
+
+    install = args.install or installs.detect().get(installs.SWTOR)
+    if not install:
+        print("kmdlfun: no Old Republic install found; pass --install",
+              file=sys.stderr)
+        return 1
+
+    try:
+        index = swtor.index_of(install, use_cache=not args.rescan)
+        catalogue = swtor.catalogue(install, index=index,
+                                    body_type=args.body_type,
+                                    max_oversize=args.fits)
+    except swtor.SwtorError as exc:
+        print(f"kmdlfun: {exc}", file=sys.stderr)
+        return 1
+
+    if not args.name:
+        print(f"{len(catalogue)} head(s) in {install}")
+        for entry in catalogue:
+            body = swtor.body_type_of(entry.name) or "-"
+            print(f"  {body:<4} {entry.triangles:>6} tris  "
+                  f"{entry.oversize:>4.1f}x  {entry.name}")
+        print("\nPass one of these and --out to convert it.")
+        return 0
+
+    wanted = args.name.lower()
+    entry = next((e for e in catalogue if e.name.lower() == wanted), None)
+    if entry is None:
+        print(f"kmdlfun: no head named {args.name!r} in {install}",
+              file=sys.stderr)
+        return 1
+    if not args.out:
+        print("kmdlfun: --out is required to convert", file=sys.stderr)
+        return 1
+
+    scale = args.scale if args.scale is not None else swtor.HEAD_SCALE
+    try:
+        result = swtor.to_pack(entry, _Path(args.out), scale=scale)
+    except swtor.SwtorError as exc:
+        print(f"kmdlfun: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"{entry.name}  ({entry.kind})")
+    print(f"  vertices  {result['vertices']}")
+    print(f"  triangles {result['triangles']}")
+    print(f"  uvs       {result['uvs'] or 'NONE - it will render untextured'}")
+    print(f"  texture   none - it will wear the host's")
+    print(f"  scale     x{swtor.SCALE:g} for units, x{scale} for fit")
+    for note in result["notes"]:
+        print(f"  note: {note}")
+    print(f"\nwrote a head pack to {result['pack']}")
+    # Three times vanilla's triangle count, and carrying a neck, so unlike the
+    # other importers this one always wants both. 1300 rather than vanilla's
+    # 690 because the nose does not survive the smaller budget - see swtor.py.
+    print("Build it with:  kmdlfun head " + str(result["pack"])
+          + " --install \"<K1 root>\" --host p_carthh --node Head"
+          + " --decimate 1300 --crop 0.2")
     return 0
 
 

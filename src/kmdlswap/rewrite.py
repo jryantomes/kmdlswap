@@ -118,8 +118,10 @@ class Rewriter:
             moved = self._shift(edits, off.absolute, stream)
             if not moved:
                 continue
+            # the field's first and LAST byte (loc + 3): an insertion right after a pointer -
+            # growing an array by one slot - moves the byte after it, not the pointer
             if self._shift(mdl_edits, off.loc, "MDL") != self._shift(
-                mdl_edits, off.loc + 4, "MDL"
+                mdl_edits, off.loc + 3, "MDL"
             ):
                 raise RewriteError(f"pointer field at {off.loc} straddles an edit boundary")
             self.set_u32(off.loc, off.value + moved)

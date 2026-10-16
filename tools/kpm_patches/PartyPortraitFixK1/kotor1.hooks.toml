@@ -1,0 +1,40 @@
+[metadata]
+target_versions = [
+	"9C10E0450A6EECA417E036E3CDE7474FED1F0A92AAB018446D156944DEA91435",
+	"761F9466F456A83909036BAEBB5C43167D722387BE66E54617BA20A8C49E9886",
+	"34E6D971C034222A417995D8E1E8FDD9F8781795C9C289BD86C499A439F34C88"
+]
+
+# CSWSObject::GetPortrait (0x004D01C0, vtable slot 0xC8) copies the object's own portrait resref
+# (this + 0x20). CSWSCreature overrides the slot (0x004F8370: the portrait from its stats); the game
+# only ever reaches the base through the vtables of objects that do not override it - there is no
+# direct call. Party Roster Limit 32 (KPM 0.7.3) calls the base directly on party creatures, whose
+# own resref is empty: blank portraits. Now the base first dispatches through the object's vtable;
+# when the slot is the base itself, the original copy runs. Same 48 bytes (36 + the 12 bytes of
+# padding before 0x004D01F0); the next function is untouched.
+[[hooks]]
+address = 0x004D01C0
+type = "simple"
+original_bytes = [
+    0x8B, 0x44, 0x24, 0x04, 0x83, 0xC1, 0x20, 0x56, 0x8B, 0x31, 0x8B, 0xD0,
+    0x89, 0x32, 0x8B, 0x71, 0x04, 0x89, 0x72, 0x04, 0x8B, 0x71, 0x08, 0x89,
+    0x72, 0x08, 0x8B, 0x49, 0x0C, 0x89, 0x4A, 0x0C, 0x5E, 0xC2, 0x04, 0x00,
+    0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90
+]
+replacement_bytes = [
+    0x8B, 0x01,                          # mov  eax, [ecx]          ; the object's vtable
+    0x8B, 0x80, 0xC8, 0x00, 0x00, 0x00,  # mov  eax, [eax+0xC8]     ; its GetPortrait
+    0x3D, 0xC0, 0x01, 0x4D, 0x00,        # cmp  eax, 0x004D01C0     ; the base itself?
+    0x74, 0x02,                          # je   base
+    0xFF, 0xE0,                          # jmp  eax                 ; an override (creature): its own, same args
+    0x56,                                # base: push esi
+    0x57,                                # push edi
+    0x8D, 0x71, 0x20,                    # lea  esi, [ecx+0x20]     ; this->portrait
+    0x8B, 0x44, 0x24, 0x0C,              # mov  eax, [esp+0xC]      ; the out CResRef (returned)
+    0x8B, 0xF8,                          # mov  edi, eax
+    0xA5, 0xA5, 0xA5, 0xA5,              # movsd x4                 ; 16 bytes, as the original
+    0x5F,                                # pop  edi
+    0x5E,                                # pop  esi
+    0xC2, 0x04, 0x00,                    # ret  4
+    0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90
+]

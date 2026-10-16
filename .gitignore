@@ -52,3 +52,30 @@ dist/
 /dist/
 /build/
 *.spec.bak
+
+# Built models. Output of the tool, reproducible in one command, and game
+# geometry besides - the same reason the diagnostic renders are not carried.
+/builds/
+
+# PO-12 GH0-RFK build outputs: models, textures, renders and vanilla GUI
+# portraits, all game-derived. Reproducible from tools/swtor_po12/README.md.
+/tools/swtor_po12/rfk_build*/
+/tools/swtor_po12/rfk_portraits*/
+/tools/swtor_po12/gui/
+# ...and rebuild_chain.py's <prefix>_* chains (rfk_e_ eye halo, rfk_m_ mouth light, rfk_o_ replay)
+/tools/swtor_po12/rfk_[a-z]_*/
+
+# PyKotor writes logs next to the scripts it runs
+tools/*/logs/
+tools/logs/
+tools/*/scripts/logs/
+
+# flow.py writes its scenario on every run (flow_<plan>.nss); the plans in flow.py are the source
+/tools/kotor_autotest/scenarios/flow_*.nss
+
+# gh0_units.py's working chain for the GH0 units (models, textures, check renders): game-derived,
+# rebuilt by tools/swtor_po12/gh0_units.py
+/tools/swtor_po12/gh0s_work/
+# crashwatch.py's run logs
+/tools/kotor_autotest/crashwatch.log
+/tools/kotor_autotest/crashwatch_run.txt

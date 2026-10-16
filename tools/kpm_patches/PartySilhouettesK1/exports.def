@@ -1,0 +1,3 @@
+LIBRARY PartySilhouettesK1
+EXPORTS
+    AddPartySilhouette

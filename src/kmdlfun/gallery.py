@@ -107,8 +107,26 @@ class Gallery(ttk.Frame):
         self._relayout()
 
     def set_image(self, label: str, photo) -> None:
-        if label in self.labels:
-            self._images[label] = photo
+        self.set_images({label: photo})
+
+    def set_images(self, images) -> None:
+        """Take several faces at once, and draw the canvas once for the lot.
+
+        `_relayout` deletes every canvas item and builds them all again, so
+        setting images one at a time is quadratic in the size of the gallery.
+        At 148 Jade heads that is 22,000 canvas items and merely wasteful. At
+        434 Neverwinter Nights heads it is 188,000, and it took the whole
+        interpreter down with an access violation inside Tk's own drawing.
+
+        Callers that receive faces one at a time should gather whatever has
+        arrived and hand it over in one call - see `App._drain`.
+        """
+        changed = False
+        for label, photo in dict(images).items():
+            if label in self.labels:
+                self._images[label] = photo
+                changed = True
+        if changed:
             self._relayout()
 
     def select(self, label: str) -> None:
